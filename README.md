@@ -1,0 +1,217 @@
+# rein
+
+A minimal, local-first agent harness. Three layers, zero runtime dependencies,
+any OpenAI-compatible model — local by default, any provider by choice.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  harness/   REPL · print · improve · loop · tools (7)          │  ← the product
+├─────────────────────────────────────────────────────────────────┤
+│  agent/     event-driven loop · steering · sessions (JSONL)     │  ← the behavior
+├─────────────────────────────────────────────────────────────────┤
+│  ai/        one message model · one event protocol · compat    │  ← the translation
+│             Ollama · LM Studio · llama.cpp · vLLM · any API    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Built by studying two codebases:
+
+- **[pi](https://github.com/earendil-works/pi)** — the architecture. Its
+  `packages/ai` proves that the hard part of an agent harness is the
+  *translation layer* (one message model + one streaming event protocol over
+  every provider quirk), and its `packages/agent` proves the loop is just:
+  stream → run tools (parallel) → repeat, with steering queues, hooks, and
+  truncation safety. rein rebuilds both layers from scratch in ~3,200 lines
+  with no dependencies, because "runs anywhere Node runs" is the point.
+- **[karpathy/autoresearch](https://github.com/karpathy/autoresearch)** — the
+  *loop* that runs an agent forever against one metric, keeping what improves
+  and discarding what doesn't. rein encodes that twice: `rein loop` (any
+  project, any metric) and `rein improve` (the harness itself is the target).
+
+And **[karpathy/nanoGPT](https://github.com/karpathy/nanoGPT)** — the values:
+readable over clever, small over complete. Every file here fits on a screen
+or two.
+
+## Requirements
+
+- Node ≥ 23.6 (native TypeScript type-stripping — no build step, no deps)
+- Any OpenAI-compatible server. Local ones are probed automatically in
+  priority order: **Ollama** → **LM Studio** → **llama.cpp** → **vLLM**.
+
+```sh
+# local (the default):
+ollama serve && ollama pull qwen2.5-coder:7b
+rein
+
+# any provider:
+rein --provider deepseek --model deepseek-chat
+rein --provider openai --model gpt-4o
+REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein -p "hello"
+```
+
+## Usage
+
+```
+rein                          interactive REPL (sessions persist, steering mid-run)
+rein -p "query"               one-shot; --json for the raw event stream
+rein loop                     autonomous experiment loop (TASK.md + METRIC.md)
+rein improve [goal]           self-improvement loop on this repo
+rein models                   what rein can see: local servers + provider presets
+```
+
+REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /quit`.
+While the agent is working, just type — it's injected as a steering message
+after the current tool batch (pi's steering, not pi's queue).
+
+### Tool calls work for every model
+
+The compatibility layer (`src/ai/compat.ts`) guarantees tool capability
+regardless of what the model natively supports:
+
+1. **Capability table** — model-name patterns: known-good (qwen2.5/3,
+   llama3.1+, deepseek, gpt-*) use native function calling; known-weak
+   (tinyllama, qwen ≤1.8b, gemma ≤2b, phi-2) start in **text protocol**.
+2. **Runtime fallback** — if a native toolUse turn comes back with empty or
+   unnamed arguments, rein flips that model to the text protocol
+   (`<tool name="bash">{"command": "ls"}</tool>`) mid-session and tells the
+   model.
+3. **Learned modes** — decisions persist in `~/.rein/capabilities.json`, so
+   the next session starts in the mode that already works.
+
+Plus JSON salvage (`src/util/json-salvage.ts`): malformed tool arguments from
+small models (trailing commas, raw newlines, invalid escapes, prose around
+the JSON) are repaired, never fatal.
+
+Override with `--tools native|text|auto` (auto is the default).
+
+### Self-improvement
+
+```sh
+rein improve "make tool errors more actionable"   # or: rein improve (uses LESSONS.md)
+```
+
+The loop (autoresearch's keep/discard, pointed at rein's own source):
+
+1. read the goal or the `## harness` section of `LESSONS.md`
+2. one concrete weakness → smallest fix
+3. run `node --experimental-strip-types test/smoke.ts` — the metric
+4. pass → `git commit` + append the lesson · fail → `git checkout .`
+5. repeat until `--max-iterations` (default 5) or the agent says no-change
+
+Two things make it a *system* rather than a one-off: the system prompt tells
+every agent to append durable learnings to `LESSONS.md` (shared memory across
+sessions, loaded on next start), and `rein improve` reads exactly that file.
+The agent that bumps into a sharp edge writes it down; the improve loop cuts
+the edge.
+
+### Autonomous experiment loop
+
+```
+your-project/
+├── TASK.md      what to improve (agent-readable)
+└── METRIC.md    fenced bash block; its output must print METRIC=<number>
+rein loop --max-iterations 10
+```
+
+Fixed budget per iteration, one metric, keep/discard with git, auto-stops
+after three no-change iterations, never otherwise stops until the budget or a
+Ctrl-C. This is autoresearch's `program.md` loop with the harness as the
+operator.
+
+## Architecture notes (what I took from pi, and where I cut)
+
+**Kept — it's load-bearing:**
+
+- The `ai` layer as a *translation* layer: one message model
+  (user / assistant[content blocks] / toolResult), one streaming event
+  protocol (`start → *_start → *_delta → *_end → done|error`) over an async
+  iterable with a final-result promise. Errors are *in* the stream, never
+  thrown at the caller. The OpenAI-compatible adapter handles: missing
+  `finish_reason`, missing usage (estimated), `stream_options` rejection,
+  reasoning/thinking deltas, tool-call argument chunking.
+- The agent loop's control points: **steering** (inject after the current
+  tool batch), **follow-up** (run when the agent would stop), parallel tool
+  execution with per-tool `sequential` override (bash), `before/afterToolCall`
+  hooks, `shouldStopAfterTurn`, **truncation safety** (a `length` stop means
+  tool args may be cut — those calls are failed with an explanatory result,
+  not executed with half-arguments).
+- Sessions as append-only JSONL with a header line; branching = copy +
+  append. One file, greppable, resumable.
+- Short system prompt; minimal toolset: `read write edit bash grep find ls`.
+
+**Cut — deliberate:**
+
+- No provider registry, no auth flows, no image/audio blocks, no reasoning
+  provider-specific APIs. One adapter shape, extended by adding files.
+- No framework: no React TUI, no config DSL. A REPL is ~200 lines of
+  readline; the print mode is ~80.
+- TypeBox → a 60-line hand-rolled schema validator for the subset we use.
+- 40+ deps → 0. `package.json` has no `dependencies` key at all.
+
+**Added (requirements):**
+
+- The tool-capability compatibility layer (above) — pi assumes capable
+  models; rein assumes you might be running a 3B quantized GGUF on a laptop.
+- The human-voice section of the system prompt is *hardcoded*: first person,
+  contractions, no "Great question!", no throat-clearing, have a point of
+  view, say exactly what failed. The way the agent talks is part of the
+  spec, not a prompt suggestion.
+- `rein improve` + the `LESSONS.md` convention — the harness eats its own
+  dogfood on a schedule.
+
+## Layout
+
+```
+src/
+├── ai/
+│   ├── types.ts               message model, event protocol, Tool/Model/Context
+│   ├── event-stream.ts        async queue + iterator + final-result promise
+│   ├── sse.ts                 SSE line parser
+│   ├── openai-completions.ts  the adapter (native + text tool protocols)
+│   ├── compat.ts              capability table + runtime fallback + learned modes
+│   └── models.ts              local-server discovery + provider presets + config
+├── agent/
+│   ├── agent-loop.ts          the loop (steering, parallel tools, hooks, safety)
+│   └── session.ts             JSONL sessions, branch, list
+├── harness/
+│   ├── system-prompt.ts       WHO + voice + work rules + self-improvement
+│   ├── runner.ts              model+loop+compat wiring (shared by all modes)
+│   ├── repl.ts                interactive mode
+│   ├── print.ts               one-shot mode
+│   ├── improve.ts             self-improvement loop (autoresearch on this repo)
+│   ├── loop.ts                experiment loop (TASK.md + METRIC.md)
+│   └── tools/                 read write edit bash grep find ls
+└── util/                      ansi · json-salvage · schema · truncate
+test/
+├── mock-server.ts             deterministic OpenAI-compatible server (4 models)
+└── smoke.ts                   28 checks incl. 3 full-pipeline e2e scenarios
+```
+
+## Testing
+
+```sh
+npm test          # node --experimental-strip-types test/smoke.ts
+```
+
+Covers: JSON salvage (7), edit semantics (6), capability table (5), and three
+end-to-end pipelines against the mock server — native tools, text protocol,
+and broken-native → runtime fallback (the tool actually executes in each).
+
+## Known limits (honest list)
+
+- Single model per session (no mid-run model switching)
+- No streaming UI niceties: no live token counts, no thinking trace (shown as
+  "thinking…"), no tool-call diff preview
+- Compaction isn't in yet: long sessions will eventually hit the context
+  window (the loop will show the error; `--max-turns` bounds the damage)
+- `rein improve` trusts its own smoke test as the metric — add more tests if
+  you make it run unattended
+- Text tool protocol assumes the model can follow one example; 1–3B models
+  still need nudging (the fallback nudge is built in)
+
+## Credits
+
+Architecture: [earendil-works/pi](https://github.com/earendil-works/pi)
+(especially `packages/ai` — "the hard part is the translation layer" — and
+`packages/agent`). Loop philosophy: [karpathy/autoresearch](https://github.com/karpathy/autoresearch).
+Simplicity bar: [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT).
