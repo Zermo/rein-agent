@@ -7,6 +7,8 @@
  *   5. text tool protocol end-to-end (mock-text)
  *   6. runtime fallback: broken native → text protocol (mock-broken)
  *   7. nodeterm: hook POSTs, pending-file approvals (allow/deny/timeout), e2e deny
+ *   8. TinyFish web_search / web_fetch against a local mock (key, shape, errors)
+ *   9. unlazy gates tool driving the vendored gate-check.mjs (lint/status/approve/reverify)
  *
  * Run: node --experimental-strip-types test/smoke.ts
  * Exits 0 on success.
@@ -221,6 +223,132 @@ console.log("7. nodeterm integration");
 	delete process.env.NODETERM_HOOK_PORT;
 	delete process.env.NODETERM_HOOK_VERSION;
 	delete process.env.NODETERM_PENDING_DIR;
+}
+
+// ---------------------------------------------------------------- 8. tinyfish web
+console.log("8. TinyFish web tools");
+{
+	const { createServer: createHttpServer } = await import("node:http");
+	const webHits: { method: string; url: string; key: string | null; body: any }[] = [];
+	const webServer = createHttpServer((req, res) => {
+		let raw = "";
+		req.on("data", (c) => (raw += c));
+		req.on("end", () => {
+			let body: any = null;
+			try { body = raw ? JSON.parse(raw) : null; } catch { body = raw; }
+			webHits.push({ method: req.method ?? "", url: req.url ?? "", key: req.headers["x-api-key"] ?? null, body });
+			res.setHeader("Content-Type", "application/json");
+			if (req.method === "GET" && (req.url ?? "").startsWith("/search")) {
+				res.end(JSON.stringify({
+					query: "tinyfish probe",
+					results: [
+						{ position: 1, site_name: "tinyfish.ai", title: "TinyFish Home", url: "https://www.tinyfish.ai/", snippet: "Web infrastructure for AI agents." },
+						{ position: 2, site_name: "docs", title: "Search API Reference", url: "https://docs.tinyfish.ai/search-api/reference", snippet: "GET api.search.tinyfish.ai", date: "2026-02-11" },
+					],
+					total_results: 2, page: 0,
+				}));
+				return;
+			}
+			if (req.method === "POST" && (req.url ?? "").startsWith("/fetch")) {
+				if (body?.urls?.[0] === "https://broken.example/404") {
+					res.end(JSON.stringify({ results: [], errors: [{ url: "https://broken.example/404", error: "page_not_found", status: 404 }] }));
+					return;
+				}
+				res.end(JSON.stringify({
+					results: [{ url: body?.urls?.[0], final_url: body?.urls?.[0], title: "Fetched Page", description: "d", published_date: "2026-01-02", text: "# Clean Content\n\nExtracted by browser. " + "Body paragraph. ".repeat(20), format: "markdown" }],
+					errors: [],
+				}));
+				return;
+			}
+			res.statusCode = 404;
+			res.end("{} ");
+		});
+	});
+	await new Promise<void>((r) => webServer.listen(0, "127.0.0.1", () => r()));
+	const webPort = (webServer.address() as any).port;
+	process.env.TINYFISH_API_KEY = "tf-test-key";
+	process.env.TINYFISH_SEARCH_URL = `http://127.0.0.1:${webPort}/search`;
+	process.env.TINYFISH_FETCH_URL = `http://127.0.0.1:${webPort}/fetch`;
+
+	const webTools = (await import("../src/harness/tools/web.ts")).default;
+	const searchTool = webTools[0];
+	const fetchTool = webTools[1];
+
+	// no key
+	delete process.env.TINYFISH_API_KEY;
+	let r: any = await searchTool.execute("t1", { query: "x" });
+	check("web: no key → clear error", r.isError === true && /TINYFISH_API_KEY/.test(r.content), r.content);
+	process.env.TINYFISH_API_KEY = "tf-test-key";
+
+	// search
+	r = await searchTool.execute("t2", { query: "tinyfish probe", purpose: "testing rein" });
+	check("web: search returns ranked results", !r.isError && /1\. TinyFish Home/.test(r.content) && /docs\.tinyfish\.ai/.test(r.content), r.content.slice(0, 200));
+	check("web: search sends X-API-Key", webHits.length > 0 && webHits[0].key === "tf-test-key", JSON.stringify(webHits[0]?.key));
+	check("web: search passes query+purpose", webHits[0].url.includes("query=tinyfish") && webHits[0].url.includes("purpose="), webHits[0].url);
+
+	// fetch
+	r = await fetchTool.execute("t3", { url: "https://example.com/page" });
+	check("web: fetch returns title + markdown", !r.isError && /Title: Fetched Page/.test(r.content) && /Clean Content/.test(r.content), r.content.slice(0, 150));
+	check("web: fetch is POST with urls[]", webHits.some((h) => h.method === "POST" && h.body?.urls?.[0] === "https://example.com/page"), JSON.stringify(webHits.map((h) => h.method + h.url)));
+
+	// fetch per-URL error
+	r = await fetchTool.execute("t4", { url: "https://broken.example/404" });
+	check("web: fetch surfaces per-URL error", r.isError === true && /page_not_found/.test(r.content), r.content);
+
+	webServer.close();
+	delete process.env.TINYFISH_API_KEY;
+	delete process.env.TINYFISH_SEARCH_URL;
+	delete process.env.TINYFISH_FETCH_URL;
+}
+
+// ---------------------------------------------------------------- 9. unlazy gates
+console.log("9. unlazy gates (vendored checker)");
+{
+	const fs = await import("node:fs");
+	const gateDir = mkdtempSync(join(tmpdir(), "rein-gates-"));
+	const ledger = join(gateDir, "GATES.md");
+	fs.writeFileSync(ledger, [
+		"# Gates: gates smoke", "", "Scope: prove the vendored checker runs inside rein", "",
+		"- [ ] G1: marker command exits zero and prints the success token",
+		"  CHECK: echo \"outcome verification passed\"",
+		"  EXPECT: outcome verification passed",
+		"  EVIDENCE: pending", "",
+		"- [ ] G2: a deliberately mismatched expectation",
+		"  CHECK: echo \"actually this\"",
+		"  EXPECT: something else entirely",
+		"  EVIDENCE: pending", "",
+	].join("\n"));
+
+	const { default: gatesTool } = await import("../src/harness/tools/gates.ts");
+	const run = (args: any) => gatesTool.execute("g" + Math.random().toString(36).slice(2), args);
+
+	// missing ledger
+	let r: any = await run({ mode: "status", file: "NOPE.md", root: gateDir });
+	check("gates: missing ledger → points at template", r.isError === true && /gates-leaf/.test(r.content), r.content);
+
+	// status: report only, never executes, exit 1 (unmet) is informational
+	r = await run({ mode: "status", file: "GATES.md", root: gateDir });
+	check("gates: status reports unmet", !r.isError && /UNMET/.test(r.content) && /exit 1/.test(r.content), r.content.slice(0, 200));
+	check("gates: status did not check boxes", fs.readFileSync(ledger, "utf8").includes("- [ ] G1"), "");
+
+	// lint: valid ledger passes, malformed one fails
+	fs.writeFileSync(join(gateDir, "BAD.md"), "- [ ] G1: no oracle\n  EVIDENCE: pending\n\n- [ ] G1: duplicate id\n  CHECK: true\n  EXPECT: x\n  EVIDENCE: pending\n");
+	r = await run({ mode: "lint", file: "GATES.md", root: gateDir });
+	check("gates: lint accepts valid ledger", !r.isError && /exit 0/.test(r.content), r.content.slice(0, 150));
+	r = await run({ mode: "lint", file: "BAD.md", root: gateDir });
+	check("gates: lint rejects duplicate id", r.isError === true && /duplicate/.test(r.content), r.content.slice(0, 150));
+
+	// approve: G1 runs and is checked with evidence; G2 fails its EXPECT
+	r = await run({ mode: "approve", file: "GATES.md", root: gateDir });
+	const after = fs.readFileSync(ledger, "utf8");
+	check("gates: approve runs oracles", /exit 1/.test(r.content) && /FAIL GATES:G2/.test(r.content), r.content.slice(0, 250));
+	check("gates: passing gate checked + evidenced", after.includes("- [x] G1") && /EVIDENCE: exit=0/.test(after) && /output-sha256=/.test(after), after.slice(0, 400));
+
+	// reverify: re-runs everything, same result
+	r = await run({ mode: "reverify", file: "GATES.md", root: gateDir });
+	check("gates: reverify re-runs gates", /reran: 2/.test(r.content) && /UNMET: 1/.test(r.content), r.content.slice(0, 200));
+
+	rmSync(gateDir, { recursive: true, force: true });
 }
 
 server.close();

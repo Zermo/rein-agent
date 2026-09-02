@@ -126,6 +126,7 @@ export interface ReinConfig {
 	maxTokens?: number;
 	toolsMode?: "native" | "text" | "auto";
 	contextWindow?: number;
+	tinyfish?: { apiKey?: string };
 }
 
 export function apiKeyFor(provider?: string): string | undefined {

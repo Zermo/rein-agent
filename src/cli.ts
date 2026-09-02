@@ -6,6 +6,7 @@
  *   rein -p "query"             one-shot
  *   rein loop                   autonomous experiment loop (TASK.md + METRIC.md)
  *   rein improve                self-improvement loop on the harness itself
+ *   rein gates <file> [--mode m] unlazy: lint / status / approve / reverify a ledger
  *   rein models                 list what rein can see (local servers, presets)
  *
  * Local AI is the default provider: Ollama → LM Studio → llama.cpp → vLLM.
@@ -23,6 +24,7 @@ Usage:
   rein -p "query" --json        one-shot, raw event stream (JSON lines)
   rein loop                     autonomous experiment loop (needs TASK.md + METRIC.md)
   rein improve [goal]           self-improvement loop on the rein repo
+  rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
 
 Model selection (highest wins):
@@ -127,6 +129,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 			metricFile: typeof flags["metric-file"] === "string" ? flags["metric-file"] : undefined,
 			maxIterations: typeof flags["max-iterations"] === "string" ? parseInt(flags["max-iterations"]) : undefined,
 		});
+		return;
+	}
+
+	if (_[0] === "gates") {
+		const { default: gatesTool } = await import("./harness/tools/gates.ts");
+		const mode = typeof flags.mode === "string" ? flags.mode : "approve";
+		const r = await gatesTool.execute("cli", { mode, file: _.slice(1)[0] });
+		console.log(r.content);
+		process.exitCode = r.isError ? 1 : 0;
 		return;
 	}
 

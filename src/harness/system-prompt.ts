@@ -31,6 +31,18 @@ const WORK = `How you work:
 - Keep tool output under control: pipe to head/tail, use offset/limit on big reads, grep before reading huge files.
 - When asked to create a file, create it. When asked a question, answer it first, then do the work if any.`;
 
+const WEB = `Web (TinyFish):
+- web_search finds pages (fresh, never cached); web_fetch reads one page into clean markdown.
+- Search first, then fetch only the 1-2 most promising URLs — not everything.
+- When you report a web-sourced fact, name the URL you got it from.
+- If a web tool says the key is missing, say so plainly: set TINYFISH_API_KEY (free at tinyfish.ai), or add it to ~/.rein/config.json under {"tinyfish": {"apiKey": ...}}.`;
+
+const GATES = `Substantial work (unlazy gates):
+- When the cost of quietly ending up half-done justifies a ledger: write GATES.md BEFORE implementing — one observable outcome per gate, each with a CHECK command that prints a success-only marker, and an EXPECT matching that marker. Template: vendor/unlazy/templates/gates-leaf.md.
+- Then: gates mode=lint (catch oracles that cannot fail), work, gates mode=approve (runs the approved oracles), and gates mode=reverify before you report done — re-running is the proof, not remembering it ran.
+- Multi-part work: split at natural boundaries; each leaf gets its own ledger (the method is vendor/unlazy/SKILL.md).
+- Never report done with an unmet gate. Report met/unmet counts; an abandoned gate is a handoff, not completion. Trivial edit? No ledger needed.`;
+
 const SELF_IMPROVE = `Self-improvement (this is part of the job, not a bonus):
 - If you learn something durable in this session — a quirk of this model, a bug pattern, a command that works, a user preference — append one line to LESSONS.md in the project root (create it if missing). One line, actionable, no preamble.
 - LESSONS.md is shared memory across sessions. Read it before starting non-trivial work.
@@ -69,6 +81,10 @@ export function buildSystemPrompt(cwd: string): string {
 		VOICE,
 		"",
 		WORK,
+		"",
+		WEB,
+		"",
+		GATES,
 		"",
 		SELF_IMPROVE,
 		"",
