@@ -170,12 +170,38 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	};
 
 	// --- main loop ---------------------------------------------------------------
-	rl.prompt();
+	// Line queue over rl.on("line"): works for a TTY and for piped stdin alike
+	// (rl.question races when input is queued faster than the loop turns).
+	let resolveLine: ((line: string) => void) | null = null;
+	let inputClosed = false;
+	const lineQueue: string[] = [];
+	rl.on("line", (line) => {
+		if (resolveLine) {
+			const r = resolveLine;
+			resolveLine = null;
+			r(line);
+		} else {
+			lineQueue.push(line);
+		}
+	});
+	rl.on("close", () => {
+		inputClosed = true;
+		if (resolveLine) {
+			const r = resolveLine;
+			resolveLine = null;
+			r("");
+		}
+	});
 
-	const ask = (prompt?: string): Promise<string> =>
-		new Promise((resolve) => {
-			rl.question(prompt ?? rl.prompt, (answer) => resolve(answer.trim()));
+	/** Next line; null means input is gone (EOF/Ctrl-D) and the queue is empty. */
+	const ask = (): Promise<string | null> => {
+		if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift()!);
+		if (inputClosed) return Promise.resolve(null);
+		return new Promise((resolve) => {
+			resolveLine = (line) => resolve(line);
+			if (!rl.closed) rl.prompt();
 		});
+	};
 
 	// Seed with a greeting only on a fresh, empty session
 	if (runner.context.messages.length === 0) {
@@ -185,12 +211,12 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	let first = true;
 	while (true) {
 		const line = await ask();
+		if (line === null) break;
 		if (!line) continue;
 
 		if (line.startsWith("/")) {
 			const keep = await handleCommand(line);
 			if (!keep) break;
-			rl.prompt();
 			continue;
 		}
 
@@ -215,8 +241,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			console.log(red(`something broke: ${(err as Error).message}`));
 		}
 		if (first) first = false;
-		rl.prompt();
 	}
 
-	rl.close();
+	if (!rl.closed) rl.close();
 }
