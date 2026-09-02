@@ -1,0 +1,26 @@
+{
+	"name": "rein",
+	"version": "0.1.0",
+	"description": "A minimal, local-first agent harness. System prompt + tools + agentic loop + translation layer, with self-hosted local AI as the default provider.",
+	"type": "module",
+	"bin": {
+		"rein": "bin/rein.js"
+	},
+	"engines": {
+		"node": ">=23.6"
+	},
+	"scripts": {
+		"test": "node test/smoke.ts"
+	},
+	"keywords": [
+		"agent",
+		"harness",
+		"llm",
+		"ollama",
+		"lmstudio",
+		"local-ai",
+		"coding-agent"
+	],
+	"license": "MIT",
+	"dependencies": {}
+}
