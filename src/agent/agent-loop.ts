@@ -89,7 +89,8 @@ export interface AgentLoopConfig {
 	convertToLlm?: (messages: AgentMessage[]) => Message[];
 	/** Transform context before the LLM call (compaction lives here). */
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
-	beforeToolCall?: (info: BeforeToolCallInfo) => { block?: boolean; reason?: string } | undefined;
+	/** May be async (e.g. an approval prompt that waits on a phone). */
+	beforeToolCall?: (info: BeforeToolCallInfo) => { block?: boolean; reason?: string } | undefined | Promise<{ block?: boolean; reason?: string } | undefined>;
 	afterToolCall?: (info: AfterToolCallInfo) => Partial<AgentToolResult> | undefined;
 	shouldStopAfterTurn?: (info: { message: AssistantMessage; context: AgentContext }) => boolean;
 	getSteeringMessages?: () => AgentMessage[] | Promise<AgentMessage[]>;
@@ -348,7 +349,7 @@ async function runOne(
 		return { toolCallId: tc.id, toolName: tc.name, result, isError: true };
 	}
 
-	const before = config.beforeToolCall?.({ assistantMessage, toolCall: tc, args, context: ctx });
+	const before = await config.beforeToolCall?.({ assistantMessage, toolCall: tc, args, context: ctx });
 	if (before?.block) {
 		const result: AgentToolResult = { content: before.reason ?? "Tool execution was blocked", isError: true };
 		await emit({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError: true });

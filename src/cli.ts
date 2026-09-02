@@ -40,8 +40,11 @@ Options:
   --task-file <f>                  loop: task file (default TASK.md)
   --metric-file <f>                loop: metric file (default METRIC.md)
   --resume <id>                    resume a session (REPL)
+  --ask <tools>                    tools that need approval: bash,write
+                                    (REPL: /ask; nodeterm: canvas/phone answers)
   --no-tools                       run with no tools (pure chat)
   -h, --help                       this help`);
+
 }
 
 interface ParsedArgs {
@@ -95,6 +98,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		toolsMode: (typeof flags.tools === "string" ? flags.tools : undefined) as "auto" | "native" | "text" | undefined,
 		maxTurns: typeof flags["max-turns"] === "string" ? parseInt(flags["max-turns"]) : undefined,
 		temperature: typeof flags.temperature === "string" ? parseFloat(flags.temperature) : undefined,
+		askTools: typeof flags.ask === "string" ? flags.ask.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
 	};
 
 	if (_[0] === "models" || _[0] === "model") {
@@ -154,7 +158,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	// Default: interactive REPL
 	const { createRunner } = await import("./harness/runner.ts");
 	const { startRepl } = await import("./harness/repl.ts");
-	const runner = await createRunner({ ...common, tools: flags["no-tools"] === true ? [] : undefined });
+	const runner = await createRunner({ ...common, tools: flags["no-tools"] === true ? [] : undefined, askTools: common.askTools });
 	await startRepl({ runner, resumeSessionId: typeof flags.resume === "string" ? flags.resume : undefined });
 }
 

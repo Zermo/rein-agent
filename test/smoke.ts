@@ -6,6 +6,7 @@
  *   4. native tool calls end-to-end (mock-native)
  *   5. text tool protocol end-to-end (mock-text)
  *   6. runtime fallback: broken native → text protocol (mock-broken)
+ *   7. nodeterm: hook POSTs, pending-file approvals (allow/deny/timeout), e2e deny
  *
  * Run: node --experimental-strip-types test/smoke.ts
  * Exits 0 on success.
@@ -136,6 +137,90 @@ async function textOf(messages: any[]): Promise<string> {
 	check("broken: text-mode tool executed", toolRan, JSON.stringify(messages.map((m) => m.role)));
 	const finalText = await textOf(messages);
 	check("broken: conversation completed", finalText.length > 0, finalText);
+}
+
+// ---------------------------------------------------------------- 7. nodeterm
+console.log("7. nodeterm integration");
+{
+	const fs = await import("node:fs");
+	const { createServer } = await import("node:http");
+	const hookHits: { url: string; body: string }[] = [];
+	const hookServer = createServer((req, res) => {
+		let raw = "";
+		req.on("data", (c) => (raw += c));
+		req.on("end", () => {
+			hookHits.push({ url: req.url ?? "", body: raw });
+			res.writeHead(200, { "Content-Type": "text/plain" });
+			res.end("ok");
+		});
+	});
+	await new Promise<void>((r) => hookServer.listen(0, "127.0.0.1", () => r()));
+	const hookPort = (hookServer.address() as any).port;
+
+	const pendingDir = mkdtempSync(join(tmpdir(), "rein-pending-"));
+	process.env.NODETERM_NODE_ID = "test-node";
+	process.env.NODETERM_HOOK_PORT = String(hookPort);
+	process.env.NODETERM_HOOK_VERSION = "1";
+	process.env.NODETERM_PENDING_DIR = pendingDir;
+
+	const { postEvent, requestApproval, active: ntActive } = await import("../src/harness/nodeterm.ts");
+	check("nt: detected active", ntActive() === true);
+
+	postEvent({ hook_event_name: "PreToolUse", tool_name: "bash", hookSpecificOutput: { hookEventName: "PreToolUse" } });
+	await new Promise((r) => setTimeout(r, 80));
+	check("nt: POST reached hook server", hookHits.length === 1 && hookHits[0].url === "/hook/rein", JSON.stringify(hookHits.map((h) => h.url)));
+	const form = new URLSearchParams(hookHits[0]?.body ?? "");
+	check("nt: form carries nodeId + version", form.get("nodeId") === "test-node" && form.get("version") === "1");
+	const payload = JSON.parse(form.get("payload") ?? "{}");
+	check("nt: payload has hook_event_name + tool", payload.hook_event_name === "PreToolUse" && payload.tool_name === "bash");
+
+	// allow — the "phone" writes the answer file
+	const allowP = requestApproval("bash", { command: "rm -rf /" });
+	await new Promise((r) => setTimeout(r, 100));
+	let reqFiles = fs.readdirSync(pendingDir).filter((f) => f.endsWith(".json"));
+	check("nt: pending request written", reqFiles.length === 1, reqFiles.join(";"));
+	fs.writeFileSync(join(pendingDir, reqFiles[0].slice(0, -5) + ".answer"), "allow");
+	check("nt: allow honored", (await allowP) === "allow");
+	check("nt: pending cleaned up", fs.readdirSync(pendingDir).length === 0, fs.readdirSync(pendingDir).join(";"));
+
+	// deny
+	const denyP = requestApproval("write", { path: "/x" });
+	await new Promise((r) => setTimeout(r, 100));
+	reqFiles = fs.readdirSync(pendingDir).filter((f) => f.endsWith(".json"));
+	fs.writeFileSync(join(pendingDir, reqFiles[0].slice(0, -5) + ".answer"), "deny");
+	check("nt: deny honored", (await denyP) === "deny");
+
+	// timeout — no answer arrives; request file gets swept
+	process.env.NODETERM_PERM_WAIT_SECS = "1";
+	const t0 = Date.now();
+	const timeoutVerdict = await requestApproval("bash", { command: "sleep 5" });
+	check("nt: timeout reported", timeoutVerdict === "timeout" && Date.now() - t0 < 3000, timeoutVerdict);
+	check("nt: timeout cleans up", fs.readdirSync(pendingDir).length === 0, fs.readdirSync(pendingDir).join(";"));
+	delete process.env.NODETERM_PERM_WAIT_SECS;
+
+	// e2e: --ask bash + a "phone" that answers deny → tool blocked, model sees it
+	{
+		const phone = setInterval(() => {
+			for (const f of fs.readdirSync(pendingDir)) {
+				if (f.endsWith(".json")) fs.writeFileSync(join(pendingDir, f.slice(0, -5) + ".answer"), "deny");
+			}
+		}, 50);
+		const { createRunner } = await import("../src/harness/runner.ts");
+		const runner = await createRunner({ cwd: process.cwd(), baseUrlOverride: baseUrl, modelOverride: "mock-native", toolsMode: "native", askTools: ["bash"] });
+		const messages = await runner.run({ role: "user", content: "please run a command", timestamp: Date.now() });
+		clearInterval(phone);
+		const blocked = messages.some((m) => m.role === "toolResult" && /Denied/.test((m as any).content?.[0]?.text ?? ""));
+		check("nt-e2e: tool blocked on deny", blocked, JSON.stringify(messages.map((m: any) => m.role)));
+		const finalText = await textOf(messages);
+		check("nt-e2e: model sees the denial", finalText.includes("Denied"), finalText);
+	}
+
+	hookServer.close();
+	rmSync(pendingDir, { recursive: true, force: true });
+	delete process.env.NODETERM_NODE_ID;
+	delete process.env.NODETERM_HOOK_PORT;
+	delete process.env.NODETERM_HOOK_VERSION;
+	delete process.env.NODETERM_PENDING_DIR;
 }
 
 server.close();

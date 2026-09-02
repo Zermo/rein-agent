@@ -12,6 +12,7 @@ import { apiKeyFor, loadConfig, resolveModel } from "../ai/models.ts";
 import type { AssistantMessage, Model } from "../ai/types.ts";
 import { buildSystemPrompt } from "./system-prompt.ts";
 import { TOOLS } from "./tools/index.ts";
+import * as nodeterm from "./nodeterm.ts";
 
 export interface RunnerOptions {
 	cwd: string;
@@ -25,6 +26,11 @@ export interface RunnerOptions {
 	systemPrompt?: string;
 	/** Replace the default toolset. */
 	tools?: AgentTool[];
+	/** Tool names that require approval before execution (e.g. ["bash", "write"]). */
+	askTools?: string[];
+	/** What happens when an approval times out with no canvas/phone answer, outside nodeterm.
+	 *  Default: deny. The REPL passes a stdin y/n prompt. */
+	askFallback?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
 }
 
 export interface Runner {
@@ -34,6 +40,10 @@ export interface Runner {
 	toolsModeSource: string;
 	systemPrompt: string;
 	tools: AgentTool[];
+	/** Live set — /ask in the REPL mutates it at runtime. */
+	askTools: string[];
+	/** Approval fallback (timeout, or outside nodeterm). REPL sets this to a stdin prompt. */
+	askFallback?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
 	context: AgentContext;
 	/** Queue a message to be injected after the current tool batch. */
 	steer(message: AgentMessage): void;
@@ -58,6 +68,13 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 
 	const steering: AgentMessage[] = [];
 	const context: AgentContext = { systemPrompt, messages: [], tools };
+	const askTools = [...(opts.askTools ?? [])];
+
+	/** Human summary of a tool call for approval prompts. */
+	const summarizeArgs = (args: Record<string, unknown>): string => {
+		const s = JSON.stringify(args);
+		return s.length > 100 ? s.slice(0, 100) + "…" : s;
+	};
 
 	const runner: Runner = {
 		model,
@@ -72,6 +89,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 			context.systemPrompt = v;
 		},
 		tools,
+		askTools,
 		context,
 
 		steer(message) {
@@ -87,11 +105,47 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					streamFn: (m, ctx, o) => openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: config.maxTokens, toolsMode: runner.toolsMode }),
 					maxTurns: opts.maxTurns ?? 60,
 					getSteeringMessages: () => steering.splice(0, steering.length),
+					beforeToolCall: async (info) => {
+						if (!askTools.includes(info.toolCall.name)) return undefined;
+						const name = info.toolCall.name;
+						const args = (info.args ?? {}) as Record<string, unknown>;
+						if (nodeterm.active()) {
+							nodeterm.setTitle(`rein · needs you: ${name}`);
+							const verdict = await nodeterm.requestApproval(name, args);
+							if (verdict === "allow") return undefined;
+							if (verdict === "deny") return { block: true, reason: `Denied: ${name} ${summarizeArgs(args)} (canvas/phone said no)` };
+							// timeout — nodeterm's reference behavior is fail-open
+							console.error(`\n[approval] ${name}: no answer in time — proceeding (fail-open)\n`);
+							return undefined;
+						}
+						// Outside nodeterm (or on timeout there): the harness's own fallback
+						const ok = (await runner.askFallback?.(name, args)) ?? false;
+						return ok ? undefined : { block: true, reason: `Denied: ${name} ${summarizeArgs(args)}` };
+					},
 				},
 				runOpts?.signal,
 				async (event) => {
-					if (event.type !== "turn_end") return;
-					await maybeFallBackToTextMode(runner, (event as { message: AssistantMessage }).message);
+					// nodeterm status + title (no-ops outside a nodeterm node / non-TTY)
+					switch (event.type) {
+						case "agent_start":
+						nodeterm.status.turnStart(String((prompt as { content?: unknown }).content ?? ""));
+						nodeterm.setTitle("rein · working");
+						break;
+						case "tool_execution_start":
+						nodeterm.status.toolStart(event.toolName, (event.args as Record<string, unknown>) ?? {});
+						nodeterm.setTitle(`rein · ${event.toolName}`);
+						break;
+						case "tool_execution_end":
+						nodeterm.status.toolEnd(event.toolName);
+						break;
+						case "agent_end":
+						nodeterm.status.done();
+						nodeterm.setTitle("rein · idle");
+						break;
+					}
+					if (event.type === "turn_end") {
+						await maybeFallBackToTextMode(runner, (event as { message: AssistantMessage }).message);
+					}
 				},
 			).then((newMessages) => {
 				// Accumulate the conversation so the next prompt has memory.

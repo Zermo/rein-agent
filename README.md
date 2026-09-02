@@ -21,7 +21,7 @@ Built by studying two codebases:
   *translation layer* (one message model + one streaming event protocol over
   every provider quirk), and its `packages/agent` proves the loop is just:
   stream → run tools (parallel) → repeat, with steering queues, hooks, and
-  truncation safety. rein rebuilds both layers from scratch in ~3,200 lines
+  truncation safety. rein rebuilds both layers from scratch in ~3,900 lines
   with no dependencies, because "runs anywhere Node runs" is the point.
 - **[karpathy/autoresearch](https://github.com/karpathy/autoresearch)** — the
   *loop* that runs an agent forever against one metric, keeping what improves
@@ -180,6 +180,7 @@ src/
 │   ├── print.ts               one-shot mode
 │   ├── improve.ts             self-improvement loop (autoresearch on this repo)
 │   ├── loop.ts                experiment loop (TASK.md + METRIC.md)
+│   └── nodeterm.ts            nodeterm surface: status hooks + phone approvals
 │   └── tools/                 read write edit bash grep find ls
 └── util/                      ansi · json-salvage · schema · truncate
 test/
@@ -196,6 +197,44 @@ npm test          # node --experimental-strip-types test/smoke.ts
 Covers: JSON salvage (7), edit semantics (6), capability table (5), and three
 end-to-end pipelines against the mock server — native tools, text protocol,
 and broken-native → runtime fallback (the tool actually executes in each).
+
+## Running under nodeterm
+
+[nodeterm](https://nodeterm.dev) is a canvas that hosts **real tmux sessions** —
+each node is a live terminal that survives app restarts and machine reboots —
+and its **iOS companion pairs to the same tmux session** (watch an agent work,
+type into it, answer prompts; off-network it's E2E-encrypted over a relay).
+rein plugs into it as a custom agent:
+
+```
+Settings → Custom agents
+  Label:          rein
+  Launch command: rein --ask bash,write      (or just: rein)
+```
+
+What you get:
+
+- **Persistence, twice** — tmux keeps the session alive across app restarts;
+  rein's JSONL sessions (`/resume`, `/branch`) keep the conversation across
+  machine reboots. Cold-restore replays scrollback; `rein` comes back in the
+  same session.
+- **Status** — inside a nodeterm node rein detects the injected
+  `NODETERM_*` env and reports Claude-style hook events (turn start, tool
+  start/end, done) to nodeterm's loopback hook server, plus the terminal
+  title (`rein · bash`, `rein · needs you: write`, `rein · idle`) which is
+  the status surface for custom-agent nodes.
+- **Approvals from the phone** — with `--ask bash,write` (or `/ask` in the
+  REPL), gated tools go through nodeterm's pending-files protocol
+  (`~/.nodeterm/pending/<id>.json`, the phone writes `<id>.answer`). The
+  answer channel is the filesystem, not loopback, so a phone over SSH can
+  answer. Timeout fails open with a visible note, matching nodeterm's own
+  reference behavior. Outside a nodeterm node the same gate falls back to a
+  `[y/N]` prompt on stdin.
+
+The integration lives in one file (`src/harness/nodeterm.ts`) and is inert
+unless the `NODETERM_*` env is present — running rein in a plain terminal
+changes nothing. nodeterm is a surface, not a dependency: BUSL-1.1 license,
+no code coupling either way.
 
 ## Known limits (honest list)
 

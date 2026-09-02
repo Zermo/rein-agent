@@ -13,3 +13,5 @@ The `## harness` section is read by `rein improve` as its work queue.
 - [setup] `-p "query"` was falling through to the REPL because flags.p was a string, not true — check presence, not truthiness
 - [setup] runner.run() must normalize string prompts to user messages; toOpenAIMessage returns undefined for unknown roles, which serializes as null and confuses providers
 - [setup] readline rl.question races on piped stdin; use an rl.on("line") queue instead
+- [surface] nodeterm hook POSTs are form-urlencoded (nodeId, version, payload); payload carries Claude-style hook_event_name. Approvals: ~/.nodeterm/pending/<id>.json + poll <id>.answer (allow|deny), fail open on timeout. Env-gated on NODETERM_NODE_ID + hook port/sock — inert in a plain terminal
+- [setup] beforeToolCall in agent-loop must be awaitable (approval waits on a phone); sync-only hooks can't hold a turn

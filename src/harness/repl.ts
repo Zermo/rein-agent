@@ -15,6 +15,7 @@ import type { AgentMessage } from "../agent/agent-loop.ts";
 import { cyan, dim, gray, green, red, yellow, bold, stripAnsi } from "../util/ansi.ts";
 import type { Runner } from "./runner.ts";
 import type { AgentTool } from "../agent/agent-loop.ts";
+import * as nodeterm from "./nodeterm.ts";
 
 interface ReplOptions {
 	runner: Runner;
@@ -32,6 +33,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			`rein · ${runner.model.provider}/${runner.model.id} · tools: ${runner.toolsMode} (${runner.toolsModeSource}) · session ${sessionId.slice(-8)}\n`,
 		),
 	);
+	if (nodeterm.active()) {
+		console.log(gray("nodeterm node detected — status badges on; approvals can be answered from the canvas or the phone."));
+	}
 
 	let busy = false;
 
@@ -114,6 +118,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 						"  /new             start a fresh session",
 						"  /model           show the active model + tool mode",
 						"  /tools <list>    show available tools",
+					"  /ask [tools]   tools that need approval (y/N here, or canvas/phone)",
 						"  /sessions        list recent sessions",
 						"  /resume <id>     continue a previous session (reloads its messages)",
 						"  /branch          branch the current session and continue there",
@@ -133,6 +138,29 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 					console.log(`  ${bold(t.name)} ${dim(t.description.split(".")[0])}`);
 				}
 				return true;
+			case "ask": {
+				// /ask — show; /ask bash,write — set; /ask clear — none
+				if (!arg) {
+					console.log(gray(`tools needing approval: ${runner.askTools.length ? runner.askTools.join(", ") : "(none)"}`));
+					return true;
+				}
+				if (arg === "clear") {
+					runner.askTools.length = 0;
+					console.log(gray("approval set cleared — all tools run automatically"));
+					return true;
+				}
+				const names = arg.split(",").map((s) => s.trim()).filter(Boolean);
+				const known = new Set((runner.tools as AgentTool[]).map((t) => t.name));
+				const bad = names.filter((n) => !known.has(n));
+				if (bad.length) {
+					console.log(yellow(`unknown tool(s): ${bad.join(", ")} — try /tools`));
+					return true;
+				}
+				runner.askTools.length = 0;
+				runner.askTools.push(...names);
+				console.log(gray(`${names.join(", ")} now need approval (canvas/phone or [y/N] here)`));
+				return true;
+			}
 			case "new":
 				sessionId = createSession({ model: runner.model.id, provider: runner.model.provider, cwd: process.cwd() });
 				runner.context.messages = [];
@@ -192,6 +220,16 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			r("");
 		}
 	});
+
+	// Approval fallback: the main loop is idle while the agent runs, so a queued
+	// line answer is exactly what we want (y/N). Outside a TTY there is nobody to ask.
+	runner.askFallback = async (name, args) => {
+		if (!process.stdin.isTTY) return false;
+		const s = JSON.stringify(args);
+		process.stdout.write(`\n\u26a1 approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} \u2014 [y/N] `);
+		const line = (await ask()) ?? "";
+		return /^y(es)?$/i.test(line.trim());
+	};
 
 	/** Next line; null means input is gone (EOF/Ctrl-D) and the queue is empty. */
 	const ask = (): Promise<string | null> => {
