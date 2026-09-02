@@ -5,7 +5,7 @@ vendored unlazy, MIT). Zero runtime dependencies. Built from two references:
 pi's architecture (short prompt, small toolset, event-driven loop) and
 karpathy/autoresearch (one metric, keep/discard, never stop until the budget runs out).
 
-Pinned at commit `1e5bbfe` (run `git log --oneline` — the history is part of the review surface).
+This archive is a snapshot of the repo at its HEAD at packaging time (run `git log --oneline` first — the history is part of the review surface, and `git status` should be clean).
 
 ## Run it (no install step)
 
