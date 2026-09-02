@@ -21,8 +21,8 @@ Built by studying two codebases:
   *translation layer* (one message model + one streaming event protocol over
   every provider quirk), and its `packages/agent` proves the loop is just:
   stream → run tools (parallel) → repeat, with steering queues, hooks, and
-  truncation safety. rein rebuilds both layers from scratch in ~3,900 lines
-  with no dependencies, because "runs anywhere Node runs" is the point.
+  truncation safety. rein rebuilds both layers from scratch in ~4,300 lines
+  of its own code (plus 2.5k lines of vendored unlazy, MIT) with no dependencies, because "runs anywhere Node runs" is the point.
 - **[karpathy/autoresearch](https://github.com/karpathy/autoresearch)** — the
   *loop* that runs an agent forever against one metric, keeping what improves
   and discarding what doesn't. rein encodes that twice: `rein loop` (any
@@ -56,6 +56,7 @@ rein                          interactive REPL (sessions persist, steering mid-r
 rein -p "query"               one-shot; --json for the raw event stream
 rein loop                     autonomous experiment loop (TASK.md + METRIC.md)
 rein improve [goal]           self-improvement loop on this repo
+rein gates [file] --mode m    unlazy gates: lint | status | approve | reverify
 rein models                   what rein can see: local servers + provider presets
 ```
 
@@ -83,6 +84,47 @@ small models (trailing commas, raw newlines, invalid escapes, prose around
 the JSON) are repaired, never fatal.
 
 Override with `--tools native|text|auto` (auto is the default).
+
+### Web: TinyFish is the web layer
+
+Two tools, one free API key (tinyfish.ai — Search and Fetch never draw from
+the wallet):
+
+```
+web_search  fresh, never-cached, structured results (site:, recency, news,
+            research-paper modes) — find the page
+web_fetch   any URL → clean LLM-ready markdown, real browser behind it — read it
+```
+
+Key: `TINYFISH_API_KEY`, or `~/.rein/config.json` → `{"tinyfish": {"apiKey": "..."}}`.
+The system prompt tells the agent to search first, fetch only the 1–2 pages
+that matter, and name the URL behind every web-sourced fact. If the key is
+missing the tool says so plainly instead of failing mysteriously.
+
+### Completion gates (unlazy)
+
+[unlazy](https://github.com/Leonxlnx/unlazy) (MIT, vendored at `vendor/unlazy/`)
+is the anti-laziness discipline: write an acceptance ledger **before** the
+work, run oracles that can actually fail, reverify before reporting done.
+
+```
+rein gates GATES.md --mode lint        # oracles that cannot fail? caught now
+rein gates GATES.md --mode status      # report only — never executes
+rein gates GATES.md                    # = --mode approve: approve exact oracles, run them
+rein gates GATES.md --mode reverify    # re-run everything; demote stale evidence
+```
+
+A gate passes only when its command exits 0 **and** `EXPECT:` matches the
+output; the ledger records shell, CWD, exit status, and a SHA-256 output
+fingerprint as `EVIDENCE:`. Untested claims are not evidence — a checked box
+without evidence counts as unmet. Approval is the trust boundary: a `CHECK:`
+line is never executed until its exact command+CWD+PATH oracle is approved
+(stored in `~/.unlazy/approved`, outside the repo by design).
+
+The agent sees all of this as one tool (`gates`) and a section of the system
+prompt: substantial work starts with `GATES.md` from
+`vendor/unlazy/templates/gates-leaf.md`. The repo's own `GATES.md` is the
+ledger for the current integration work — every box checked with evidence.
 
 ### Self-improvement
 
@@ -158,6 +200,9 @@ operator.
   spec, not a prompt suggestion.
 - `rein improve` + the `LESSONS.md` convention — the harness eats its own
   dogfood on a schedule.
+- TinyFish `web_search`/`web_fetch` — the web layer, one free key.
+- `gates` + vendored unlazy — completion discipline with runnable oracles,
+  wired in as both a tool and a `rein gates` CLI.
 
 ## Layout
 
@@ -180,9 +225,11 @@ src/
 │   ├── print.ts               one-shot mode
 │   ├── improve.ts             self-improvement loop (autoresearch on this repo)
 │   ├── loop.ts                experiment loop (TASK.md + METRIC.md)
-│   └── nodeterm.ts            nodeterm surface: status hooks + phone approvals
-│   └── tools/                 read write edit bash grep find ls
+│   ├── nodeterm.ts            nodeterm surface: status hooks + phone approvals
+│   └── tools/                 read write edit bash grep find ls web(TinyFish) gates(unlazy)
 └── util/                      ansi · json-salvage · schema · truncate
+vendor/
+└── unlazy/                    Leonxlnx/unlazy (MIT): SKILL.md + gate-check.mjs + templates + references
 test/
 ├── mock-server.ts             deterministic OpenAI-compatible server (4 models)
 └── smoke.ts                   28 checks incl. 3 full-pipeline e2e scenarios
@@ -254,3 +301,6 @@ Architecture: [earendil-works/pi](https://github.com/earendil-works/pi)
 (especially `packages/ai` — "the hard part is the translation layer" — and
 `packages/agent`). Loop philosophy: [karpathy/autoresearch](https://github.com/karpathy/autoresearch).
 Simplicity bar: [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT).
+Completion discipline: [Leonxlnx/unlazy](https://github.com/Leonxlnx/unlazy)
+(MIT, vendored — the gate ledger and runnable oracles).
+Web layer: [TinyFish](https://www.tinyfish.ai) Search + Fetch APIs.
