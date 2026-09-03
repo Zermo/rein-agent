@@ -8,6 +8,7 @@
  *   rein improve                self-improvement loop on the harness itself
  *   rein gates <file> [--mode m] unlazy: lint / status / approve / reverify a ledger
  *   rein models                 list what rein can see (local servers, presets)
+ *   rein hardware [--json]      profile this machine + what it can run (stolen from Magnitude)
  *   rein setup [--yes|--status] interactive onboarding: pick model, test, save config
  *
  * Local AI is the default provider: Ollama → LM Studio → llama.cpp → vLLM.
@@ -16,6 +17,30 @@
  */
 import { readFileSync } from "node:fs";
 import { loadConfig } from "./ai/models.ts";
+
+/** "what you can run" section for `rein models` — hardware-aware fit, best 5. */
+async function printHardwareSection(): Promise<void> {
+	try {
+		const { profileHardware, summarizeHardware } = await import("./hardware/profile.ts");
+		const { CATALOG } = await import("./hardware/catalog.ts");
+		const { bestAssessment, verdictMark } = await import("./hardware/fit.ts");
+		const profile = await profileHardware({ fast: true });
+		const ranked = CATALOG.map((m) => ({ m, a: bestAssessment(profile, m) }))
+			.filter((x) => x.a.verdict !== "no")
+			.sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.m.params - a.m.params)
+			.slice(0, 5);
+		if (ranked.length === 0) return;
+		console.log("\nyour machine:");
+		console.log(`  ${summarizeHardware(profile)}`);
+		console.log("top local picks (see `rein hardware` for the full table):");
+		for (const { m, a } of ranked) {
+			const mark = a.verdict === "fits" ? `~${a.estTokS ?? "?"} tok/s` : "tight";
+			console.log(`  ${m.name.padEnd(28)} ${String(mark).padEnd(12)} ${m.ollama ?? ""}`);
+		}
+	} catch {
+		// hardware section is best-effort; never break `rein models`
+	}
+}
 
 function cliVersion(): string {
 	try {
@@ -36,6 +61,7 @@ Usage:
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
+  rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
   rein setup                    interactive onboarding: provider → model → key
                                 → connection test → saves ~/.rein/config.json
   rein setup --yes              non-interactive (first local server / existing config)
@@ -138,7 +164,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		}
 		const config = loadConfig();
 		if (config.model || config.baseUrl) console.log(`\nconfig: ~/.rein/config.json → ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl })}`);
+		await printHardwareSection();
 		return;
+	}
+	if (_[0] === "hardware") {
+		const { printHardwareReport } = await import("./hardware/report.ts");
+		return printHardwareReport({ json: _.includes("--json") });
 	}
 
 	if (_[0] === "setup") {
