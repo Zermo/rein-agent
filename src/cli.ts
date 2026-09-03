@@ -21,19 +21,18 @@ import { loadConfig } from "./ai/models.ts";
 /** "what you can run" section for `rein models` — hardware-aware fit, best 5. */
 async function printHardwareSection(): Promise<void> {
 	try {
-		const { profileHardware, summarizeHardware } = await import("./hardware/profile.ts");
-		const { CATALOG } = await import("./hardware/catalog.ts");
-		const { bestAssessment, verdictMark } = await import("./hardware/fit.ts");
-		const profile = await profileHardware({ fast: true });
-		const ranked = CATALOG.map((m) => ({ m, a: bestAssessment(profile, m) }))
+		const { summarizeHardware } = await import("./hardware/profile.ts");
+		const { assessCatalog } = await import("./hardware/fit.ts");
+		const { profile, all } = await assessCatalog();
+		const ranked = all
 			.filter((x) => x.a.verdict !== "no")
-			.sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.m.params - a.m.params)
+			.sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.model.params - a.model.params)
 			.slice(0, 5);
 		if (ranked.length === 0) return;
 		console.log("\nyour machine:");
 		console.log(`  ${summarizeHardware(profile)}`);
 		console.log("top local picks (see `rein hardware` for the full table):");
-		for (const { m, a } of ranked) {
+		for (const { model: m, a } of ranked) {
 			const mark = a.verdict === "fits" ? `~${a.estTokS ?? "?"} tok/s` : "tight";
 			console.log(`  ${m.name.padEnd(28)} ${String(mark).padEnd(12)} ${m.ollama ?? ""}`);
 		}
@@ -57,6 +56,7 @@ Usage:
   rein                          start an interactive session in this directory
   rein -p, --print "query"      one-shot: run the query, print the answer, exit
   rein -p "query" --json        one-shot, raw event stream (JSON lines)
+  rein -p "query" --save        one-shot, persist the session (resume with --resume <id>)
   rein loop                     autonomous experiment loop (needs TASK.md + METRIC.md)
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)

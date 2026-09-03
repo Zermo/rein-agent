@@ -146,13 +146,14 @@ async function askSecret(prompt: string): Promise<string | undefined> {
 async function fitMarks(ids: string[]): Promise<Map<string, string>> {
 	const out = new Map<string, string>();
 	try {
-		const { profileHardware } = await import("../hardware/profile.ts");
 		const { matchCatalog } = await import("../hardware/catalog.ts");
-		const { bestAssessment, verdictMark } = await import("../hardware/fit.ts");
-		const profile = await profileHardware({ fast: true });
+		const { assessCatalog, verdictMark } = await import("../hardware/fit.ts");
+		const { all } = await assessCatalog();
 		for (const id of ids) {
 			const cm = matchCatalog(id);
-			if (cm) out.set(id, verdictMark(bestAssessment(profile, cm)));
+			if (!cm) continue;
+			const hit = all.find((x) => x.model.id === cm.id);
+			if (hit) out.set(id, verdictMark(hit.a));
 		}
 	} catch {
 		// never block the wizard on the fit section
@@ -227,7 +228,7 @@ export async function runSetup(opts: SetupOptions): Promise<number> {
 	console.log(C.bold("rein setup") + " — configure your model\n");
 	try {
 		const { profileHardware, summarizeHardware } = await import("../hardware/profile.ts");
-		console.log(C.dim(`machine: ${summarizeHardware(await profileHardware({ fast: true }))}`) + "\n");
+		console.log(C.dim(`machine: ${summarizeHardware(await profileHardware())}`) + "\n");
 	} catch {
 		// best-effort
 	}

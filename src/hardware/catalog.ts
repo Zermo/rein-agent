@@ -3,7 +3,7 @@
  *
  * Structure stolen from Magnitude's inference catalog (models.json,
  * Apache-2.0): parameterization incl. MoE activeParameters, quant
- * variants, contextLength, intelligence with provenance. rein's entries
+ * variants, contextLength. rein's entries
  * are the models you can actually `ollama pull` for an agent harness,
  * with an approximate bytes-per-weight for each quant so the fit
  * assessor can reason about them.
@@ -28,7 +28,6 @@ export interface CatalogModel {
 	/** How to get it: `ollama pull <tag>` / LM Studio search term. */
 	ollama?: string;
 	note?: string;
-	intelligence?: { score: number; source: string };
 }
 
 const QUANTS = {
@@ -71,8 +70,9 @@ export const CATALOG: CatalogModel[] = [
 		params: 16_310_918_144,
 		contextLength: 131_072,
 		quants: [QUANTS.q4, QUANTS.q6],
-		ollama: "deepseek-coder-v2-lite:16b",
-		note: "128k context; MoE-lite, efficient for long sessions.",
+		activeParams: 2_400_000_000,
+		ollama: "deepseek-coder-v2:16b",
+		note: "128k context; MoE (16.3B total, ~2.4B active) — fast for its size.",
 	},
 	{
 		id: "qwen3-30b-a3b",
@@ -90,7 +90,7 @@ export const CATALOG: CatalogModel[] = [
 		params: 21_263_125_504,
 		activeParams: 3_558_896_128,
 		contextLength: 131_072,
-		quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.48 }],
+		quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.52 }],
 		ollama: "gpt-oss:20b",
 		note: "Open-weight 20B; 128k context, very fast (3.6B active).",
 	},
@@ -105,7 +105,7 @@ export const CATALOG: CatalogModel[] = [
 	},
 	{
 		id: "mistral-small-24b",
-		name: "Mistral Small 3.1 24B",
+		name: "Mistral Small 3.2 24B",
 		params: 24_333_378_048,
 		contextLength: 131_072,
 		quants: [QUANTS.q4, QUANTS.q6],
@@ -127,7 +127,7 @@ export const CATALOG: CatalogModel[] = [
 		params: 117_172_437_504,
 		activeParams: 5_104_399_616,
 		contextLength: 131_072,
-		quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.48 }],
+		quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.52 }],
 		ollama: "gpt-oss:120b",
 		note: "Frontier-class in a 60–70 GB footprint; 5B active per token.",
 	},

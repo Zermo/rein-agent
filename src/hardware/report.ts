@@ -3,13 +3,12 @@
  * The "scan your hardware and give you what you can run" feature, stolen
  * from Magnitude and rebuilt as three small zero-dependency modules.
  */
-import { CATALOG } from "./catalog.ts";
-import { bestAssessment, verdictMark } from "./fit.ts";
-import { gb, profileHardware, summarizeHardware } from "./profile.ts";
+import { bold, dim, green, red, yellow } from "../util/ansi.ts";
+import { assessCatalog, verdictMark } from "./fit.ts";
+import { gb, summarizeHardware } from "./profile.ts";
 
 export async function printHardwareReport(opts: { json?: boolean } = {}): Promise<number> {
-	const profile = await profileHardware();
-	const assessments = CATALOG.map((m) => ({ model: m, a: bestAssessment(profile, m) }));
+	const { profile, all: assessments } = await assessCatalog();
 	const fits = assessments.filter((x) => x.a.verdict === "fits");
 	const tight = assessments.filter((x) => x.a.verdict === "tight");
 	const no = assessments.filter((x) => x.a.verdict === "no");
@@ -47,18 +46,13 @@ export async function printHardwareReport(opts: { json?: boolean } = {}): Promis
 		return 0;
 	}
 
-	const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
-	const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-	const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
-	const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
-	const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
-
 	console.log(bold("rein hardware"));
 	console.log(`  ${profile.cpu.name} · ${profile.cpu.cores} cores${profile.cpu.features.length ? ` (${profile.cpu.features.join(", ")})` : ""}`);
+	const bwLine = profile.memBandwidthGBs ? ` · ~${profile.memBandwidthGBs} GB/s${profile.bandwidthNote === "estimate" ? " (est)" : ""}` : "";
 	console.log(
 		profile.unifiedMemory
-			? `  ${gb(profile.ram.totalBytes)} unified memory (${gb(profile.ram.availableBytes)} available)${profile.memBandwidthGBs ? ` · ~${profile.memBandwidthGBs} GB/s${profile.bandwidthNote === "estimate" ? " (est)" : ""}` : ""}`
-			: `  ${gb(profile.ram.totalBytes)} RAM (${gb(profile.ram.availableBytes)} available)${profile.memBandwidthGBs ? ` · ~${profile.memBandwidthGBs} GB/s` : ""}`,
+			? `  ${gb(profile.ram.totalBytes)} unified memory (${gb(profile.ram.availableBytes)} available)${bwLine}`
+			: `  ${gb(profile.ram.totalBytes)} RAM (${gb(profile.ram.availableBytes)} available)${bwLine}`,
 	);
 	for (const g of profile.gpus) {
 		if (g.vramTotalBytes) console.log(`  ${g.name} · ${gb(g.vramTotalBytes)} VRAM${g.vramFreeBytes != null ? ` (${gb(g.vramFreeBytes)} free)` : ""}`);
@@ -69,9 +63,11 @@ export async function printHardwareReport(opts: { json?: boolean } = {}): Promis
 	const row = (x: (typeof assessments)[number]) => {
 		const m = x.model;
 		const moe = m.activeParams ? ` · ${Math.round(m.activeParams / 1e9)}B active` : "";
-		const mark = x.a.verdict === "fits" ? green(verdictMark(x.a)) : x.a.verdict === "tight" ? yellow(verdictMark(x.a)) : red(verdictMark(x.a));
+		// Pad the plain text, then color — escape codes after padding keep columns aligned.
+		const markPlain = verdictMark(x.a).padEnd(14);
+		const mark = x.a.verdict === "fits" ? green(markPlain) : x.a.verdict === "tight" ? yellow(markPlain) : red(markPlain);
 		const get = m.ollama ? `  ${dim("ollama pull " + m.ollama)}` : "";
-		console.log(`  ${mark.padEnd(14)} ${m.name.padEnd(26)} ${Math.round(m.params / 1e9)}B${moe.padEnd(16)} ${x.a.quant.label.padEnd(8)} ${dim(x.a.placement)}${get}`);
+		console.log(`  ${mark} ${m.name.padEnd(26)} ${Math.round(m.params / 1e9)}B${moe.padEnd(16)} ${x.a.quant.label.padEnd(8)} ${dim(x.a.placement)}${get}`);
 	};
 
 	if (fits.length > 0) {
