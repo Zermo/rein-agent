@@ -6,6 +6,9 @@ The `## harness` section is read by `rein improve` as its work queue.
 ## session
 
 - [setup] uncommitted docs in the working tree get eaten by the loop's `git clean -fd` on discard — commit (or stash) new files before running improve/loop on a dirty repo
+- [hardware] `sysctl -n k1 k2 …` prints values only, in order, no key names — parse positionally; and one bad oid makes the whole call exit non-zero, so probe optional features (avx oids) in separate caught calls
+- [hardware] vm_stat's page size lives in the header line `(page size of N bytes)`, not as a key; reclaimable RAM ≈ (free + inactive + speculative) × page
+- [hardware] Magnitude's fit model, ported: reserve max(pool/10, 2GiB) before a model may claim memory; footprint = weights(params×bytesPerWeight) + KV estimate @16k; Apple Silicon = one unified pool; MoE tok/s uses activeParams; tok/s = bandwidth/bytes-per-token × 0.55 — directional, labeled as estimate, never a benchmark
 
 ## harness
 

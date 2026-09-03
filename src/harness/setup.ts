@@ -142,6 +142,24 @@ async function askSecret(prompt: string): Promise<string | undefined> {
 	return value;
 }
 
+/** Map model ids → fit marks ("~45 tok/s" / "tight" / "won't fit") for the menu. Best-effort. */
+async function fitMarks(ids: string[]): Promise<Map<string, string>> {
+	const out = new Map<string, string>();
+	try {
+		const { profileHardware } = await import("../hardware/profile.ts");
+		const { matchCatalog } = await import("../hardware/catalog.ts");
+		const { bestAssessment, verdictMark } = await import("../hardware/fit.ts");
+		const profile = await profileHardware({ fast: true });
+		for (const id of ids) {
+			const cm = matchCatalog(id);
+			if (cm) out.set(id, verdictMark(bestAssessment(profile, cm)));
+		}
+	} catch {
+		// never block the wizard on the fit section
+	}
+	return out;
+}
+
 async function testConnection(baseUrl: string, model: string, apiKey?: string): Promise<{ ok: boolean; detail: string }> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), 20_000);
@@ -207,6 +225,12 @@ export async function runSetup(opts: SetupOptions): Promise<number> {
 	}
 
 	console.log(C.bold("rein setup") + " — configure your model\n");
+	try {
+		const { profileHardware, summarizeHardware } = await import("../hardware/profile.ts");
+		console.log(C.dim(`machine: ${summarizeHardware(await profileHardware({ fast: true }))}`) + "\n");
+	} catch {
+		// best-effort
+	}
 	const servers = await discoverLocalServers();
 	if (servers.length > 0) {
 		console.log("local servers detected:");
@@ -264,8 +288,9 @@ export async function runSetup(opts: SetupOptions): Promise<number> {
 				const json = (await res.json()) as any;
 				const ids: string[] = (json?.data ?? []).map((m: any) => m.id).filter(Boolean);
 				if (ids.length > 0) {
-					console.log(`models on ${baseUrl}:`);
-					ids.slice(0, 20).forEach((id, i) => console.log(`  ${i + 1}. ${id}`));
+					const marks = await fitMarks(ids);
+					console.log(`models on ${baseUrl}  ${C.dim("(fit marks from your hardware)")}:`);
+					ids.slice(0, 20).forEach((id, i) => console.log(`  ${i + 1}. ${id}${marks.get(id) ? C.dim(marks.get(id)!) : ""}`));
 					const preferred = pickDefaultModelId(ids);
 					const defIdx = Math.max(0, ids.indexOf(preferred ?? ""));
 					if (!opts.yes) {

@@ -351,6 +351,23 @@ console.log("9. unlazy gates (vendored checker)");
 	rmSync(gateDir, { recursive: true, force: true });
 }
 
+// 10. hardware: profile + fit assessment (stolen from Magnitude)
+{
+	const { profileHardware } = await import("../src/hardware/profile.ts");
+	const { CATALOG, matchCatalog } = await import("../src/hardware/catalog.ts");
+	const { bestAssessment } = await import("../src/hardware/fit.ts");
+	const hw = await profileHardware({ fast: true });
+	check("hardware: profile has cpu+ram", hw.cpu.cores > 0 && hw.ram.totalBytes > 0, JSON.stringify(hw.cpu));
+	if (process.platform === "darwin" && /Apple (M|A)/.test(hw.cpu.name)) {
+		check("hardware: darwin detects unified memory + bandwidth", hw.unifiedMemory === true && (hw.memBandwidthGBs ?? 0) >= 50, `${hw.memBandwidthGBs} GB/s`);
+	}
+	const a = bestAssessment(hw, CATALOG[0]);
+	check("hardware: fit assessment is arithmetic", a.totalBytes > 0 && ["fits", "tight", "no"].includes(a.verdict), `${a.verdict} ${a.totalBytes}`);
+	check("hardware: catalog match finds exact + fuzzy ids", !!matchCatalog("qwen2.5-coder:7b") && !!matchCatalog("qwen2.5-coder:7b-instruct"), "");
+	// a 7B Q4 must never be "no" on a machine with 8GB+ RAM
+	if (hw.ram.totalBytes >= 8 * 1024 ** 3) check("hardware: 7B Q4 fits on 8GB+ machine", a.verdict !== "no", a.verdict);
+}
+
 server.close();
 rmSync(testHome, { recursive: true, force: true });
 

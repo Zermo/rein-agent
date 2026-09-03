@@ -51,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | 
 
 Flags after `bash -s --`: `--skip-setup` (install only), `--yes` (no prompts).
 The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM)
-or cloud providers, tests the connection, and saves `~/.rein/config.json`.
+or cloud providers, marks each model with a fit verdict + rough tok/s (see `rein hardware`), tests the connection, and saves `~/.rein/config.json`.
 You can always re-run it: `rein setup` (`--yes` non-interactive,
 `--status` config + connection check).
 
@@ -67,7 +67,7 @@ build step and no devDependencies. To rebuild the bundle after changing
 source: `npm install && npm run bundle` (esbuild, dev-only).
 The compatibility commands `rein-agent` and `rein` point to the same CLI.
 
-Developing from source: `npm install && npm test` (55 checks, offline).
+Developing from source: `npm install && npm test` (60 checks, offline).
 
 ```sh
 # local (the default):
@@ -89,6 +89,7 @@ rein-agent loop               autonomous experiment loop (TASK.md + METRIC.md)
 rein-agent improve [goal]     self-improvement loop on this repo
 rein-agent gates [file] --mode m  unlazy gates: lint | status | approve | reverify
 rein-agent models             what rein can see: local servers + provider presets
+rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
 rein setup                    onboarding wizard (also: --yes, --status)
 rein --version                print version
 ```
@@ -193,6 +194,33 @@ after three no-change iterations, never otherwise stops until the budget or a
 Ctrl-C. This is autoresearch's `program.md` loop with the harness as the
 operator.
 
+### Local model fit — `rein hardware`
+
+Stolen concept from [Magnitude](https://github.com/magnitudedev/magnitude)
+(Apache-2.0): profile the machine, then tell you what you can actually run —
+with a per-domain memory model (system RAM vs VRAM, unified memory handled as
+one pool) and reserves before a model may claim memory (`max(pool/10, 2 GiB)`).
+
+```
+rein hardware
+  Apple M5 Pro · 18 cores
+  48 GB unified memory (23 GB available) · ~307 GB/s
+  what you can run (6)
+  ✓ ~99 tok/s  GPT-OSS 20B (MoE)   21B · 4B active   MXFP4    unified
+  ✓ ~38 tok/s  Qwen2.5-Coder 7B    8B                Q4_K_M   unified
+  ...
+  tight — fits only if other memory hogs are closed
+  out of reach: GPT-OSS 120B (MoE)
+```
+
+The math is deliberately visible and rough: footprint = weights
+(`params × bytesPerWeight`) + KV estimate @ 16k ctx, minus reserves; tok/s ≈
+`bandwidth / bytes-per-token` (MoE: active params only) × 0.55 efficiency.
+Directional, not a benchmark — the point is to stop guessing between a 7B and
+a 32B before you've spent an hour downloading. `rein models` shows a
+best-5 fit section, and the `rein setup` wizard marks each detected model
+with its verdict. `--json` for machines.
+
 ## Architecture notes (what I took from pi, and where I cut)
 
 **Kept — it's load-bearing:**
@@ -248,6 +276,11 @@ src/
 │   ├── openai-completions.ts  the adapter (native + text tool protocols)
 │   ├── compat.ts              capability table + runtime fallback + learned modes
 │   └── models.ts              local-server discovery + provider presets + config
+├── hardware/                  (stolen from Magnitude, Apache-2.0)
+│   ├── profile.ts             sysctl/vm_stat + /proc: cpu, ram, gpus, bandwidth
+│   ├── catalog.ts             curated local-model catalog (params, MoE active, quants)
+│   ├── fit.ts                 fits/tight/no + tok/s estimate, reserves, unified memory
+│   └── report.ts              `rein hardware` renderer
 ├── agent/
 │   ├── agent-loop.ts          the loop (steering, parallel tools, hooks, safety)
 │   └── session.ts             JSONL sessions, branch, list
@@ -274,9 +307,10 @@ test/
 npm test          # node --experimental-strip-types test/smoke.ts
 ```
 
-Covers: JSON salvage (7), edit semantics (6), capability table (5), and three
-end-to-end pipelines against the mock server — native tools, text protocol,
-and broken-native → runtime fallback (the tool actually executes in each).
+Covers: JSON salvage (7), edit semantics (6), capability table (5),
+hardware profile + fit assessment (5), and three end-to-end pipelines against
+the mock server — native tools, text protocol, and broken-native → runtime
+fallback (the tool actually executes in each).
 
 ## Running under nodeterm
 
@@ -337,3 +371,6 @@ Simplicity bar: [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT).
 Completion discipline: [Leonxlnx/unlazy](https://github.com/Leonxlnx/unlazy)
 (MIT, vendored — the gate ledger and runnable oracles).
 Web layer: [TinyFish](https://www.tinyfish.ai) Search + Fetch APIs.
+Hardware fit: [magnitudedev/magnitude](https://github.com/magnitudedev/magnitude)
+(Apache-2.0 — concepts ported: hardware discovery, per-domain memory
+reserves, Fits/DoesNotFit assessment, MoE-aware catalog).
