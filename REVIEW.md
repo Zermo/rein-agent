@@ -9,8 +9,8 @@ This archive is a snapshot of the repo at its HEAD at packaging time (run `git l
 
 ## Run it (no install step)
 
-Requires Node ≥ 23.6 (native TypeScript type stripping; developed on v26.3.0).
-There is no `npm install` — `package.json` has no `dependencies` key, by design.
+Requires Node ≥ 23.6 (native TypeScript type stripping; developed on v26.3.0) — or just Node ≥ 18 for the installed CLI, which ships prebuilt (`dist/rein.js`).
+There is no `npm install` needed to run from source — `package.json` has no `dependencies` key, by design (esbuild is dev-only, for the publish-time bundle).
 
 ```sh
 node --experimental-strip-types test/smoke.ts     # 55 checks, fully offline (mock server)

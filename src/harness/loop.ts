@@ -63,7 +63,7 @@ export async function runExperimentLoop(opts: LoopOptions): Promise<void> {
 		throw new Error(`No ${taskFile} in ${cwd} — write what to improve, then re-run.`);
 	}
 	if (!existsSync(metricPath)) {
-		throw new Error(`No ${metricFile} in ${cwd} — put the metric command in a ``` fence and what METRIC= means, then re-run.`);
+		throw new Error(`No ${metricFile} in ${cwd} — put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
 	}
 
 	const task = readFileSync(taskPath, "utf8");

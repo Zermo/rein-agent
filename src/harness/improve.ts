@@ -15,8 +15,9 @@
  * karpathy/autoresearch with the harness as the target.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, appendFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { cpSync, existsSync, mkdtempSync, readFileSync, appendFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { cyan, dim, gray, green, red, yellow, bold } from "../util/ansi.ts";
@@ -25,7 +26,12 @@ import type { Runner } from "./runner.ts";
 import { buildImprovePrompt } from "./system-prompt.ts";
 import type { RunnerOptions } from "./runner.ts";
 
-const REIN_REPO = dirname(dirname(fileURLToPath(import.meta.url)));
+const here = dirname(fileURLToPath(import.meta.url));
+// Layout-agnostic repo root: <root>/src/harness when run from source, <root>/dist
+// in the bundled CLI. Find the directory that actually holds test/smoke.ts.
+const REIN_REPO =
+	[here, resolve(here, ".."), resolve(here, "..", "..")].find((dir) => existsSync(join(dir, "test", "smoke.ts"))) ??
+	resolve(here, "..", "..");
 
 export interface ImproveOptions extends RunnerOptions {
 	goal?: string;
@@ -47,15 +53,24 @@ function gitAvailable(cwd: string): boolean {
 }
 
 function runSmokeTest(repoDir: string): { pass: boolean; output: string } {
-	try {
-		const out = execFileSync("node", ["--experimental-strip-types", "test/smoke.ts"], {
-			cwd: repoDir,
+	const run = (dir: string): string =>
+		execFileSync("node", ["--experimental-strip-types", "test/smoke.ts"], {
+			cwd: dir,
 			encoding: "utf8",
 			timeout: 120_000,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
+	// Node refuses to type-strip .ts under node_modules, so a copy installed there
+	// must run the same test from a scratch copy outside node_modules (fresh source).
+	const underNodeModules = repoDir.split(/[\\/]/).includes("node_modules");
+	const dir = underNodeModules ? mkdtempSync(join(tmpdir(), "rein-smoke-")) : repoDir;
+	if (dir !== repoDir) for (const name of ["src", "test", "vendor"]) cpSync(join(repoDir, name), join(dir, name), { recursive: true });
+	try {
+		const out = run(dir);
+		if (dir !== repoDir) rmSync(dir, { recursive: true, force: true });
 		return { pass: true, output: out };
 	} catch (err: any) {
+		if (dir !== repoDir) rmSync(dir, { recursive: true, force: true });
 		return { pass: false, output: `${err.stdout ?? ""}${err.stderr ?? ""}` };
 	}
 }

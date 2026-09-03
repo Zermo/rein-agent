@@ -9,6 +9,10 @@ The `## harness` section is read by `rein improve` as its work queue.
 
 ## harness
 
+- [setup] Node refuses to type-strip .ts under node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) — a bin that imports src/*.ts installs but crashes on first run. Ship a prebuilt bundle (esbuild → dist/rein.js, committed + rebuilt in prepare) as the published bin; keep the .ts dev entry for source runs
+- [setup] layout-sensitive paths (import.meta.url + ../.. to the repo) break when the same file is bundled elsewhere — resolve by probing for a known file (test/smoke.ts, vendor/unlazy/scripts/gate-check.mjs) instead of counting dirnames
+- [setup] a backtick inside a template literal (```` ``` ```` in an error message) is a hard syntax error Node and esbuild both reject — `rein loop` was unparseable until the message dropped the backticks
+- [setup] a copy installed under node_modules can't run its own TS smoke test — `rein improve` copies src/test/vendor to a scratch dir outside node_modules and runs the same test there (fresh source, no stale bundle)
 - [setup] improve loop's repo root was resolving to src/ — needs three dirnames from src/harness/
 - [setup] `-p "query"` was falling through to the REPL because flags.p was a string, not true — check presence, not truthiness
 - [setup] runner.run() must normalize string prompts to user messages; toOpenAIMessage returns undefined for unknown roles, which serializes as null and confuses providers
