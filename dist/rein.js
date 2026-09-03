@@ -196,7 +196,7 @@ function num(s) {
 }
 function appleBandwidth(cpuName) {
   for (const [re, gbs, kind] of APPLE_BANDWIDTH) {
-    if (re.test(cpuName)) return { gbs, note: kind === "estimate" ? "estimated from chip family" : "Apple published spec" };
+    if (re.test(cpuName)) return { gbs, note: kind === "estimate" ? "estimate" : "spec" };
   }
   return {};
 }
@@ -208,20 +208,28 @@ function parseSysctlKV(text) {
   }
   return out;
 }
-async function profileDarwin(fast) {
-  const sysctlOut = await sh("sysctl", ["-n", "hw.memsize", "hw.ncpu", "hw.physicalcpu", "machdep.cpu.brand_string"]);
-  const [memsize, ncpu, physicalcpu, cpuNameRaw] = sysctlOut.split("\n").map((s) => s.trim());
+async function profileDarwin() {
+  const key = async (k) => {
+    try {
+      return (await sh("sysctl", ["-n", k])).trim();
+    } catch {
+      return void 0;
+    }
+  };
+  const [memsize, ncpu, physicalcpu, cpuNameRaw] = await Promise.all([
+    key("hw.memsize"),
+    key("hw.ncpu"),
+    key("hw.physicalcpu"),
+    key("machdep.cpu.brand_string")
+  ]);
   const cpuName = cpuNameRaw || "Apple CPU";
   const cores = num(ncpu) ?? 0;
   const physical = num(physicalcpu) ?? cores;
   const total = num(memsize) ?? 0;
   const features = [];
-  for (const [key, feat] of [["hw.optional.avx2_512", "avx2"], ["hw.optional.avx512f", "avx512"]]) {
-    try {
-      if (await sh("sysctl", ["-n", key]) === "1") features.push(feat);
-    } catch {
-    }
-  }
+  const cpuFeatures = await key("machdep.cpu.features") ?? "";
+  if (/\bAVX2\b/i.test(cpuFeatures)) features.push("avx2");
+  if (/\bAVX512F\b/i.test(cpuFeatures)) features.push("avx512");
   let available = total;
   try {
     const vmText = await sh("vm_stat", []);
@@ -235,28 +243,26 @@ async function profileDarwin(fast) {
   }
   const gpus = [];
   let unified = true;
-  let bw = {};
-  if (!fast) {
-    try {
-      const text = await sh("system_profiler", ["SPDisplaysDataType", "-json"]);
-      const json = JSON.parse(text);
-      const items = json?.SPDisplaysDataType ?? [];
-      for (const item of items) {
-        const gpu = item._items?.[0];
-        if (!gpu) continue;
-        const name = gpu["_name"] ?? gpu["chipset-model"] ?? gpu["chip-model"] ?? "Apple GPU";
-        const vram = num(gpu["vram-total"]);
-        if (vram) {
-          gpus.push({ name, vramTotalBytes: vram * 1024 ** 2 });
-          unified = false;
-        } else {
-          gpus.push({ name });
-        }
+  let bw2 = {};
+  try {
+    const text = await sh("system_profiler", ["SPDisplaysDataType", "-json"]);
+    const json = JSON.parse(text);
+    const items = json?.SPDisplaysDataType ?? [];
+    for (const item of items) {
+      const gpu = item._items?.[0] ?? item;
+      if (!gpu) continue;
+      const name = gpu["_name"] ?? gpu["chipset-model"] ?? gpu["chip-model"] ?? "Apple GPU";
+      const vram = num(gpu["vram-total"]) ?? num(gpu["spdisplays_vram"]);
+      if (vram) {
+        gpus.push({ name, vramTotalBytes: vram * 1024 ** 2 });
+        unified = false;
+      } else {
+        gpus.push({ name });
       }
-    } catch {
     }
+  } catch {
   }
-  bw = appleBandwidth(cpuName);
+  bw2 = appleBandwidth(cpuName);
   return {
     os: `darwin ${process.env.DARWIN_VERSION ?? ""}`.trim(),
     arch: process.arch,
@@ -264,11 +270,11 @@ async function profileDarwin(fast) {
     ram: { totalBytes: total, availableBytes: Math.min(available, total) },
     gpus,
     unifiedMemory: unified,
-    memBandwidthGBs: bw.gbs,
-    bandwidthNote: bw.note
+    memBandwidthGBs: bw2.gbs,
+    bandwidthNote: bw2.note
   };
 }
-async function profileLinux(fast) {
+async function profileLinux() {
   const read = async (p) => {
     try {
       const { readFile } = await import("node:fs/promises");
@@ -279,27 +285,34 @@ async function profileLinux(fast) {
   };
   const meminfo = parseSysctlKV(await read("/proc/meminfo") ?? "");
   const total = (num(meminfo.MemTotal) ?? 0) * 1024;
-  const available = (num(meminfo.MemAvailable) ?? (num(meminfo.MemFree) ?? 0) * 1024) * 1024;
+  const availKB = num(meminfo.MemAvailable) ?? num(meminfo.MemFree) ?? 0;
+  const available = availKB * 1024;
   const cpuinfo = await read("/proc/cpuinfo") ?? "";
   const lines = cpuinfo.split("\n");
   const name = lines.map((l) => l.match(/model name\s*:\s*(.*)/)?.[1]).find(Boolean) ?? "Linux CPU";
-  const cores = lines.filter((l) => l.startsWith("processor")).length || (num(await sh("nproc", [])) ?? 0);
+  let cores = lines.filter((l) => l.startsWith("processor")).length;
+  if (cores === 0) {
+    try {
+      cores = num(await sh("nproc", [])) ?? 0;
+    } catch {
+    }
+  }
   const flagsLine = lines.map((l) => l.match(/^flags\s*:\s*(.*)/)?.[1]).find(Boolean) ?? "";
   const features = ["avx2", "avx512f", "avx512_bf16"].filter((f) => flagsLine.includes(f));
   const gpus = [];
-  let bw = {};
-  if (!fast) {
-    try {
-      const out = await sh("nvidia-smi", [
-        "--query-gpu=name,memory.total,memory.free",
-        "--format=csv,noheader,nounits"
-      ]);
-      for (const line of out.split("\n")) {
-        const [n, tot, free] = line.split(",").map((s) => s.trim());
-        if (n && tot) gpus.push({ name: n, vramTotalBytes: num(tot) * 1024 ** 2, vramFreeBytes: (num(free) ?? 0) * 1024 ** 2 });
-      }
-    } catch {
+  try {
+    const out = await sh("nvidia-smi", [
+      "--query-gpu=name,memory.total,memory.free",
+      "--format=csv,noheader,nounits"
+    ]);
+    for (const line of out.split("\n")) {
+      const parts = line.split(",").map((s) => s.trim());
+      if (parts.length < 3) continue;
+      const [n, tot, free] = parts;
+      const totB = num(tot);
+      if (n && totB) gpus.push({ name: n, vramTotalBytes: totB * 1024 ** 2, vramFreeBytes: (num(free) ?? 0) * 1024 ** 2 });
     }
+  } catch {
   }
   bw = {};
   return {
@@ -324,9 +337,9 @@ async function profileOther() {
     unifiedMemory: false
   };
 }
-async function profileHardware(opts = {}) {
-  if (process.platform === "darwin") return profileDarwin(!!opts.fast);
-  if (process.platform === "linux") return profileLinux(!!opts.fast);
+async function profileHardware() {
+  if (process.platform === "darwin") return profileDarwin();
+  if (process.platform === "linux") return profileLinux();
   return profileOther();
 }
 function gb(bytes, digits = 0) {
@@ -428,8 +441,9 @@ var init_catalog = __esm({
         params: 16310918144,
         contextLength: 131072,
         quants: [QUANTS.q4, QUANTS.q6],
-        ollama: "deepseek-coder-v2-lite:16b",
-        note: "128k context; MoE-lite, efficient for long sessions."
+        activeParams: 24e8,
+        ollama: "deepseek-coder-v2:16b",
+        note: "128k context; MoE (16.3B total, ~2.4B active) \u2014 fast for its size."
       },
       {
         id: "qwen3-30b-a3b",
@@ -447,7 +461,7 @@ var init_catalog = __esm({
         params: 21263125504,
         activeParams: 3558896128,
         contextLength: 131072,
-        quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.48 }],
+        quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.52 }],
         ollama: "gpt-oss:20b",
         note: "Open-weight 20B; 128k context, very fast (3.6B active)."
       },
@@ -462,7 +476,7 @@ var init_catalog = __esm({
       },
       {
         id: "mistral-small-24b",
-        name: "Mistral Small 3.1 24B",
+        name: "Mistral Small 3.2 24B",
         params: 24333378048,
         contextLength: 131072,
         quants: [QUANTS.q4, QUANTS.q6],
@@ -484,7 +498,7 @@ var init_catalog = __esm({
         params: 117172437504,
         activeParams: 5104399616,
         contextLength: 131072,
-        quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.48 }],
+        quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.52 }],
         ollama: "gpt-oss:120b",
         note: "Frontier-class in a 60\u201370 GB footprint; 5B active per token."
       }
@@ -495,6 +509,7 @@ var init_catalog = __esm({
 // src/hardware/fit.ts
 var fit_exports = {};
 __export(fit_exports, {
+  assessCatalog: () => assessCatalog,
   assessFit: () => assessFit,
   bestAssessment: () => bestAssessment,
   verdictMark: () => verdictMark
@@ -509,29 +524,31 @@ function assessFit(profile, model, quant) {
   const totalBytes = weightsBytes + kvBytes;
   const pools = [];
   if (profile.unifiedMemory) {
-    pools.push({ name: "unified", capacity: profile.ram.totalBytes, available: profile.ram.availableBytes });
+    pools.push({ name: "unified", capacity: profile.ram.totalBytes, available: Math.min(profile.ram.availableBytes, profile.ram.totalBytes) });
   } else {
     for (const g of profile.gpus) {
-      if (g.vramTotalBytes) pools.push({ name: "gpu", capacity: g.vramTotalBytes, available: g.vramFreeBytes ?? g.vramTotalBytes });
+      if (g.vramTotalBytes) pools.push({ name: "gpu", capacity: g.vramTotalBytes, available: Math.min(g.vramFreeBytes ?? g.vramTotalBytes, g.vramTotalBytes) });
     }
-    pools.push({ name: "ram", capacity: profile.ram.totalBytes, available: profile.ram.availableBytes });
+    pools.push({ name: "ram", capacity: profile.ram.totalBytes, available: Math.min(profile.ram.availableBytes, profile.ram.totalBytes) });
   }
   let verdict = "no";
   let placement = "ram";
+  let usedReserve = 0;
   for (const pool of pools) {
     const reserve = reserveFor(pool.capacity);
     if (totalBytes + reserve <= pool.available) {
-      verdict = verdict === "no" ? "fits" : verdict;
+      verdict = "fits";
       placement = pool.name;
+      usedReserve = reserve;
       if (pool.name === "gpu" || pool.name === "unified") break;
     } else if (verdict === "no" && totalBytes + reserve <= pool.capacity * 0.95) {
       verdict = "tight";
       placement = pool.name;
+      usedReserve = reserve;
     }
   }
   const estTokS = profile.memBandwidthGBs && verdict !== "no" ? Math.round(profile.memBandwidthGBs * 1e9 / (active2 * quant.bytesPerWeight) * EFFICIENCY) : void 0;
-  const where = placement === "unified" ? `${gb(profile.ram.totalBytes)} unified` : placement === "gpu" ? `${gb(profile.gpus.find((g) => g.vramTotalBytes)?.vramTotalBytes ?? 0)} VRAM` : `${gb(profile.ram.totalBytes)} RAM`;
-  const estimate = `weights ${gb(totalBytes - kvBytes)} + KV ~${gb(kvBytes)} @ ${PLAN_CONTEXT / 1024}k ctx, after ${gb(reserveFor(pools[0]?.capacity ?? 8 * GiB2))} reserve`;
+  const estimate = `weights ${gb(totalBytes - kvBytes)} + KV ~${gb(kvBytes)} @ ${PLAN_CONTEXT / 1024}k ctx, after ${gb(usedReserve || reserveFor(8 * GiB2))} reserve`;
   return {
     model,
     quant,
@@ -543,6 +560,10 @@ function assessFit(profile, model, quant) {
     estTokS,
     estimate
   };
+}
+async function assessCatalog() {
+  const profile = await profileHardware();
+  return { profile, all: CATALOG.map((m) => ({ model: m, a: bestAssessment(profile, m) })) };
 }
 function bestAssessment(profile, model) {
   const ranked = model.quants.map((q) => assessFit(profile, model, q)).sort((a, b) => {
@@ -560,11 +581,33 @@ function verdictMark(a) {
 var GiB2, PLAN_CONTEXT, KV_PER_PARAM, EFFICIENCY;
 var init_fit = __esm({
   "src/hardware/fit.ts"() {
+    init_catalog();
     init_profile();
     GiB2 = 1024 ** 3;
     PLAN_CONTEXT = 16384;
     KV_PER_PARAM = 0.045;
     EFFICIENCY = 0.55;
+  }
+});
+
+// src/util/ansi.ts
+function wrap(open, close) {
+  return (text) => enabled ? `\x1B[${open}m${text}\x1B[${close}m` : text;
+}
+var enabled, bold, dim, italic, red, green, yellow, blue, magenta, cyan, gray;
+var init_ansi = __esm({
+  "src/util/ansi.ts"() {
+    enabled = process.stdout.isTTY && !("NO_COLOR" in process.env);
+    bold = wrap(1, 22);
+    dim = wrap(2, 22);
+    italic = wrap(3, 23);
+    red = wrap(31, 39);
+    green = wrap(32, 39);
+    yellow = wrap(33, 39);
+    blue = wrap(34, 39);
+    magenta = wrap(35, 39);
+    cyan = wrap(36, 39);
+    gray = wrap(90, 39);
   }
 });
 
@@ -574,8 +617,7 @@ __export(report_exports, {
   printHardwareReport: () => printHardwareReport
 });
 async function printHardwareReport(opts = {}) {
-  const profile = await profileHardware();
-  const assessments = CATALOG.map((m) => ({ model: m, a: bestAssessment(profile, m) }));
+  const { profile, all: assessments } = await assessCatalog();
   const fits = assessments.filter((x) => x.a.verdict === "fits");
   const tight = assessments.filter((x) => x.a.verdict === "tight");
   const no = assessments.filter((x) => x.a.verdict === "no");
@@ -611,15 +653,11 @@ async function printHardwareReport(opts = {}) {
     );
     return 0;
   }
-  const bold2 = (s) => `\x1B[1m${s}\x1B[0m`;
-  const dim2 = (s) => `\x1B[2m${s}\x1B[0m`;
-  const green2 = (s) => `\x1B[32m${s}\x1B[0m`;
-  const yellow3 = (s) => `\x1B[33m${s}\x1B[0m`;
-  const red2 = (s) => `\x1B[31m${s}\x1B[0m`;
-  console.log(bold2("rein hardware"));
+  console.log(bold("rein hardware"));
   console.log(`  ${profile.cpu.name} \xB7 ${profile.cpu.cores} cores${profile.cpu.features.length ? ` (${profile.cpu.features.join(", ")})` : ""}`);
+  const bwLine = profile.memBandwidthGBs ? ` \xB7 ~${profile.memBandwidthGBs} GB/s${profile.bandwidthNote === "estimate" ? " (est)" : ""}` : "";
   console.log(
-    profile.unifiedMemory ? `  ${gb(profile.ram.totalBytes)} unified memory (${gb(profile.ram.availableBytes)} available)${profile.memBandwidthGBs ? ` \xB7 ~${profile.memBandwidthGBs} GB/s${profile.bandwidthNote === "estimate" ? " (est)" : ""}` : ""}` : `  ${gb(profile.ram.totalBytes)} RAM (${gb(profile.ram.availableBytes)} available)${profile.memBandwidthGBs ? ` \xB7 ~${profile.memBandwidthGBs} GB/s` : ""}`
+    profile.unifiedMemory ? `  ${gb(profile.ram.totalBytes)} unified memory (${gb(profile.ram.availableBytes)} available)${bwLine}` : `  ${gb(profile.ram.totalBytes)} RAM (${gb(profile.ram.availableBytes)} available)${bwLine}`
   );
   for (const g of profile.gpus) {
     if (g.vramTotalBytes) console.log(`  ${g.name} \xB7 ${gb(g.vramTotalBytes)} VRAM${g.vramFreeBytes != null ? ` (${gb(g.vramFreeBytes)} free)` : ""}`);
@@ -629,38 +667,39 @@ async function printHardwareReport(opts = {}) {
   const row = (x) => {
     const m = x.model;
     const moe = m.activeParams ? ` \xB7 ${Math.round(m.activeParams / 1e9)}B active` : "";
-    const mark = x.a.verdict === "fits" ? green2(verdictMark(x.a)) : x.a.verdict === "tight" ? yellow3(verdictMark(x.a)) : red2(verdictMark(x.a));
-    const get = m.ollama ? `  ${dim2("ollama pull " + m.ollama)}` : "";
-    console.log(`  ${mark.padEnd(14)} ${m.name.padEnd(26)} ${Math.round(m.params / 1e9)}B${moe.padEnd(16)} ${x.a.quant.label.padEnd(8)} ${dim2(x.a.placement)}${get}`);
+    const markPlain = verdictMark(x.a).padEnd(14);
+    const mark = x.a.verdict === "fits" ? green(markPlain) : x.a.verdict === "tight" ? yellow(markPlain) : red(markPlain);
+    const get = m.ollama ? `  ${dim("ollama pull " + m.ollama)}` : "";
+    console.log(`  ${mark} ${m.name.padEnd(26)} ${Math.round(m.params / 1e9)}B${moe.padEnd(16)} ${x.a.quant.label.padEnd(8)} ${dim(x.a.placement)}${get}`);
   };
   if (fits.length > 0) {
-    console.log(bold2(`what you can run (${fits.length})`));
+    console.log(bold(`what you can run (${fits.length})`));
     fits.sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.model.params - a.model.params).forEach(row);
   }
   if (tight.length > 0) {
     console.log("");
-    console.log(bold2("tight \u2014 fits only if other memory hogs are closed"));
+    console.log(bold("tight \u2014 fits only if other memory hogs are closed"));
     tight.forEach(row);
   }
   if (no.length > 0) {
     console.log("");
-    console.log(dim2(`out of reach: ${no.map((x) => x.model.name).join(", ")}`));
+    console.log(dim(`out of reach: ${no.map((x) => x.model.name).join(", ")}`));
   }
   if (fits.length > 0) {
     const best = fits[0];
     console.log("");
-    console.log(`best pick: ${bold2(best.model.name)}`);
+    console.log(`best pick: ${bold(best.model.name)}`);
     if (best.model.ollama) console.log(`  ollama pull ${best.model.ollama}`);
-    console.log(`  ${dim2(best.a.estimate)}`);
+    console.log(`  ${dim(best.a.estimate)}`);
   }
   console.log("");
-  console.log(dim2("estimates: footprint = weights + KV @ 16k ctx, 10%/2GiB reserve; tok/s = bandwidth \xD7 efficiency \u2014 directional, not a benchmark"));
-  console.log(dim2(`summary: ${summarizeHardware(profile)}`));
+  console.log(dim("estimates: footprint = weights + KV @ 16k ctx, 10%/2GiB reserve; tok/s = bandwidth \xD7 efficiency \u2014 directional, not a benchmark"));
+  console.log(dim(`summary: ${summarizeHardware(profile)}`));
   return 0;
 }
 var init_report = __esm({
   "src/hardware/report.ts"() {
-    init_catalog();
+    init_ansi();
     init_fit();
     init_profile();
   }
@@ -769,13 +808,14 @@ async function askSecret(prompt) {
 async function fitMarks(ids) {
   const out = /* @__PURE__ */ new Map();
   try {
-    const { profileHardware: profileHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
     const { matchCatalog: matchCatalog2 } = await Promise.resolve().then(() => (init_catalog(), catalog_exports));
-    const { bestAssessment: bestAssessment2, verdictMark: verdictMark2 } = await Promise.resolve().then(() => (init_fit(), fit_exports));
-    const profile = await profileHardware2({ fast: true });
+    const { assessCatalog: assessCatalog2, verdictMark: verdictMark2 } = await Promise.resolve().then(() => (init_fit(), fit_exports));
+    const { all } = await assessCatalog2();
     for (const id of ids) {
       const cm = matchCatalog2(id);
-      if (cm) out.set(id, verdictMark2(bestAssessment2(profile, cm)));
+      if (!cm) continue;
+      const hit = all.find((x) => x.model.id === cm.id);
+      if (hit) out.set(id, verdictMark2(hit.a));
     }
   } catch {
   }
@@ -838,7 +878,7 @@ async function runSetup(opts) {
   console.log(C.bold("rein setup") + " \u2014 configure your model\n");
   try {
     const { profileHardware: profileHardware2, summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-    console.log(C.dim(`machine: ${summarizeHardware2(await profileHardware2({ fast: true }))}`) + "\n");
+    console.log(C.dim(`machine: ${summarizeHardware2(await profileHardware2())}`) + "\n");
   } catch {
   }
   const servers = await discoverLocalServers();
@@ -960,27 +1000,6 @@ var init_setup = __esm({
     lineQueue = [];
     inputClosed = false;
     manualClose = false;
-  }
-});
-
-// src/util/ansi.ts
-function wrap(open, close) {
-  return (text) => enabled ? `\x1B[${open}m${text}\x1B[${close}m` : text;
-}
-var enabled, bold, dim, italic, red, green, yellow, blue, magenta, cyan, gray;
-var init_ansi = __esm({
-  "src/util/ansi.ts"() {
-    enabled = process.stdout.isTTY && !("NO_COLOR" in process.env);
-    bold = wrap(1, 22);
-    dim = wrap(2, 22);
-    italic = wrap(3, 23);
-    red = wrap(31, 39);
-    green = wrap(32, 39);
-    yellow = wrap(33, 39);
-    blue = wrap(34, 39);
-    magenta = wrap(35, 39);
-    cyan = wrap(36, 39);
-    gray = wrap(90, 39);
   }
 });
 
@@ -3577,16 +3596,15 @@ init_models();
 import { readFileSync as readFileSync11 } from "node:fs";
 async function printHardwareSection() {
   try {
-    const { profileHardware: profileHardware2, summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-    const { CATALOG: CATALOG2 } = await Promise.resolve().then(() => (init_catalog(), catalog_exports));
-    const { bestAssessment: bestAssessment2, verdictMark: verdictMark2 } = await Promise.resolve().then(() => (init_fit(), fit_exports));
-    const profile = await profileHardware2({ fast: true });
-    const ranked = CATALOG2.map((m) => ({ m, a: bestAssessment2(profile, m) })).filter((x) => x.a.verdict !== "no").sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.m.params - a.m.params).slice(0, 5);
+    const { summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    const { assessCatalog: assessCatalog2 } = await Promise.resolve().then(() => (init_fit(), fit_exports));
+    const { profile, all } = await assessCatalog2();
+    const ranked = all.filter((x) => x.a.verdict !== "no").sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.model.params - a.model.params).slice(0, 5);
     if (ranked.length === 0) return;
     console.log("\nyour machine:");
     console.log(`  ${summarizeHardware2(profile)}`);
     console.log("top local picks (see `rein hardware` for the full table):");
-    for (const { m, a } of ranked) {
+    for (const { model: m, a } of ranked) {
       const mark = a.verdict === "fits" ? `~${a.estTokS ?? "?"} tok/s` : "tight";
       console.log(`  ${m.name.padEnd(28)} ${String(mark).padEnd(12)} ${m.ollama ?? ""}`);
     }
@@ -3607,6 +3625,7 @@ Usage:
   rein                          start an interactive session in this directory
   rein -p, --print "query"      one-shot: run the query, print the answer, exit
   rein -p "query" --json        one-shot, raw event stream (JSON lines)
+  rein -p "query" --save        one-shot, persist the session (resume with --resume <id>)
   rein loop                     autonomous experiment loop (needs TASK.md + METRIC.md)
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)

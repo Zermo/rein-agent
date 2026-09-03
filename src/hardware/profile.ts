@@ -67,7 +67,7 @@ const APPLE_BANDWIDTH: Array<[RegExp, number, string]> = [
 
 function appleBandwidth(cpuName: string): { gbs?: number; note?: string } {
 	for (const [re, gbs, kind] of APPLE_BANDWIDTH) {
-		if (re.test(cpuName)) return { gbs, note: kind === "estimate" ? "estimated from chip family" : "Apple published spec" };
+		if (re.test(cpuName)) return { gbs, note: kind === "estimate" ? "estimate" : "spec" };
 	}
 	return {};
 }
@@ -81,23 +81,33 @@ function parseSysctlKV(text: string): Record<string, string> {
 	return out;
 }
 
-async function profileDarwin(fast: boolean): Promise<HardwareProfile> {
-	// `sysctl -n k1 k2…` prints the values, in order, one per line
-	const sysctlOut = await sh("sysctl", ["-n", "hw.memsize", "hw.ncpu", "hw.physicalcpu", "machdep.cpu.brand_string"]);
-	const [memsize, ncpu, physicalcpu, cpuNameRaw] = sysctlOut.split("\n").map((s) => s.trim());
+async function profileDarwin(): Promise<HardwareProfile> {
+	// `sysctl -n k1 k2…` prints values in order, one per line — but one missing
+	// oid makes the whole call exit non-zero and reject. Run each key separately.
+	const key = async (k: string): Promise<string | undefined> => {
+		try {
+			return (await sh("sysctl", ["-n", k])).trim();
+		} catch {
+			return undefined;
+		}
+	};
+	const [memsize, ncpu, physicalcpu, cpuNameRaw] = await Promise.all([
+		key("hw.memsize"),
+		key("hw.ncpu"),
+		key("hw.physicalcpu"),
+		key("machdep.cpu.brand_string"),
+	]);
 	const cpuName = cpuNameRaw || "Apple CPU";
 	const cores = num(ncpu) ?? 0;
 	const physical = num(physicalcpu) ?? cores;
 	const total = num(memsize) ?? 0;
 
+	// macOS reports CPU features as a token string ("AVX2 AVX FMA …"), not the
+	// Linux-style hw.optional.* oids — parse that (arm chips simply don't list AVX).
 	const features: string[] = [];
-	for (const [key, feat] of [["hw.optional.avx2_512", "avx2"], ["hw.optional.avx512f", "avx512"]] as const) {
-		try {
-			if ((await sh("sysctl", ["-n", key])) === "1") features.push(feat);
-		} catch {
-			// feature doesn't exist on this chip (e.g. arm has no avx oids) — fine
-		}
-	}
+	const cpuFeatures = (await key("machdep.cpu.features")) ?? "";
+	if (/\bAVX2\b/i.test(cpuFeatures)) features.push("avx2");
+	if (/\bAVX512F\b/i.test(cpuFeatures)) features.push("avx512");
 
 	// Available RAM: free + inactive + speculative pages (the reclaimable pool)
 	let available = total;
@@ -116,16 +126,17 @@ async function profileDarwin(fast: boolean): Promise<HardwareProfile> {
 	const gpus: GpuInfo[] = [];
 	let unified = true; // Apple Silicon defaults: built-in GPU on a shared pool
 	let bw: { gbs?: number; note?: string } = {};
-	if (!fast) {
-		try {
-			const text = await sh("system_profiler", ["SPDisplaysDataType", "-json"]);
+	try {
+		const text = await sh("system_profiler", ["SPDisplaysDataType", "-json"]);
 			const json = JSON.parse(text) as any;
 			const items = json?.SPDisplaysDataType ?? [];
 			for (const item of items) {
-				const gpu = item._items?.[0];
+				// macOS JSON shape varies: some versions nest the GPU under _items[0],
+				// others put the detail keys directly on the group object.
+				const gpu = item._items?.[0] ?? item;
 				if (!gpu) continue;
 				const name = gpu["_name"] ?? gpu["chipset-model"] ?? gpu["chip-model"] ?? "Apple GPU";
-				const vram = num(gpu["vram-total"]);
+				const vram = num(gpu["vram-total"]) ?? num(gpu["spdisplays_vram"]);
 				if (vram) {
 					gpus.push({ name, vramTotalBytes: vram * 1024 ** 2 });
 					unified = false;
@@ -133,9 +144,8 @@ async function profileDarwin(fast: boolean): Promise<HardwareProfile> {
 					gpus.push({ name });
 				}
 			}
-		} catch {
-			// system_profiler failed: keep defaults (unified, no discrete VRAM)
-		}
+	} catch {
+		// system_profiler failed: keep defaults (unified, no discrete VRAM)
 	}
 	bw = appleBandwidth(cpuName);
 
@@ -151,7 +161,7 @@ async function profileDarwin(fast: boolean): Promise<HardwareProfile> {
 	};
 }
 
-async function profileLinux(fast: boolean): Promise<HardwareProfile> {
+async function profileLinux(): Promise<HardwareProfile> {
 	const read = async (p: string): Promise<string | undefined> => {
 		try {
 			const { readFile } = await import("node:fs/promises");
@@ -162,30 +172,38 @@ async function profileLinux(fast: boolean): Promise<HardwareProfile> {
 	};
 	const meminfo = parseSysctlKV((await read("/proc/meminfo")) ?? "");
 	const total = (num(meminfo.MemTotal) ?? 0) * 1024;
-	const available = (num(meminfo.MemAvailable) ?? (num(meminfo.MemFree) ?? 0) * 1024) * 1024;
+	const availKB = num(meminfo.MemAvailable) ?? num(meminfo.MemFree) ?? 0;
+	const available = availKB * 1024;
 
 	const cpuinfo = (await read("/proc/cpuinfo")) ?? "";
 	const lines = cpuinfo.split("\n");
 	const name = lines.map((l) => l.match(/model name\s*:\s*(.*)/)?.[1]).find(Boolean) ?? "Linux CPU";
-	const cores = lines.filter((l) => l.startsWith("processor")).length || (num((await sh("nproc", []))) ?? 0);
+	let cores = lines.filter((l) => l.startsWith("processor")).length;
+	if (cores === 0) {
+		try {
+			cores = num(await sh("nproc", [])) ?? 0;
+		} catch {
+			// no nproc either — leave 0
+		}
+	}
 	const flagsLine = lines.map((l) => l.match(/^flags\s*:\s*(.*)/)?.[1]).find(Boolean) ?? "";
 	const features = ["avx2", "avx512f", "avx512_bf16"].filter((f) => flagsLine.includes(f));
 
 	const gpus: GpuInfo[] = [];
-	let bw: { gbs?: number; note?: string } = {};
-	if (!fast) {
-		try {
-			const out = await sh("nvidia-smi", [
-				"--query-gpu=name,memory.total,memory.free",
-				"--format=csv,noheader,nounits",
-			]);
-			for (const line of out.split("\n")) {
-				const [n, tot, free] = line.split(",").map((s) => s.trim());
-				if (n && tot) gpus.push({ name: n, vramTotalBytes: num(tot) * 1024 ** 2, vramFreeBytes: (num(free) ?? 0) * 1024 ** 2 });
-			}
-		} catch {
-			// no nvidia-smi (or no NVIDIA GPU)
+	try {
+		const out = await sh("nvidia-smi", [
+			"--query-gpu=name,memory.total,memory.free",
+			"--format=csv,noheader,nounits",
+		]);
+		for (const line of out.split("\n")) {
+			const parts = line.split(",").map((s) => s.trim());
+			if (parts.length < 3) continue; // malformed row (e.g. comma in a GPU name) — skip, don't misparse
+			const [n, tot, free] = parts;
+			const totB = num(tot);
+			if (n && totB) gpus.push({ name: n, vramTotalBytes: totB * 1024 ** 2, vramFreeBytes: (num(free) ?? 0) * 1024 ** 2 });
 		}
+	} catch {
+		// no nvidia-smi (or no NVIDIA GPU)
 	}
 	// Dimm-speed heuristics are too machine-specific to trust; report what we know.
 	bw = {};
@@ -214,13 +232,11 @@ async function profileOther(): Promise<HardwareProfile> {
 	};
 }
 
-/**
- * Profile the machine. `fast` skips slow probes (system_profiler / nvidia-smi)
- * for interactive paths; the full profile is used by `rein hardware`.
- */
-export async function profileHardware(opts: { fast?: boolean } = {}): Promise<HardwareProfile> {
-	if (process.platform === "darwin") return profileDarwin(!!opts.fast);
-	if (process.platform === "linux") return profileLinux(!!opts.fast);
+/** Profile the machine. All probes are cheap (<0.5s) and the GPU data affects
+ * the fit verdict, so nothing is skipped. */
+export async function profileHardware(): Promise<HardwareProfile> {
+	if (process.platform === "darwin") return profileDarwin();
+	if (process.platform === "linux") return profileLinux();
 	return profileOther();
 }
 

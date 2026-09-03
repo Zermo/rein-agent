@@ -67,7 +67,7 @@ build step and no devDependencies. To rebuild the bundle after changing
 source: `npm install && npm run bundle` (esbuild, dev-only).
 The compatibility commands `rein-agent` and `rein` point to the same CLI.
 
-Developing from source: `npm install && npm test` (60 checks, offline).
+Developing from source: `npm install && npm test` (63 checks, offline).
 
 ```sh
 # local (the default):
@@ -204,13 +204,22 @@ one pool) and reserves before a model may claim memory (`max(pool/10, 2 GiB)`).
 ```
 rein hardware
   Apple M5 Pro · 18 cores
-  48 GB unified memory (23 GB available) · ~307 GB/s
-  what you can run (6)
-  ✓ ~99 tok/s  GPT-OSS 20B (MoE)   21B · 4B active   MXFP4    unified
-  ✓ ~38 tok/s  Qwen2.5-Coder 7B    8B                Q4_K_M   unified
+  48 GB unified memory (26 GB available) · ~307 GB/s (est)
+
+  what you can run (7)
+  ✓ ~121 tok/s  DeepSeek Coder V2 Lite 16B  16B · 2B active  Q4_K_M  unified
+  ✓ ~91 tok/s   GPT-OSS 20B (MoE)           21B · 4B active  MXFP4   unified
+  ✓ ~38 tok/s   Qwen2.5-Coder 7B            8B               Q4_K_M  unified
   ...
   tight — fits only if other memory hogs are closed
+  △ tight  Qwen3 30B-A3B (MoE)   31B · 3B active  Q4_K_M  unified
+  △ tight  Qwen2.5-Coder 32B     33B              Q4_K_M  unified
+
   out of reach: GPT-OSS 120B (MoE)
+
+  best pick: DeepSeek Coder V2 Lite 16B
+    ollama pull deepseek-coder-v2:16b
+    weights 9 GB + KV ~3 GB @ 16k ctx, after 5 GB reserve
 ```
 
 The math is deliberately visible and rough: footprint = weights

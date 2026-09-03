@@ -11,8 +11,8 @@
  *   verdict   = footprint vs the memory pool(s), after reserves
  *   speed     = bandwidth / bytes-per-token (MoE: active params only)
  */
-import { type CatalogModel, type CatalogQuant } from "./catalog.ts";
-import { gb, type HardwareProfile } from "./profile.ts";
+import { CATALOG, type CatalogModel, type CatalogQuant } from "./catalog.ts";
+import { gb, profileHardware, type HardwareProfile } from "./profile.ts";
 
 const GiB = 1024 ** 3;
 /** Context we plan against (agent sessions, not 128k novels). */
@@ -46,30 +46,35 @@ function reserveFor(poolBytes: number): number {
 export function assessFit(profile: HardwareProfile, model: CatalogModel, quant: CatalogQuant): FitAssessment {
 	const active = model.activeParams ?? model.params;
 	const weightsBytes = model.params * quant.bytesPerWeight * 1.05; // +5% embeddings/layers overhead
+	// KV scales with layers, not total params — using total params over-counts MoE by
+	// 3-5× (conservative: costs headroom, flips fits→tight). Deliberate.
 	const kvBytes = model.params * KV_PER_PARAM * (PLAN_CONTEXT / 4096);
 	const totalBytes = weightsBytes + kvBytes;
 
 	const pools: Array<{ name: "gpu" | "unified" | "ram"; capacity: number; available: number }> = [];
 	if (profile.unifiedMemory) {
-		pools.push({ name: "unified", capacity: profile.ram.totalBytes, available: profile.ram.availableBytes });
+		pools.push({ name: "unified", capacity: profile.ram.totalBytes, available: Math.min(profile.ram.availableBytes, profile.ram.totalBytes) });
 	} else {
 		for (const g of profile.gpus) {
-			if (g.vramTotalBytes) pools.push({ name: "gpu", capacity: g.vramTotalBytes, available: g.vramFreeBytes ?? g.vramTotalBytes });
+			if (g.vramTotalBytes) pools.push({ name: "gpu", capacity: g.vramTotalBytes, available: Math.min(g.vramFreeBytes ?? g.vramTotalBytes, g.vramTotalBytes) });
 		}
-		pools.push({ name: "ram", capacity: profile.ram.totalBytes, available: profile.ram.availableBytes });
+		pools.push({ name: "ram", capacity: profile.ram.totalBytes, available: Math.min(profile.ram.availableBytes, profile.ram.totalBytes) });
 	}
 
 	let verdict: FitAssessment["verdict"] = "no";
 	let placement: FitAssessment["placement"] = "ram";
+	let usedReserve = 0; // the reserve of the pool that decided the verdict (for the estimate line)
 	for (const pool of pools) {
 		const reserve = reserveFor(pool.capacity);
 		if (totalBytes + reserve <= pool.available) {
-			verdict = verdict === "no" ? "fits" : verdict;
+			verdict = "fits"; // a later pool that fits overrides an earlier "tight" (e.g. VRAM tight, RAM fine)
 			placement = pool.name;
+			usedReserve = reserve;
 			if (pool.name === "gpu" || pool.name === "unified") break; // GPU-resident wins; stop looking
 		} else if (verdict === "no" && totalBytes + reserve <= pool.capacity * 0.95) {
 			verdict = "tight"; // fits only if you close other memory hogs
 			placement = pool.name;
+			usedReserve = reserve;
 		}
 	}
 
@@ -78,11 +83,7 @@ export function assessFit(profile: HardwareProfile, model: CatalogModel, quant: 
 			? Math.round(((profile.memBandwidthGBs * 1e9) / (active * quant.bytesPerWeight)) * EFFICIENCY)
 			: undefined;
 
-	const where =
-		placement === "unified" ? `${gb(profile.ram.totalBytes)} unified`
-			: placement === "gpu" ? `${gb(profile.gpus.find((g) => g.vramTotalBytes)?.vramTotalBytes ?? 0)} VRAM`
-				: `${gb(profile.ram.totalBytes)} RAM`;
-	const estimate = `weights ${gb(totalBytes - kvBytes)} + KV ~${gb(kvBytes)} @ ${PLAN_CONTEXT / 1024}k ctx, after ${gb(reserveFor(pools[0]?.capacity ?? 8 * GiB))} reserve`;
+	const estimate = `weights ${gb(totalBytes - kvBytes)} + KV ~${gb(kvBytes)} @ ${PLAN_CONTEXT / 1024}k ctx, after ${gb(usedReserve || reserveFor(8 * GiB))} reserve`;
 
 	return {
 		model,
@@ -95,6 +96,16 @@ export function assessFit(profile: HardwareProfile, model: CatalogModel, quant: 
 		estTokS,
 		estimate,
 	};
+}
+
+/** Profile the machine and assess every catalog model against it (shared by
+ * `rein hardware` and the `rein models` section). */
+export async function assessCatalog(): Promise<{
+	profile: HardwareProfile;
+	all: Array<{ model: CatalogModel; a: FitAssessment }>;
+}> {
+	const profile = await profileHardware();
+	return { profile, all: CATALOG.map((m) => ({ model: m, a: bestAssessment(profile, m) })) };
 }
 
 /** Rank a model's quants best-first for this machine (smallest that fits). */

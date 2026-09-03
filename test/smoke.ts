@@ -356,7 +356,7 @@ console.log("9. unlazy gates (vendored checker)");
 	const { profileHardware } = await import("../src/hardware/profile.ts");
 	const { CATALOG, matchCatalog } = await import("../src/hardware/catalog.ts");
 	const { bestAssessment } = await import("../src/hardware/fit.ts");
-	const hw = await profileHardware({ fast: true });
+	const hw = await profileHardware();
 	check("hardware: profile has cpu+ram", hw.cpu.cores > 0 && hw.ram.totalBytes > 0, JSON.stringify(hw.cpu));
 	if (process.platform === "darwin" && /Apple (M|A)/.test(hw.cpu.name)) {
 		check("hardware: darwin detects unified memory + bandwidth", hw.unifiedMemory === true && (hw.memBandwidthGBs ?? 0) >= 50, `${hw.memBandwidthGBs} GB/s`);
@@ -366,6 +366,25 @@ console.log("9. unlazy gates (vendored checker)");
 	check("hardware: catalog match finds exact + fuzzy ids", !!matchCatalog("qwen2.5-coder:7b") && !!matchCatalog("qwen2.5-coder:7b-instruct"), "");
 	// a 7B Q4 must never be "no" on a machine with 8GB+ RAM
 	if (hw.ram.totalBytes >= 8 * 1024 ** 3) check("hardware: 7B Q4 fits on 8GB+ machine", a.verdict !== "no", a.verdict);
+
+	// Fixture profiles: pin the fit arithmetic independent of this machine.
+	const GiB = 1024 ** 3;
+	const fixture = {
+		os: "test", cpu: { name: "Fixture", cores: 8, features: [] },
+		ram: { totalBytes: 16 * GiB, availableBytes: 14 * GiB },
+		gpus: [], unifiedMemory: false, memBandwidthGBs: 100,
+	};
+	const m7 = CATALOG.find((m) => m.id === "qwen2.5-coder-7b")!;
+	const m14 = CATALOG.find((m) => m.id === "qwen2.5-coder-14b")!;
+	const m120 = CATALOG.find((m) => m.id === "gpt-oss-120b")!;
+	const f7 = bestAssessment(fixture, m7);
+	check("hardware: fixture 16GB machine — 7B fits", f7.verdict === "fits", `${f7.verdict} ${Math.round(f7.totalBytes / GiB)}GiB`);
+	const f120 = bestAssessment(fixture, m120);
+	check("hardware: fixture 16GB machine — 120B out of reach", f120.verdict === "no", f120.verdict);
+	// P0 regression: a tight GPU pool must not mask a RAM pool that fits
+	const tightGpu = { ...fixture, gpus: [{ name: "RTX", vramTotalBytes: 16 * GiB, vramFreeBytes: 8 * GiB }] };
+	const f14 = bestAssessment(tightGpu, m14);
+	check("hardware: GPU tight + RAM fits → fits/ram (tight must not mask)", f14.verdict === "fits" && f14.placement === "ram", `${f14.verdict}/${f14.placement}`);
 }
 
 server.close();
