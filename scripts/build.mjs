@@ -1,6 +1,7 @@
 // Bundle the CLI into a single dependency-free ESM file: dist/rein.js.
 // Node refuses to type-strip .ts files under node_modules, so the installed
-// package ships plain JS. Runs on publish/install (prepare) and on demand.
+// package ships plain JS. Run with `npm run bundle` after source changes;
+// the built file is committed so installs never need to rebuild.
 import { build } from "esbuild";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
