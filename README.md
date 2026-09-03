@@ -47,8 +47,9 @@ npm install --global git+https://github.com/Zermo/rein-agent.git
 rein-agent
 ```
 
-Install from git rebuilds the bundle automatically (`prepare` script); the repo
-also commits `dist/`, so the install works even when devDependencies can't run.
+The CLI ships prebuilt (`dist/rein.js`, committed), so the install needs no
+build step and no devDependencies. To rebuild the bundle after changing
+source: `npm install && npm run bundle` (esbuild, dev-only).
 The compatibility commands `rein-agent` and `rein` point to the same CLI.
 
 Developing from source: `npm install && npm test` (55 checks, offline).

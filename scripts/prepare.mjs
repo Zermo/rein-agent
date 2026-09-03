@@ -1,6 +1,5 @@
-// npm lifecycle hook: runs on git install, npm publish, and local npm install.
-// Rebuilds dist/rein.js when esbuild is available; otherwise keeps the
-// committed build, so the package installs even without devDependencies.
+// Rebuilds dist/rein.js (the committed build is the fallback for installs
+// where esbuild can't run). Run manually: node scripts/build.mjs
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
