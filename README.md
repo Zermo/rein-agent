@@ -22,7 +22,7 @@ Built by studying two codebases:
   every provider quirk), and its `packages/agent` proves the loop is just:
   stream → run tools (parallel) → repeat, with steering queues, hooks, and
   truncation safety. rein rebuilds both layers from scratch in ~4,300 lines
-  of its own code (plus 2.5k lines of vendored unlazy, MIT) with no dependencies, because "runs anywhere Node runs" is the point.
+  of its own code (plus 2.5k lines of vendored unlazy, MIT) with zero runtime dependencies, because "runs anywhere Node runs" is the point. (One dev-only tool, esbuild, bundles the CLI to plain JS at publish time — Node won't type-strip `.ts` under `node_modules`.)
 - **[karpathy/autoresearch](https://github.com/karpathy/autoresearch)** — the
   *loop* that runs an agent forever against one metric, keeping what improves
   and discarding what doesn't. rein encodes that twice: `rein loop` (any
@@ -34,7 +34,9 @@ or two.
 
 ## Requirements
 
-- Node ≥ 23.6 (native TypeScript type-stripping — no build step, no deps)
+- Node ≥ 18 for the installed CLI (ships prebuilt; zero runtime deps)
+- Node ≥ 23.6 (or ≥ 22.18) to develop from source or run the test suite
+  (native TypeScript type-stripping)
 - Any OpenAI-compatible server. Local ones are probed automatically in
   priority order: **Ollama** → **LM Studio** → **llama.cpp** → **vLLM**.
 
@@ -45,7 +47,11 @@ npm install --global git+https://github.com/Zermo/rein-agent.git
 rein-agent
 ```
 
+Install from git rebuilds the bundle automatically (`prepare` script); the repo
+also commits `dist/`, so the install works even when devDependencies can't run.
 The compatibility commands `rein-agent` and `rein` point to the same CLI.
+
+Developing from source: `npm install && npm test` (55 checks, offline).
 
 ```sh
 # local (the default):

@@ -1,12 +1,24 @@
 {
 	"name": "rein-agent",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "A minimal, local-first agent harness. System prompt + tools + agentic loop + translation layer, with self-hosted local AI as the default provider.",
 	"type": "module",
 	"bin": {
-		"rein-agent": "bin/rein.js",
-		"rein": "bin/rein.js"
+		"rein-agent": "dist/rein.js",
+		"rein": "dist/rein.js"
 	},
+	"files": [
+		"dist",
+		"bin",
+		"src",
+		"test",
+		"vendor",
+		"examples",
+		"AGENTS.md",
+		"GATES.md",
+		"LESSONS.md",
+		"REVIEW.md"
+	],
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/Zermo/rein-agent.git"
@@ -16,10 +28,12 @@
 	},
 	"homepage": "https://github.com/Zermo/rein-agent#readme",
 	"engines": {
-		"node": ">=23.6"
+		"node": ">=18"
 	},
 	"scripts": {
-		"test": "node test/smoke.ts"
+		"test": "node test/smoke.ts",
+		"build": "node scripts/build.mjs",
+		"prepare": "node scripts/prepare.mjs"
 	},
 	"keywords": [
 		"agent",
@@ -31,5 +45,8 @@
 		"coding-agent"
 	],
 	"license": "MIT",
-	"dependencies": {}
+	"dependencies": {},
+	"devDependencies": {
+		"esbuild": "^0.28.2"
+	}
 }

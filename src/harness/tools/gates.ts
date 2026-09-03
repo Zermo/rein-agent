@@ -28,7 +28,14 @@ import { truncateLines } from "../../util/truncate.ts";
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const UNLAZY_DIR = resolve(here, "..", "..", "..", "vendor", "unlazy");
+// Layout-agnostic: the vendored checker lives at <root>/vendor/unlazy. `here` is
+// <root>/src/harness/tools when run from source, <root>/dist in the bundled CLI.
+const UNLAZY_CANDIDATES = [
+	resolve(here, "..", "..", "..", "vendor", "unlazy"),
+	resolve(here, "..", "vendor", "unlazy"),
+];
+const UNLAZY_DIR =
+	UNLAZY_CANDIDATES.find((dir) => existsSync(join(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
 
 const MODES = new Set(["status", "approve", "reverify", "lint"]);
 
