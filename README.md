@@ -40,11 +40,26 @@ or two.
 - Any OpenAI-compatible server. Local ones are probed automatically in
   priority order: **Ollama** → **LM Studio** → **llama.cpp** → **vLLM**.
 
-## Install from GitHub
+## Install
+
+One-liner (macOS / Linux / WSL) — installs the harness and walks you through
+model setup (the openclaw / hermes style onboarding):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
+```
+
+Flags after `bash -s --`: `--skip-setup` (install only), `--yes` (no prompts).
+The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM)
+or cloud providers, tests the connection, and saves `~/.rein/config.json`.
+You can always re-run it: `rein setup` (`--yes` non-interactive,
+`--status` config + connection check).
+
+Or install manually:
 
 ```sh
 npm install --global git+https://github.com/Zermo/rein-agent.git
-rein-agent
+rein setup
 ```
 
 The CLI ships prebuilt (`dist/rein.js`, committed), so the install needs no
@@ -74,6 +89,8 @@ rein-agent loop               autonomous experiment loop (TASK.md + METRIC.md)
 rein-agent improve [goal]     self-improvement loop on this repo
 rein-agent gates [file] --mode m  unlazy gates: lint | status | approve | reverify
 rein-agent models             what rein can see: local servers + provider presets
+rein setup                    onboarding wizard (also: --yes, --status)
+rein --version                print version
 ```
 
 REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /quit`.

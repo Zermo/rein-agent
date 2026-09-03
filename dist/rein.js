@@ -177,6 +177,282 @@ var init_models = __esm({
   }
 });
 
+// src/harness/setup.ts
+var setup_exports = {};
+__export(setup_exports, {
+  runSetup: () => runSetup
+});
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, writeFileSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
+import * as readline from "node:readline/promises";
+import { stdin, stdout } from "node:process";
+function configPath() {
+  return join2(homedir2(), ".rein", "config.json");
+}
+function saveConfig(patch) {
+  mkdirSync(join2(homedir2(), ".rein"), { recursive: true });
+  let existing = {};
+  try {
+    if (existsSync2(configPath())) existing = JSON.parse(readFileSync2(configPath(), "utf8"));
+  } catch {
+  }
+  writeFileSync(configPath(), JSON.stringify({ ...existing, ...patch }, null, 2) + "\n", { mode: 384 });
+}
+function promptRl() {
+  if (rl) return rl;
+  const r = readline.createInterface({ input: stdin, output: stdout });
+  rl = r;
+  r.on("line", (line) => {
+    const text = line.trim();
+    if (lineWaiter) {
+      const w = lineWaiter;
+      lineWaiter = void 0;
+      w(text);
+    } else {
+      lineQueue.push(text);
+    }
+  });
+  r.on("close", () => {
+    if (!manualClose) inputClosed = true;
+    manualClose = false;
+    if (lineWaiter) {
+      const w = lineWaiter;
+      lineWaiter = void 0;
+      w("");
+    }
+  });
+  return r;
+}
+async function askLine(prompt, def = "") {
+  promptRl();
+  stdout.write(prompt);
+  if (lineQueue.length > 0) return lineQueue.shift() || def;
+  if (inputClosed) return def;
+  return new Promise((resolve3) => {
+    lineWaiter = (text) => resolve3(text || def);
+  });
+}
+async function askChoice(prompt, count, def = 1) {
+  for (; ; ) {
+    const answer = (await askLine(prompt)).trim();
+    if (answer === "") return def - 1;
+    const n = Number.parseInt(answer, 10);
+    if (!Number.isNaN(n) && n >= 1 && n <= count) return n - 1;
+    stdout.write(C.yellow("  pick a number from the list\n"));
+  }
+}
+async function askSecret(prompt) {
+  if (!stdin.isTTY) return void 0;
+  manualClose = true;
+  rl?.close();
+  rl = void 0;
+  const wasRaw = stdin.isRaw;
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdout.write(prompt);
+  let value = "";
+  await new Promise((resolve3) => {
+    stdin.on("data", (chunk) => {
+      for (const ch of chunk.toString("utf8")) {
+        if (ch === "\r" || ch === "\n") {
+          stdin.pause();
+          resolve3();
+        } else if (ch === "" || ch === "") {
+          stdout.write("\n");
+          process.exit(ch === "" ? 130 : 143);
+        } else if (ch === "\x7F") {
+          if (value.length > 0) {
+            value = value.slice(0, -1);
+            stdout.write("\b \b");
+          }
+        } else if (ch >= " ") {
+          value += ch;
+          stdout.write("*");
+        }
+      }
+    });
+  });
+  stdout.write("\n");
+  if (wasRaw !== void 0) stdin.setRawMode(wasRaw);
+  return value;
+}
+async function testConnection(baseUrl, model, apiKey) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2e4);
+  const started = Date.now();
+  try {
+    const res = await fetch(baseUrl.replace(/\/$/, "") + "/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json", ...apiKey ? { authorization: `Bearer ${apiKey}` } : {} },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "Reply with the single word: ok" }],
+        max_tokens: 8,
+        temperature: 0
+      })
+    });
+    if (!res.ok) {
+      const body = (await res.text().catch(() => "")).slice(0, 160);
+      return { ok: false, detail: `HTTP ${res.status}${body ? ` \u2014 ${body}` : ""}` };
+    }
+    const json = await res.json().catch(() => ({}));
+    const reply = json?.choices?.[0]?.message?.content?.trim() ?? "(empty)";
+    return { ok: true, detail: `model answered "${reply}" in ${Date.now() - started}ms` };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function printStatus() {
+  const config = loadConfig();
+  const servers = await discoverLocalServers();
+  console.log(`config: ${configPath()}`);
+  if (config.baseUrl || config.model) {
+    console.log(`  model:   ${config.model ?? "(unset)"}`);
+    console.log(`  baseUrl: ${config.baseUrl ?? "(unset)"}`);
+    console.log(`  apiKey:  ${config.apiKey ? `${config.apiKey.slice(0, 7)}\u2026` : "(none)"}`);
+  } else {
+    console.log("  (no config yet \u2014 run `rein setup`)");
+  }
+  console.log("\nlocal servers:");
+  if (servers.length === 0) console.log("  (none running)");
+  for (const s of servers) console.log(`  ${s.provider.padEnd(10)} ${s.baseUrl}  ${s.models?.length ?? 0} model(s)`);
+  if (config.baseUrl && config.model) {
+    const r = await testConnection(config.baseUrl, config.model, config.apiKey);
+    console.log(`
+connection: ${r.ok ? C.green("\u2713 " + r.detail) : C.red("\u2717 " + r.detail)}`);
+  }
+}
+async function runSetup(opts) {
+  if (opts.status) {
+    await printStatus();
+    return 0;
+  }
+  console.log(C.bold("rein setup") + " \u2014 configure your model\n");
+  const servers = await discoverLocalServers();
+  if (servers.length > 0) {
+    console.log("local servers detected:");
+    servers.forEach((s, i) => {
+      const models = (s.models ?? []).slice(0, 4).join(", ") + ((s.models ?? []).length > 4 ? ", \u2026" : "");
+      console.log(`  ${C.green(String(i + 1))}. ${s.provider.padEnd(10)} ${C.dim(s.baseUrl)}  ${C.dim(models)}`);
+    });
+  } else {
+    console.log(C.yellow("no local AI servers detected") + C.dim(" (ollama / LM Studio / llama.cpp / vLLM)"));
+  }
+  console.log("");
+  const choices = [];
+  for (const s of servers) {
+    choices.push({ label: `${s.provider} (local)`, baseUrl: s.baseUrl, model: pickDefaultModelId(s.models ?? []), needsKey: false });
+  }
+  for (const [name, p] of Object.entries(PROVIDER_PRESETS).slice(4)) {
+    choices.push({ label: `${name} (cloud)`, baseUrl: p.baseUrl, needsKey: true, keyEnv: p.keyEnv });
+  }
+  choices.push({ label: "custom OpenAI-compatible endpoint", baseUrl: "", needsKey: true });
+  const customIndex = choices.length - 1;
+  let pick;
+  if (opts.yes) {
+    const config = loadConfig();
+    pick = servers.length > 0 ? choices[0] : config.baseUrl && config.model ? { label: "existing config", baseUrl: config.baseUrl, model: config.model, needsKey: false } : choices[customIndex];
+    console.log(C.dim(`  (--yes) picked: ${pick.label}`));
+  } else {
+    console.log(choices.map((c, i) => `  ${i + 1}. ${c.label}`).join("\n") + "\n");
+    const defIdx = servers.length > 0 ? 0 : customIndex;
+    const idx = await askChoice(`choose provider [${defIdx + 1}]: `, choices.length, defIdx + 1);
+    pick = choices[idx];
+  }
+  let baseUrl = pick.baseUrl ?? "";
+  let model = pick.model;
+  let apiKey;
+  if (baseUrl === "") {
+    baseUrl = (await askLine("base URL (OpenAI-compatible, e.g. http://localhost:11434/v1): ")).replace(/\/$/, "");
+  }
+  if (!baseUrl) {
+    console.log(C.red("no base URL \u2014 nothing to configure"));
+    return 1;
+  }
+  if (!model) {
+    try {
+      const res = await fetch(baseUrl + "/models", { signal: AbortSignal.timeout(3e3) });
+      if (res.ok) {
+        const json = await res.json();
+        const ids = (json?.data ?? []).map((m) => m.id).filter(Boolean);
+        if (ids.length > 0) {
+          console.log(`models on ${baseUrl}:`);
+          ids.slice(0, 20).forEach((id, i) => console.log(`  ${i + 1}. ${id}`));
+          const preferred = pickDefaultModelId(ids);
+          const defIdx = Math.max(0, ids.indexOf(preferred ?? ""));
+          if (!opts.yes) {
+            const n = await askChoice(`choose model [${defIdx + 1}]: `, ids.length, defIdx + 1);
+            model = ids[n];
+          } else {
+            model = ids[defIdx];
+          }
+        }
+      }
+    } catch {
+    }
+    if (!model && !opts.yes) model = await askLine("model id: ");
+  }
+  if (!model) {
+    console.log(C.red("no model id available \u2014 start a server or pick one manually, then re-run `rein setup`"));
+    return 1;
+  }
+  if (pick.needsKey) {
+    const envKey = pick.keyEnv ? process.env[pick.keyEnv] : void 0;
+    if (envKey) {
+      apiKey = envKey;
+      console.log(C.dim(`  using ${pick.keyEnv} from environment`));
+    } else if (!opts.yes) {
+      const secret = await askSecret("API key (Enter to skip): ");
+      if (secret) apiKey = secret;
+    }
+  }
+  console.log(`
+model:   ${model}`);
+  console.log(`baseURL: ${baseUrl}`);
+  if (apiKey) console.log(`apiKey:  ${apiKey.slice(0, 7)}\u2026`);
+  const test = await testConnection(baseUrl, model, apiKey);
+  if (test.ok) {
+    console.log(C.green(`\u2713 connection test passed \u2014 ${test.detail}`));
+  } else {
+    console.log(C.yellow(`\u26A0 connection test failed \u2014 ${test.detail}`));
+    if (!opts.yes) {
+      const keep = await askLine("save the config anyway? [y/N]: ");
+      if (!/^y(es)?$/i.test(keep)) {
+        console.log("not saved. Fix the endpoint and run `rein setup` again.");
+        return 1;
+      }
+    }
+  }
+  saveConfig({ baseUrl, model, ...apiKey ? { apiKey } : {} });
+  console.log(`
+${C.green("\u2713 config saved to " + configPath())}`);
+  console.log(`
+try it:`);
+  console.log(`  rein -p "hello, what model are you?"`);
+  console.log(`  rein            # interactive session in this directory`);
+  return 0;
+}
+var C, lineQueue, lineWaiter, inputClosed, manualClose, rl;
+var init_setup = __esm({
+  "src/harness/setup.ts"() {
+    init_models();
+    C = {
+      dim: (s) => `\x1B[2m${s}\x1B[0m`,
+      green: (s) => `\x1B[32m${s}\x1B[0m`,
+      red: (s) => `\x1B[31m${s}\x1B[0m`,
+      yellow: (s) => `\x1B[33m${s}\x1B[0m`,
+      bold: (s) => `\x1B[1m${s}\x1B[0m`
+    };
+    lineQueue = [];
+    inputClosed = false;
+    manualClose = false;
+  }
+});
+
 // src/util/ansi.ts
 function wrap(open, close) {
   return (text) => enabled ? `\x1B[${open}m${text}\x1B[${close}m` : text;
@@ -1013,12 +1289,12 @@ Rules for tool blocks:
 });
 
 // src/ai/compat.ts
-import { readFileSync as readFileSync2, writeFileSync, mkdirSync, existsSync as existsSync2 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join2 } from "node:path";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync3 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join3 } from "node:path";
 function readStore() {
   try {
-    if (existsSync2(storePath())) return JSON.parse(readFileSync2(storePath(), "utf8"));
+    if (existsSync3(storePath())) return JSON.parse(readFileSync3(storePath(), "utf8"));
   } catch {
   }
   return {};
@@ -1032,9 +1308,9 @@ function decideToolMode(provider, modelId, forced = "auto") {
   if (forced !== "auto") {
     const mode = { mode: forced, source: "forced" };
     try {
-      mkdirSync(join2(homedir2(), ".rein"), { recursive: true });
+      mkdirSync2(join3(homedir3(), ".rein"), { recursive: true });
       store[key] = mode;
-      writeFileSync(storePath(), JSON.stringify(store, null, 2));
+      writeFileSync2(storePath(), JSON.stringify(store, null, 2));
     } catch {
     }
     return mode;
@@ -1048,10 +1324,10 @@ function decideToolMode(provider, modelId, forced = "auto") {
 }
 function recordDecision(provider, modelId, mode, source) {
   try {
-    mkdirSync(join2(homedir2(), ".rein"), { recursive: true });
+    mkdirSync2(join3(homedir3(), ".rein"), { recursive: true });
     const store = readStore();
     store[keyFor(provider, modelId)] = { mode, source };
-    writeFileSync(storePath(), JSON.stringify(store, null, 2));
+    writeFileSync2(storePath(), JSON.stringify(store, null, 2));
   } catch {
   }
 }
@@ -1102,19 +1378,19 @@ var init_compat = __esm({
       /openchat[-_]?3\.5/i,
       /starcoder[-_]?1b/i
     ];
-    storePath = () => join2(homedir2(), ".rein", "capabilities.json");
+    storePath = () => join3(homedir3(), ".rein", "capabilities.json");
   }
 });
 
 // src/harness/system-prompt.ts
-import { existsSync as existsSync3 } from "node:fs";
-import { readFileSync as readFileSync3 } from "node:fs";
-import { join as join3 } from "node:path";
+import { existsSync as existsSync4 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
+import { join as join4 } from "node:path";
 function readProjectInstructions(cwd) {
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const path2 = join3(cwd, name);
-    if (existsSync3(path2)) {
-      const text = readFileSync3(path2, "utf8").trim();
+    const path2 = join4(cwd, name);
+    if (existsSync4(path2)) {
+      const text = readFileSync4(path2, "utf8").trim();
       if (text) return `Project instructions:
 ${text}`;
     }
@@ -1122,9 +1398,9 @@ ${text}`;
   return void 0;
 }
 function readLessons(cwd) {
-  const path2 = join3(cwd, "LESSONS.md");
-  if (!existsSync3(path2)) return void 0;
-  const text = readFileSync3(path2, "utf8").trim();
+  const path2 = join4(cwd, "LESSONS.md");
+  if (!existsSync4(path2)) return void 0;
+  const text = readFileSync4(path2, "utf8").trim();
   if (!text) return void 0;
   return `Lessons from previous sessions (trust but verify):
 ${text.slice(0, 4e3)}`;
@@ -1208,7 +1484,7 @@ var init_system_prompt = __esm({
 });
 
 // src/harness/tools/read.ts
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 var readTool, read_default;
 var init_read = __esm({
   "src/harness/tools/read.ts"() {
@@ -1228,7 +1504,7 @@ var init_read = __esm({
         const path2 = args.path;
         let text;
         try {
-          text = readFileSync4(path2, "utf8");
+          text = readFileSync5(path2, "utf8");
         } catch (err) {
           return { content: `read failed: ${err.message}`, isError: true };
         }
@@ -1258,7 +1534,7 @@ var init_read = __esm({
 });
 
 // src/harness/tools/write.ts
-import { writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "node:fs";
+import { writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "node:fs";
 import { dirname } from "node:path";
 var writeTool, write_default;
 var init_write = __esm({
@@ -1278,8 +1554,8 @@ var init_write = __esm({
         const path2 = args.path;
         const content = args.content;
         try {
-          mkdirSync2(dirname(path2), { recursive: true });
-          writeFileSync2(path2, content);
+          mkdirSync3(dirname(path2), { recursive: true });
+          writeFileSync3(path2, content);
         } catch (err) {
           return { content: `write failed: ${err.message}`, isError: true };
         }
@@ -1292,7 +1568,7 @@ var init_write = __esm({
 });
 
 // src/harness/tools/edit.ts
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
 function countOccurrences(text, needle) {
   let count = 0;
   let i = text.indexOf(needle);
@@ -1332,7 +1608,7 @@ var init_edit = __esm({
         const edits = args.edits;
         let text;
         try {
-          text = readFileSync5(path2, "utf8");
+          text = readFileSync6(path2, "utf8");
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -1363,7 +1639,7 @@ var init_edit = __esm({
           text = text.slice(0, r.start) + edit.newText + text.slice(r.end);
         }
         try {
-          writeFileSync3(path2, text);
+          writeFileSync4(path2, text);
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -1417,7 +1693,7 @@ var init_bash = __esm({
       execute: async (_id, args, signal) => {
         const command = args.command;
         const timeoutSec = typeof args.timeout === "number" ? args.timeout : 120;
-        let stdout = "";
+        let stdout2 = "";
         let stderr = "";
         let code = 0;
         let timedOut = false;
@@ -1427,17 +1703,17 @@ var init_bash = __esm({
             maxBuffer: 8 * 1024 * 1024,
             signal
           });
-          stdout = result.stdout;
+          stdout2 = result.stdout;
           stderr = result.stderr;
         } catch (err) {
           const e = err;
-          stdout = e.stdout ?? "";
+          stdout2 = e.stdout ?? "";
           stderr = e.stderr ?? e.message ?? "";
           code = typeof e.code === "number" ? e.code : 1;
           timedOut = e.killed === true;
         }
         let output = "";
-        if (stdout) output += stdout;
+        if (stdout2) output += stdout2;
         if (stderr) output += (output ? "\n" : "") + stderr;
         if (output.length === 0) output = "(no output)";
         const truncated = truncateLines(output, 500);
@@ -1488,9 +1764,9 @@ var init_grep = __esm({
         if (args.glob) argsArr.push(`--include=${args.glob}`);
         argsArr.push("--", args.pattern, args.path ?? ".");
         try {
-          const { stdout, stderr } = await execFileAsync2("grep", argsArr, { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
-          if (!stdout && !stderr) return { content: "No matches" };
-          const out = (stdout + stderr).trimEnd();
+          const { stdout: stdout2, stderr } = await execFileAsync2("grep", argsArr, { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
+          if (!stdout2 && !stderr) return { content: "No matches" };
+          const out = (stdout2 + stderr).trimEnd();
           if (out.length > 15e3) return { content: out.slice(0, 15e3) + "\n\u2026 [output truncated \u2014 narrow the search]", isError: false };
           return { content: out };
         } catch (err) {
@@ -1530,8 +1806,8 @@ var init_find = __esm({
         const limit = typeof args.limit === "number" ? args.limit : 200;
         const path2 = args.path ?? ".";
         try {
-          const { stdout } = await execFileAsync3("bash", ["-c", `command -v fd >/dev/null 2>&1 && fd -g ${shellQuote(args.pattern)} --max-results ${limit} . ${shellQuote(path2)} || find ${shellQuote(path2)} -name ${shellQuote(args.pattern)} -print | head -n ${limit}`], { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
-          const out = stdout.trimEnd();
+          const { stdout: stdout2 } = await execFileAsync3("bash", ["-c", `command -v fd >/dev/null 2>&1 && fd -g ${shellQuote(args.pattern)} --max-results ${limit} . ${shellQuote(path2)} || find ${shellQuote(path2)} -name ${shellQuote(args.pattern)} -print | head -n ${limit}`], { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
+          const out = stdout2.trimEnd();
           return { content: out || "No matches" };
         } catch (err) {
           return { content: `find failed: ${err.message}`, isError: true };
@@ -1544,7 +1820,7 @@ var init_find = __esm({
 
 // src/harness/tools/ls.ts
 import { readdirSync, statSync } from "node:fs";
-import { join as join4 } from "node:path";
+import { join as join5 } from "node:path";
 var lsTool, ls_default;
 var init_ls = __esm({
   "src/harness/tools/ls.ts"() {
@@ -1581,12 +1857,12 @@ var init_ls = __esm({
             }
             let isDir = false;
             try {
-              isDir = statSync(join4(dir, name)).isDirectory();
+              isDir = statSync(join5(dir, name)).isDirectory();
             } catch {
               isDir = false;
             }
             lines.push(`${prefix}${name}${isDir ? "/" : ""}`);
-            if (isDir && d > 1) walk(join4(dir, name), prefix + "  ", d - 1);
+            if (isDir && d > 1) walk(join5(dir, name), prefix + "  ", d - 1);
           }
         };
         walk(path2, "", depth);
@@ -1744,8 +2020,8 @@ __export(gates_exports, {
 });
 import { execFile as execFile4 } from "node:child_process";
 import { promisify as promisify4 } from "node:util";
-import { existsSync as existsSync4 } from "node:fs";
-import { dirname as dirname2, isAbsolute, join as join5, resolve } from "node:path";
+import { existsSync as existsSync5 } from "node:fs";
+import { dirname as dirname2, isAbsolute, join as join6, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 var execFileAsync4, here, UNLAZY_CANDIDATES, UNLAZY_DIR, MODES, gatesTool, gates_default;
 var init_gates = __esm({
@@ -1757,7 +2033,7 @@ var init_gates = __esm({
       resolve(here, "..", "..", "..", "vendor", "unlazy"),
       resolve(here, "..", "vendor", "unlazy")
     ];
-    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync4(join5(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
+    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync5(join6(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
     MODES = /* @__PURE__ */ new Set(["status", "approve", "reverify", "lint"]);
     gatesTool = {
       name: "gates",
@@ -1776,13 +2052,13 @@ var init_gates = __esm({
         if (!MODES.has(mode)) return { content: `Unknown mode: ${mode}. Use one of: status, approve, reverify, lint.`, isError: true };
         const file = args.file ? String(args.file) : "GATES.md";
         const root = args.root ? resolve(String(args.root)) : process.cwd();
-        const ledgerPath = isAbsolute(file) ? file : join5(root, file);
-        if (!existsSync4(ledgerPath)) {
+        const ledgerPath = isAbsolute(file) ? file : join6(root, file);
+        if (!existsSync5(ledgerPath)) {
           return { content: `Ledger not found: ${ledgerPath}. Write it first (template: vendor/unlazy/templates/gates-leaf.md), then run gates with mode=lint.`, isError: true };
         }
-        const scriptPath = join5(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
+        const scriptPath = join6(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
         const cmdArgs = mode === "lint" ? [scriptPath, ledgerPath] : [scriptPath, `--${mode}`, ledgerPath];
-        let stdout = "";
+        let stdout2 = "";
         let stderr = "";
         let code = 0;
         try {
@@ -1792,15 +2068,15 @@ var init_gates = __esm({
             maxBuffer: 8 * 1024 * 1024,
             signal
           });
-          stdout = result.stdout;
+          stdout2 = result.stdout;
           stderr = result.stderr;
         } catch (err) {
           const e = err;
-          stdout = e.stdout ?? "";
+          stdout2 = e.stdout ?? "";
           stderr = e.stderr ?? e.message ?? "";
           code = typeof e.code === "number" ? e.code : 1;
         }
-        const output = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
+        const output = [stdout2, stderr].filter(Boolean).join("\n") || "(no output)";
         const truncated = truncateLines(output, 200);
         const tail = ` [gates:${mode} exit ${code}]`;
         const isError = code === 0 ? false : mode === "status" ? code >= 2 : true;
@@ -2095,8 +2371,8 @@ __export(loop_exports, {
   runExperimentLoop: () => runExperimentLoop
 });
 import { execFileSync } from "node:child_process";
-import { existsSync as existsSync5, readFileSync as readFileSync7, appendFileSync } from "node:fs";
-import { join as join7 } from "node:path";
+import { existsSync as existsSync6, readFileSync as readFileSync8, appendFileSync } from "node:fs";
+import { join as join8 } from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 function sh(cmd, cwd) {
   return execFileSync("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
@@ -2114,7 +2390,7 @@ function readMetric(output) {
   return m ? parseFloat(m[1]) : void 0;
 }
 function readMetricCommand(metricFile) {
-  const text = readFileSync7(metricFile, "utf8");
+  const text = readFileSync8(metricFile, "utf8");
   const m = text.match(/```\n([^\n`]+)\n```/);
   if (m) return m[1].trim();
   return text.trim().split("\n").filter((l) => l.trim() && !l.startsWith("#"))[0] ?? "";
@@ -2123,16 +2399,16 @@ async function runExperimentLoop(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join7(cwd, taskFile);
-  const metricPath = join7(cwd, metricFile);
-  if (!existsSync5(taskPath)) {
+  const taskPath = join8(cwd, taskFile);
+  const metricPath = join8(cwd, metricFile);
+  if (!existsSync6(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
-  if (!existsSync5(metricPath)) {
+  if (!existsSync6(metricPath)) {
     throw new Error(`No ${metricFile} in ${cwd} \u2014 put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
   }
-  const task = readFileSync7(taskPath, "utf8");
-  const metricDoc = readFileSync7(metricPath, "utf8");
+  const task = readFileSync8(taskPath, "utf8");
+  const metricDoc = readFileSync8(metricPath, "utf8");
   const metricCmd = readMetricCommand(metricDoc);
   const useGit = gitAvailable(cwd);
   const maxIters = opts.maxIterations ?? 10;
@@ -2211,7 +2487,7 @@ ${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
   const summary = `
 loop complete: best METRIC=${best ?? "n/a"} \xB7 ${kept} kept \xB7 ${discarded} discarded`;
   console.log(bold(summary));
-  appendFileSync(join7(cwd, "LESSONS.md"), `
+  appendFileSync(join8(cwd, "LESSONS.md"), `
 - [loop ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}] ${summary}
 `);
 }
@@ -2228,9 +2504,9 @@ __export(improve_exports, {
   runImproveLoop: () => runImproveLoop
 });
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { cpSync, existsSync as existsSync6, mkdtempSync, readFileSync as readFileSync8, appendFileSync as appendFileSync2, rmSync as rmSync2 } from "node:fs";
+import { cpSync, existsSync as existsSync7, mkdtempSync, readFileSync as readFileSync9, appendFileSync as appendFileSync2, rmSync as rmSync2 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join8, dirname as dirname3, resolve as resolve2 } from "node:path";
+import { join as join9, dirname as dirname3, resolve as resolve2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { randomUUID as randomUUID3 } from "node:crypto";
 function sh2(cmd, cwd) {
@@ -2252,8 +2528,8 @@ function runSmokeTest(repoDir) {
     stdio: ["ignore", "pipe", "pipe"]
   });
   const underNodeModules = repoDir.split(/[\\/]/).includes("node_modules");
-  const dir = underNodeModules ? mkdtempSync(join8(tmpdir(), "rein-smoke-")) : repoDir;
-  if (dir !== repoDir) for (const name of ["src", "test", "vendor"]) cpSync(join8(repoDir, name), join8(dir, name), { recursive: true });
+  const dir = underNodeModules ? mkdtempSync(join9(tmpdir(), "rein-smoke-")) : repoDir;
+  if (dir !== repoDir) for (const name of ["src", "test", "vendor"]) cpSync(join9(repoDir, name), join9(dir, name), { recursive: true });
   try {
     const out = run(dir);
     if (dir !== repoDir) rmSync2(dir, { recursive: true, force: true });
@@ -2264,9 +2540,9 @@ function runSmokeTest(repoDir) {
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join8(repoDir, "LESSONS.md");
-  if (!existsSync6(path2)) return "";
-  const text = readFileSync8(path2, "utf8");
+  const path2 = join9(repoDir, "LESSONS.md");
+  if (!existsSync7(path2)) return "";
+  const text = readFileSync9(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
   return m?.[1]?.trim() ?? "";
 }
@@ -2326,7 +2602,7 @@ ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
           if (useGit) {
             sh2(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
           }
-          appendFileSync2(join8(repoDir, "LESSONS.md"), `
+          appendFileSync2(join9(repoDir, "LESSONS.md"), `
 - [improve ${tag}] fixed: ${firstLine(report)}
 `);
           improved++;
@@ -2335,7 +2611,7 @@ ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
           if (useGit) sh2("git checkout . && git clean -fd", repoDir);
           console.log(red(`discarded ${dim(tag)} \u2014 smoke test failed`));
           console.log(dim(test.output.slice(-600)));
-          appendFileSync2(join8(repoDir, "LESSONS.md"), `
+          appendFileSync2(join9(repoDir, "LESSONS.md"), `
 - [improve ${tag}] tried and failed: ${firstLine(report)}
 `);
         }
@@ -2368,16 +2644,16 @@ var init_improve = __esm({
     init_runner();
     init_system_prompt();
     here2 = dirname3(fileURLToPath2(import.meta.url));
-    REIN_REPO = [here2, resolve2(here2, ".."), resolve2(here2, "..", "..")].find((dir) => existsSync6(join8(dir, "test", "smoke.ts"))) ?? resolve2(here2, "..", "..");
+    REIN_REPO = [here2, resolve2(here2, ".."), resolve2(here2, "..", "..")].find((dir) => existsSync7(join9(dir, "test", "smoke.ts"))) ?? resolve2(here2, "..", "..");
   }
 });
 
 // src/agent/session.ts
-import { appendFileSync as appendFileSync3, existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync9, readdirSync as readdirSync2 } from "node:fs";
-import { homedir as homedir4 } from "node:os";
-import { join as join9 } from "node:path";
+import { appendFileSync as appendFileSync3, existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync10, readdirSync as readdirSync2 } from "node:fs";
+import { homedir as homedir5 } from "node:os";
+import { join as join10 } from "node:path";
 function ensureDir() {
-  mkdirSync4(DIR, { recursive: true });
+  mkdirSync5(DIR, { recursive: true });
 }
 function newSessionId() {
   const d = /* @__PURE__ */ new Date();
@@ -2386,7 +2662,7 @@ function newSessionId() {
   return `session-${d.getTime()}-${rand}`;
 }
 function sessionPath(id) {
-  return join9(DIR, `${id}.jsonl`);
+  return join10(DIR, `${id}.jsonl`);
 }
 function createSession(opts) {
   ensureDir();
@@ -2401,7 +2677,7 @@ function createSession(opts) {
     cwd: opts.cwd
   };
   const path2 = sessionPath(id);
-  if (existsSync7(path2)) {
+  if (existsSync8(path2)) {
     appendFileSync3(path2, JSON.stringify(header) + "\n");
     return id;
   }
@@ -2417,8 +2693,8 @@ function appendEntries(sessionId, messages) {
 }
 function loadSession(sessionId) {
   const path2 = sessionPath(sessionId);
-  if (!existsSync7(path2)) throw new Error(`No such session: ${sessionId}`);
-  const lines = readFileSync9(path2, "utf8").split("\n").filter((l) => l.trim().length > 0);
+  if (!existsSync8(path2)) throw new Error(`No such session: ${sessionId}`);
+  const lines = readFileSync10(path2, "utf8").split("\n").filter((l) => l.trim().length > 0);
   let header = null;
   const messages = [];
   for (const line of lines) {
@@ -2471,7 +2747,7 @@ function branchSession(sourceId, upToMessageIndex, newId) {
   const id = newId ?? newSessionId();
   ensureDir();
   const path2 = sessionPath(id);
-  const header = JSON.parse(readFileSync9(sessionPath(sourceId), "utf8").split("\n")[0] ?? "{}");
+  const header = JSON.parse(readFileSync10(sessionPath(sourceId), "utf8").split("\n")[0] ?? "{}");
   appendFileSync3(
     path2,
     JSON.stringify({ ...header, id, created: (/* @__PURE__ */ new Date()).toISOString() }) + "\n"
@@ -2482,7 +2758,7 @@ function branchSession(sourceId, upToMessageIndex, newId) {
 var DIR;
 var init_session = __esm({
   "src/agent/session.ts"() {
-    DIR = join9(homedir4(), ".rein", "sessions");
+    DIR = join10(homedir5(), ".rein", "sessions");
   }
 });
 
@@ -2544,11 +2820,11 @@ var repl_exports = {};
 __export(repl_exports, {
   startRepl: () => startRepl
 });
-import * as readline from "node:readline";
+import * as readline2 from "node:readline";
 async function startRepl(opts) {
   const { runner } = opts;
   let sessionId = opts.resumeSessionId ?? createSession({ model: runner.model.id, provider: runner.model.provider, cwd: process.cwd() });
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true, prompt: dim("\u276F ") });
+  const rl2 = readline2.createInterface({ input: process.stdin, output: process.stdout, terminal: true, prompt: dim("\u276F ") });
   console.log(
     gray(
       `rein \xB7 ${runner.model.provider}/${runner.model.id} \xB7 tools: ${runner.toolsMode} (${runner.toolsModeSource}) \xB7 session ${sessionId.slice(-8)}
@@ -2709,19 +2985,19 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     }
   };
   let resolveLine = null;
-  let inputClosed = false;
-  const lineQueue = [];
-  rl.on("line", (line) => {
+  let inputClosed2 = false;
+  const lineQueue2 = [];
+  rl2.on("line", (line) => {
     if (resolveLine) {
       const r = resolveLine;
       resolveLine = null;
       r(line);
     } else {
-      lineQueue.push(line);
+      lineQueue2.push(line);
     }
   });
-  rl.on("close", () => {
-    inputClosed = true;
+  rl2.on("close", () => {
+    inputClosed2 = true;
     if (resolveLine) {
       const r = resolveLine;
       resolveLine = null;
@@ -2737,11 +3013,11 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     return /^y(es)?$/i.test(line.trim());
   };
   const ask = () => {
-    if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift());
-    if (inputClosed) return Promise.resolve(null);
+    if (lineQueue2.length > 0) return Promise.resolve(lineQueue2.shift());
+    if (inputClosed2) return Promise.resolve(null);
     return new Promise((resolve3) => {
       resolveLine = (line) => resolve3(line);
-      if (!rl.closed) rl.prompt();
+      if (!rl2.closed) rl2.prompt();
     });
   };
   if (runner.context.messages.length === 0) {
@@ -2776,7 +3052,7 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     }
     if (first) first = false;
   }
-  if (!rl.closed) rl.close();
+  if (!rl2.closed) rl2.close();
 }
 var init_repl = __esm({
   "src/harness/repl.ts"() {
@@ -2788,6 +3064,14 @@ var init_repl = __esm({
 
 // src/cli.ts
 init_models();
+import { readFileSync as readFileSync11 } from "node:fs";
+function cliVersion() {
+  try {
+    return JSON.parse(readFileSync11(new URL("../package.json", import.meta.url), "utf8")).version;
+  } catch {
+    return "0.0.0";
+  }
+}
 function usage() {
   console.log(`rein \u2014 minimal local-first agent harness
 
@@ -2799,6 +3083,10 @@ Usage:
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
+  rein setup                    interactive onboarding: provider \u2192 model \u2192 key
+                                \u2192 connection test \u2192 saves ~/.rein/config.json
+  rein setup --yes              non-interactive (first local server / existing config)
+  rein setup --status           show config, detected servers, test the connection
 
 Model selection (highest wins):
   --model <id> --base-url <url>    explicit endpoint
@@ -2818,7 +3106,8 @@ Options:
   --ask <tools>                    tools that need approval: bash,write
                                     (REPL: /ask; nodeterm: canvas/phone answers)
   --no-tools                       run with no tools (pure chat)
-  -h, --help                       this help`);
+  -h, --help                       this help
+  -v, --version                    print version`);
 }
 function parseArgs(argv) {
   const _ = [];
@@ -2855,6 +3144,10 @@ async function main(argv = process.argv.slice(2)) {
     usage();
     return;
   }
+  if (flags.version === true || flags.v === true || _[0] === "--version") {
+    console.log(`rein ${cliVersion()}`);
+    return;
+  }
   const common = {
     cwd: process.cwd(),
     modelOverride: typeof flags.model === "string" ? flags.model : void 0,
@@ -2881,6 +3174,12 @@ async function main(argv = process.argv.slice(2)) {
     const config = loadConfig();
     if (config.model || config.baseUrl) console.log(`
 config: ~/.rein/config.json \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl })}`);
+    return;
+  }
+  if (_[0] === "setup") {
+    const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
+    const code = await runSetup2({ yes: flags.yes === true, status: flags.status === true });
+    process.exitCode = code;
     return;
   }
   if (_[0] === "loop") {
