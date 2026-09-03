@@ -38,26 +38,35 @@ or two.
 - Any OpenAI-compatible server. Local ones are probed automatically in
   priority order: **Ollama** → **LM Studio** → **llama.cpp** → **vLLM**.
 
+## Install from GitHub
+
+```sh
+npm install --global git+https://github.com/Zermo/rain-agent.git
+rain-agent
+```
+
+The compatibility commands `rein-agent` and `rein` point to the same CLI.
+
 ```sh
 # local (the default):
 ollama serve && ollama pull qwen2.5-coder:7b
-rein
+rain-agent
 
 # any provider:
-rein --provider deepseek --model deepseek-chat
-rein --provider openai --model gpt-4o
-REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein -p "hello"
+rain-agent --provider deepseek --model deepseek-chat
+rain-agent --provider openai --model gpt-4o
+REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rain-agent -p "hello"
 ```
 
 ## Usage
 
 ```
-rein                          interactive REPL (sessions persist, steering mid-run)
-rein -p "query"               one-shot; --json for the raw event stream
-rein loop                     autonomous experiment loop (TASK.md + METRIC.md)
-rein improve [goal]           self-improvement loop on this repo
-rein gates [file] --mode m    unlazy gates: lint | status | approve | reverify
-rein models                   what rein can see: local servers + provider presets
+rain-agent                    interactive REPL (sessions persist, steering mid-run)
+rain-agent -p "query"         one-shot; --json for the raw event stream
+rain-agent loop               autonomous experiment loop (TASK.md + METRIC.md)
+rain-agent improve [goal]     self-improvement loop on this repo
+rain-agent gates [file] --mode m  unlazy gates: lint | status | approve | reverify
+rain-agent models             what rein can see: local servers + provider presets
 ```
 
 REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /quit`.
