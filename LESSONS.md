@@ -9,7 +9,9 @@ The `## harness` section is read by `rein improve` as its work queue.
 
 ## harness
 
-- [setup] Node refuses to type-strip .ts under node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) — a bin that imports src/*.ts installs but crashes on first run. Ship a prebuilt bundle (esbuild → dist/rein.js, committed + rebuilt in prepare) as the published bin; keep the .ts dev entry for source runs
+- [setup] Node refuses to type-strip .ts under node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) — a bin that imports src/*.ts installs but crashes on first run. Ship a prebuilt bundle (esbuild → dist/rein.js, committed) as the published bin; keep the .ts dev entry for source runs
+- [setup] npm's git fetcher runs an internal `npm install` in the clone whenever package.json has any of postinstall/build/preinstall/install/prepack/prepare — that path left a gutted install (symlink to a skeleton clone) on this machine. Zero lifecycle scripts in package.json; dist is committed, rebuild is `npm run bundle`
+- [onboard] curl|bash installer + `rein setup` wizard (the openclaw/hermes pattern): detect local servers → pick provider+model → optional masked key → connection test → save ~/.rein/config.json; `--yes` for non-TTY, `--status` to re-check. raw.githubusercontent needs the repo public (it is — flip back with `gh repo edit Zermo/rein-agent --private`)
 - [setup] layout-sensitive paths (import.meta.url + ../.. to the repo) break when the same file is bundled elsewhere — resolve by probing for a known file (test/smoke.ts, vendor/unlazy/scripts/gate-check.mjs) instead of counting dirnames
 - [setup] a backtick inside a template literal (```` ``` ```` in an error message) is a hard syntax error Node and esbuild both reject — `rein loop` was unparseable until the message dropped the backticks
 - [setup] a copy installed under node_modules can't run its own TS smoke test — `rein improve` copies src/test/vendor to a scratch dir outside node_modules and runs the same test there (fresh source, no stale bundle)

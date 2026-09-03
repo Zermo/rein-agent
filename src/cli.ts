@@ -8,12 +8,22 @@
  *   rein improve                self-improvement loop on the harness itself
  *   rein gates <file> [--mode m] unlazy: lint / status / approve / reverify a ledger
  *   rein models                 list what rein can see (local servers, presets)
+ *   rein setup [--yes|--status] interactive onboarding: pick model, test, save config
  *
  * Local AI is the default provider: Ollama → LM Studio → llama.cpp → vLLM.
  * Any OpenAI-compatible server works: --provider, --base-url, --model,
  * or REIN_BASE_URL / REIN_MODEL.
  */
+import { readFileSync } from "node:fs";
 import { loadConfig } from "./ai/models.ts";
+
+function cliVersion(): string {
+	try {
+		return JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+	} catch {
+		return "0.0.0";
+	}
+}
 
 function usage(): void {
 	console.log(`rein — minimal local-first agent harness
@@ -26,6 +36,10 @@ Usage:
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
+  rein setup                    interactive onboarding: provider → model → key
+                                → connection test → saves ~/.rein/config.json
+  rein setup --yes              non-interactive (first local server / existing config)
+  rein setup --status           show config, detected servers, test the connection
 
 Model selection (highest wins):
   --model <id> --base-url <url>    explicit endpoint
@@ -45,7 +59,8 @@ Options:
   --ask <tools>                    tools that need approval: bash,write
                                     (REPL: /ask; nodeterm: canvas/phone answers)
   --no-tools                       run with no tools (pure chat)
-  -h, --help                       this help`);
+  -h, --help                       this help
+  -v, --version                    print version`);
 
 }
 
@@ -92,6 +107,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 
+	if (flags.version === true || flags.v === true || _[0] === "--version") {
+		console.log(`rein ${cliVersion()}`);
+		return;
+	}
+
 	const common = {
 		cwd: process.cwd(),
 		modelOverride: typeof flags.model === "string" ? flags.model : undefined,
@@ -118,6 +138,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		}
 		const config = loadConfig();
 		if (config.model || config.baseUrl) console.log(`\nconfig: ~/.rein/config.json → ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl })}`);
+		return;
+	}
+
+	if (_[0] === "setup") {
+		const { runSetup } = await import("./harness/setup.ts");
+		const code = await runSetup({ yes: flags.yes === true, status: flags.status === true });
+		process.exitCode = code;
 		return;
 	}
 
