@@ -9,6 +9,7 @@ The `## harness` section is read by `rein improve` as its work queue.
 - [hardware] `sysctl -n k1 k2 …` prints values only, in order, no key names — parse positionally; and one bad oid makes the whole call exit non-zero, so probe optional features (avx oids) in separate caught calls
 - [hardware] vm_stat's page size lives in the header line `(page size of N bytes)`, not as a key; reclaimable RAM ≈ (free + inactive + speculative) × page
 - [hardware] Magnitude's fit model, ported: reserve max(pool/10, 2GiB) before a model may claim memory; footprint = weights(params×bytesPerWeight) + KV estimate @16k; Apple Silicon = one unified pool; MoE tok/s uses activeParams; tok/s = bandwidth/bytes-per-token × 0.55 — directional, labeled as estimate, never a benchmark
+- [install] the global `rein` symlinks to ~/.rein/repo (persistent) — that's the canonical checkout; /tmp/rein-agent was a scratch clone and went stale while the global install pointed at the other one. Work in ~/.rein/repo and `git pull` before building
 
 ## harness
 
