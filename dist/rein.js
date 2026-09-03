@@ -3708,7 +3708,7 @@ config: ~/.rein/config.json \u2192 ${JSON.stringify({ model: config.model, baseU
   }
   if (_[0] === "hardware") {
     const { printHardwareReport: printHardwareReport2 } = await Promise.resolve().then(() => (init_report(), report_exports));
-    return printHardwareReport2({ json: _.includes("--json") });
+    return printHardwareReport2({ json: flags.json === true });
   }
   if (_[0] === "setup") {
     const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));

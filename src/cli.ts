@@ -169,7 +169,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	}
 	if (_[0] === "hardware") {
 		const { printHardwareReport } = await import("./hardware/report.ts");
-		return printHardwareReport({ json: _.includes("--json") });
+		return printHardwareReport({ json: flags.json === true });
 	}
 
 	if (_[0] === "setup") {
