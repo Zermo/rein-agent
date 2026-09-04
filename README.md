@@ -404,6 +404,9 @@ no code coupling either way.
   "thinking…"), no tool-call diff preview
 - Compaction isn't in yet: long sessions will eventually hit the context
   window (the loop will show the error; `--max-turns` bounds the damage)
+- `rein improve` (and `heartbeat --improve` self-advance) refuses to run on a
+  dirty working tree — a discarded iteration is `git checkout .`, which would eat
+  uncommitted work. Commit or stash first
 - `rein improve` trusts its own smoke test as the metric — add more tests if
   you make it run unattended
 - Text tool protocol assumes the model can follow one example; 1–3B models

@@ -2920,6 +2920,13 @@ async function runImproveLoop(opts) {
   if (!useGit) {
     console.log(yellow(`not a git repo (${repoDir}) \u2014 running without keep/discard; review changes manually`));
   }
+  if (useGit) {
+    const pre = sh3("git status --porcelain", repoDir).trim();
+    if (pre) {
+      console.log(yellow(`working tree is dirty (${pre.split("\n").length} file(s)) \u2014 commit or stash before self-advancing; refusing to risk your work`));
+      return;
+    }
+  }
   const runner = await createRunner({
     ...opts,
     cwd: repoDir,
@@ -4049,7 +4056,7 @@ Usage:
   rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
   rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal \u2192 HEARTBEAT.md tasks \u2192 self-advance
-                                (--improve adds one self-improvement iteration; idle if no tasks)
+                                (--improve [goal] adds one self-improvement iteration; idle if no tasks)
   rein setup                    interactive onboarding: provider \u2192 model \u2192 key
                                 \u2192 connection test \u2192 saves ~/.rein/config.json
   rein setup --yes              non-interactive (first local server / existing config)
@@ -4159,8 +4166,9 @@ config: ~/.rein/config.json \u2192 ${JSON.stringify({ model: config.model, baseU
     const code = await runHeartbeat2({
       ...common,
       file: typeof flags.file === "string" ? flags.file : void 0,
-      improve: flags.improve === true,
-      init: flags.init === true
+      improve: "improve" in flags && flags.improve !== "false",
+      improveGoal: typeof flags.improve === "string" ? flags.improve : void 0,
+      init: flags.init === true || _[1] === "init"
     });
     process.exitCode = code;
     return;

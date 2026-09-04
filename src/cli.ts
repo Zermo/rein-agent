@@ -66,7 +66,7 @@ Usage:
   rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
   rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
-                                (--improve adds one self-improvement iteration; idle if no tasks)
+                                (--improve [goal] adds one self-improvement iteration; idle if no tasks)
   rein setup                    interactive onboarding: provider → model → key
                                 → connection test → saves ~/.rein/config.json
   rein setup --yes              non-interactive (first local server / existing config)
@@ -186,11 +186,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
 	if (_[0] === "heartbeat" || _[0] === "hb") {
 		const { runHeartbeat } = await import("./harness/heartbeat.ts");
+		// --improve [goal]: flag present turns it on; a string value is the goal
 		const code = await runHeartbeat({
 			...common,
 			file: typeof flags.file === "string" ? flags.file : undefined,
-			improve: flags.improve === true,
-			init: flags.init === true,
+			improve: "improve" in flags && flags.improve !== "false",
+			improveGoal: typeof flags.improve === "string" ? flags.improve : undefined,
+			init: flags.init === true || _[1] === "init",
 		});
 		process.exitCode = code;
 		return;
