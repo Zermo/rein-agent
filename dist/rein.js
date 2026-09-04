@@ -195,6 +195,7 @@ var profile_exports = {};
 __export(profile_exports, {
   gb: () => gb,
   profileHardware: () => profileHardware,
+  profileLinux: () => profileLinux,
   summarizeHardware: () => summarizeHardware
 });
 import { execFile } from "node:child_process";
@@ -256,7 +257,7 @@ async function profileDarwin() {
   }
   const gpus = [];
   let unified = true;
-  let bw2 = {};
+  let bw = {};
   try {
     const text = await sh("system_profiler", ["SPDisplaysDataType", "-json"]);
     const json = JSON.parse(text);
@@ -275,7 +276,7 @@ async function profileDarwin() {
     }
   } catch {
   }
-  bw2 = appleBandwidth(cpuName);
+  bw = appleBandwidth(cpuName);
   return {
     os: `darwin ${process.env.DARWIN_VERSION ?? ""}`.trim(),
     arch: process.arch,
@@ -283,8 +284,8 @@ async function profileDarwin() {
     ram: { totalBytes: total, availableBytes: Math.min(available, total) },
     gpus,
     unifiedMemory: unified,
-    memBandwidthGBs: bw2.gbs,
-    bandwidthNote: bw2.note
+    memBandwidthGBs: bw.gbs,
+    bandwidthNote: bw.note
   };
 }
 async function profileLinux() {
@@ -327,16 +328,13 @@ async function profileLinux() {
     }
   } catch {
   }
-  bw = {};
   return {
     os: "linux",
     arch: process.arch,
     cpu: { name, cores, physicalCores: cores, features },
     ram: { totalBytes: total, availableBytes: available },
     gpus,
-    unifiedMemory: false,
-    memBandwidthGBs: bw.gbs,
-    bandwidthNote: bw.note
+    unifiedMemory: false
   };
 }
 async function profileOther() {

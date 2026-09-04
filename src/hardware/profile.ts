@@ -161,7 +161,7 @@ async function profileDarwin(): Promise<HardwareProfile> {
 	};
 }
 
-async function profileLinux(): Promise<HardwareProfile> {
+export async function profileLinux(): Promise<HardwareProfile> {
 	const read = async (p: string): Promise<string | undefined> => {
 		try {
 			const { readFile } = await import("node:fs/promises");
@@ -205,8 +205,7 @@ async function profileLinux(): Promise<HardwareProfile> {
 	} catch {
 		// no nvidia-smi (or no NVIDIA GPU)
 	}
-	// Dimm-speed heuristics are too machine-specific to trust; report what we know.
-	bw = {};
+	// Dimm-speed heuristics are too machine-specific to trust; leave bandwidth unknown.
 
 	return {
 		os: "linux",
@@ -215,8 +214,6 @@ async function profileLinux(): Promise<HardwareProfile> {
 		ram: { totalBytes: total, availableBytes: available },
 		gpus,
 		unifiedMemory: false,
-		memBandwidthGBs: bw.gbs,
-		bandwidthNote: bw.note,
 	};
 }
 
