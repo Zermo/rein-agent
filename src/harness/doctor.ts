@@ -210,7 +210,7 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean } = {}): 
 			const profile = await profileHardware();
 			const entry = matchCatalog(config.model!);
 			if (!entry) {
-				checks.push({ name: "hardware", status: "ok", detail: `machine: ${profile.cpu} · ${Math.round(profile.totalMemoryBytes / 2 ** 30)} GB (model not in catalog — fit unchecked)` });
+				checks.push({ name: "hardware", status: "ok", detail: `machine: ${profile.cpu.name} · ${Math.round(profile.ram.totalBytes / 2 ** 30)} GB (model not in catalog — fit unchecked)` });
 			} else {
 				const fit = bestAssessment(profile, entry);
 				let bestPick = "";

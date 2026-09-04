@@ -433,7 +433,10 @@ console.log("12. doctor + heartbeat");
 
 	// doctor runs, returns a structured result, node check passes
 	const d = await runDoctor({ quiet: true });
-	check("doctor: returns structured checks", Array.isArray(d.checks) && d.checks.length >= 6, `${d.checks?.length} checks`);
+	check("doctor: returns structured checks", Array.isArray(d.checks)
+		&& ["node", "bin", "config", "disk"].every(name => d.checks.some(c => c.name === name && ["ok", "warn", "fail"].includes(c.status)))
+		&& d.total === d.checks.length && d.healthy === d.checks.filter(c => c.status === "ok").length,
+		`${d.checks?.length} checks`);
 	const nodeCheck = d.checks.find((c: any) => c.name === "node");
 	check("doctor: node check ok", nodeCheck?.status === "ok", nodeCheck?.detail);
 
