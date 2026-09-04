@@ -100,6 +100,8 @@ export interface Model {
 	provider: string;
 	/** Root of the OpenAI-compatible API, e.g. http://localhost:11434/v1 */
 	baseUrl: string;
+	/** Optional SSH config alias used to reach this HTTP endpoint from the remote host. */
+	sshHost?: string;
 	contextWindow: number;
 	maxTokens: number;
 }

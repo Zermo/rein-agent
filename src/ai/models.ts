@@ -17,26 +17,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Model } from "./types.ts";
 
-/**
- * Cloud provider presets — "any provider" works with `rein --provider <name>`.
- * API key is read from the provider's conventional env var.
- */
-export const PROVIDER_PRESETS: Record<string, { baseUrl: string; keyEnv: string }> = {
-	ollama: { baseUrl: "http://localhost:11434/v1", keyEnv: "OLLAMA_API_KEY" },
-	lmstudio: { baseUrl: "http://localhost:1234/v1", keyEnv: "LMSTUDIO_API_KEY" },
-	llamacpp: { baseUrl: "http://localhost:8080/v1", keyEnv: "LLAMACPP_API_KEY" },
-	vllm: { baseUrl: "http://localhost:8000/v1", keyEnv: "VLLM_API_KEY" },
-	openai: { baseUrl: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
-	deepseek: { baseUrl: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY" },
-	groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY" },
-	together: { baseUrl: "https://api.together.xyz/v1", keyEnv: "TOGETHER_API_KEY" },
-	openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
-	mistral: { baseUrl: "https://api.mistral.ai/v1", keyEnv: "MISTRAL_API_KEY" },
-	fireworks: { baseUrl: "https://api.fireworks.ai/inference/v1", keyEnv: "FIREWORKS_API_KEY" },
-	cerebras: { baseUrl: "https://api.cerebras.ai/v1", keyEnv: "CEREBRAS_API_KEY" },
-	huggingface: { baseUrl: "https://router.huggingface.co/v1", keyEnv: "HF_TOKEN" },
-	github: { baseUrl: "https://models.inference.ai.azure.com/v1", keyEnv: "GITHUB_TOKEN" },
-};
+import { PROVIDER_PRESETS, detectEndpoint, normalizeBaseUrl, guessProvider, GITHUB_MODELS_RETIRED } from "./endpoints.ts";
+export { PROVIDER_PRESETS, normalizeBaseUrl, detectEndpoint, guessProvider } from "./endpoints.ts";
 
 export interface LocalServer {
 	provider: string;
@@ -85,40 +67,19 @@ export function pickDefaultModelId(ids: string[]): string | undefined {
 	return ids[0];
 }
 
-async function fetchJson(url: string, timeoutMs = 1500, apiKey?: string): Promise<any> {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
-	try {
-		const res = await fetch(url, { signal: controller.signal, headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined });
-		if (!res.ok) return undefined;
-		return await res.json();
-	} catch {
-		return undefined;
-	} finally {
-		clearTimeout(timer);
-	}
-}
-
-/** Probe each well-known local server. Returns those that are alive, in priority order. */
+/** Probe known local addresses concurrently while retaining the configured priority. */
 export async function discoverLocalServers(): Promise<LocalServer[]> {
-	const alive: LocalServer[] = [];
-	for (const server of LOCAL_SERVERS) {
-		// /v1/models is the OpenAI-compatible shape; Ollama also serves /api/tags
-		let models: string[] = [];
-		let data = await fetchJson(server.baseUrl + "/models");
-		if (data?.data?.map) models = data.data.map((m: any) => m.id).filter(Boolean);
-		if (models.length === 0) {
-			data = await fetchJson(server.modelsEndpoint);
-			if (data?.models?.map) models = data.models.map((m: any) => m.name ?? m.model ?? m.id).filter(Boolean);
-		}
-		if (models.length === 0) continue; // server not running (or no models)
-		alive.push({ ...server, models });
-		if (alive.length >= 1 && server.provider === "ollama") continue; // keep probing all, but stop early on ollama for default pick
-	}
-	return alive;
+	const results = await Promise.all(LOCAL_SERVERS.map(async server => {
+		const detected = await detectEndpoint(server.baseUrl, { provider: server.provider, apiKey: scopedApiKeyFor(server.provider, server.baseUrl, undefined, false), timeoutMs: 1500 });
+		return detected.models.length ? { ...server, baseUrl: detected.baseUrl, models: detected.models } : undefined;
+	}));
+	return results.filter((server): server is LocalServer & { models: string[] } => server !== undefined);
 }
 
 export interface ReinConfig {
+	provider?: string;
+	auth?: { type: "api-key" | "cli"; provider?: "codex" | "copilot"; command?: never };
+	sshHost?: string;
 	baseUrl?: string;
 	apiKey?: string;
 	model?: string;
@@ -130,14 +91,29 @@ export interface ReinConfig {
 	tinyfish?: { apiKey?: string };
 }
 
-export function apiKeyFor(provider?: string): string | undefined {
+/** Credentials are selected for the logical endpoint, before any SSH forwarding. */
+export function apiKeyFor(provider?: string, baseUrl?: string, sshHost?: string): string | undefined {
+	return scopedApiKeyFor(provider, baseUrl, sshHost, true);
+}
+
+function scopedApiKeyFor(provider?: string, baseUrl?: string, sshHost?: string, allowGeneric = true): string | undefined {
 	provider = provider?.toLowerCase();
-	if (provider && PROVIDER_PRESETS[provider]) {
-		const envKey = process.env[PROVIDER_PRESETS[provider].keyEnv];
-		if (envKey) return envKey;
-	}
+	if (provider === "codex" || provider === "copilot" || baseUrl?.startsWith("cli://")) return undefined;
 	const config = loadConfig();
-	return config.apiKey;
+	const preset = provider ? PROVIDER_PRESETS[provider] : undefined;
+	const target = baseUrl ?? preset?.baseUrl ?? config.baseUrl;
+	let normalized: string | undefined;
+	try { if (target) normalized = normalizeBaseUrl(target); } catch { return undefined; }
+	// This explicit generic variable applies to the user's selected API endpoint.
+	if (allowGeneric && process.env.REIN_API_KEY) return process.env.REIN_API_KEY;
+	if (preset && normalized && new URL(normalized).origin === new URL(preset.baseUrl).origin) {
+		const key = process.env[preset.keyEnv];
+		if (key) return key;
+	}
+	if (!normalized || !config.apiKey || config.auth?.type === "cli" || config.sshHost !== sshHost) return undefined;
+	const configured = config.baseUrl ?? (config.provider ? PROVIDER_PRESETS[config.provider]?.baseUrl : undefined);
+	try { return configured && normalizeBaseUrl(configured) === normalized ? config.apiKey : undefined; }
+	catch { return undefined; }
 }
 
 export function loadConfig(): ReinConfig {
@@ -157,80 +133,57 @@ export function loadConfig(): ReinConfig {
  *   3. Local discovery only when no endpoint was selected
  */
 export async function resolveModel(
-	overrides: { model?: string; baseUrl?: string; provider?: string } = {},
+	overrides: { model?: string; baseUrl?: string; provider?: string; sshHost?: string } = {},
 ): Promise<Model> {
 	const config = loadConfig();
-	const envBase = process.env.REIN_BASE_URL;
-	const envModel = process.env.REIN_MODEL;
-
-	// --provider name → preset base url (unless an explicit --base-url wins)
-	let providerBaseUrl: string | undefined;
-	let providerName: string | undefined;
-	if (overrides.provider) {
-		const preset = PROVIDER_PRESETS[overrides.provider.toLowerCase()];
-		if (!preset) {
-			throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}`);
-		}
-		providerBaseUrl = preset.baseUrl;
-		providerName = overrides.provider.toLowerCase();
-	}
-
-	const baseUrl = (overrides.baseUrl ?? providerBaseUrl ?? envBase ?? config.baseUrl ?? "").replace(/\/$/, "");
-	const modelId = overrides.model ?? envModel ?? config.model;
-
-	if (baseUrl && modelId) {
+	const envBase = process.env.REIN_BASE_URL?.trim() || undefined;
+	const envModel = process.env.REIN_MODEL?.trim() || undefined;
+	const providerOverride = overrides.provider?.toLowerCase();
+	const selectingEndpoint = overrides.baseUrl !== undefined || !!envBase;
+	const configuredProvider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : undefined);
+	const providerName = providerOverride ?? (selectingEndpoint ? undefined : configuredProvider);
+	if (providerName === "github") throw new Error(GITHUB_MODELS_RETIRED);
+	if (providerName === "codex" || providerName === "copilot") {
+		if (overrides.baseUrl !== undefined || envBase) throw new Error(`CLI provider ${providerName} cannot be combined with an HTTP base URL. Remove --base-url/REIN_BASE_URL or select an API provider.`);
+		if (overrides.sshHost) throw new Error("SSH forwarding applies to HTTP API providers, not subscription CLI providers.");
 		return {
-			id: modelId,
-			provider: providerName ?? guessProvider(baseUrl, overrides.baseUrl ? "custom" : "openai-compatible"),
-			baseUrl,
-			contextWindow: config.contextWindow ?? 32_768,
-			maxTokens: config.maxTokens ?? 4096,
+			id: overrides.model ?? envModel ?? (configuredProvider === providerName ? config.model : undefined) ?? "default",
+			provider: providerName, baseUrl: `cli://${providerName}`,
+			contextWindow: config.contextWindow ?? 32_768, maxTokens: config.maxTokens ?? 4096,
 		};
 	}
-
-	// A selected endpoint must never silently redirect to a different local server.
-	if (baseUrl) {
-		const provider = providerName ?? guessProvider(baseUrl, overrides.baseUrl ? "custom" : "openai-compatible");
-		const data = await fetchJson(`${baseUrl}/models`, 1500, apiKeyFor(provider));
-		const ids = Array.isArray(data?.data) ? data.data.map((m: any) => m.id).filter((id: unknown) => typeof id === "string") : [];
-		const id = pickDefaultModelId(ids);
-		if (!id) throw new Error(`No models found at ${baseUrl}. Specify --model or REIN_MODEL for this endpoint.`);
-		return { id, provider, baseUrl, contextWindow: config.contextWindow ?? 32_768, maxTokens: config.maxTokens ?? 4096 };
+	const preset = providerName ? PROVIDER_PRESETS[providerName] : undefined;
+	if (providerOverride && !preset && !["custom", "openai-compatible"].includes(providerOverride)) {
+		throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, custom`);
 	}
-
+	// Config URLs belong to their auth mode; selecting an API cannot inherit a CLI URL.
+	const configuredBase = config.auth?.type !== "cli" && !config.baseUrl?.startsWith("cli://") ? config.baseUrl : undefined;
+	const rawBase = overrides.baseUrl ?? (providerOverride ? preset?.baseUrl : undefined) ?? envBase ?? configuredBase ?? preset?.baseUrl;
+	const baseUrl = rawBase ? normalizeBaseUrl(rawBase, providerName) : "";
+	let sameEndpoint = false;
+	try { sameEndpoint = !!baseUrl && normalizeBaseUrl(configuredBase ?? (configuredProvider ? PROVIDER_PRESETS[configuredProvider]?.baseUrl ?? "" : "")) === baseUrl; } catch { /* No valid saved endpoint. */ }
+	if (overrides.sshHost !== undefined && overrides.sshHost !== config.sshHost) sameEndpoint = false;
+	const modelId = overrides.model ?? envModel ?? (sameEndpoint || !baseUrl && !configuredBase && config.auth?.type !== "cli" ? config.model : undefined);
+	const sshHost = overrides.sshHost ?? (sameEndpoint ? config.sshHost : undefined);
+	const metadata = { contextWindow: config.contextWindow ?? 32_768, maxTokens: config.maxTokens ?? 4096, ...(sshHost ? { sshHost } : {}) };
+	if (baseUrl) {
+		const provider = providerName ?? guessProvider(baseUrl, "custom");
+		if (modelId) return { id: modelId, provider, baseUrl, ...metadata };
+		const detected = await detectEndpoint(baseUrl, { provider, apiKey: apiKeyFor(provider, baseUrl, sshHost), sshHost });
+		const id = pickDefaultModelId(detected.models);
+		if (!id) throw new Error(`No models found at ${baseUrl}. ${detected.error ?? "Specify --model or REIN_MODEL for this endpoint."}`);
+		return { id, provider: detected.provider, baseUrl: detected.baseUrl, ...metadata };
+	}
 	const servers = await discoverLocalServers();
-	const server = modelId ? servers.find((server) => server.models?.includes(modelId)) : servers[0];
+	const server = modelId ? servers.find(server => server.models?.includes(modelId)) : servers[0];
 	if (server) {
 		const id = modelId ?? pickDefaultModelId(server.models ?? []);
-		if (id) return {
-			id,
-			provider: server.provider,
-			baseUrl: server.baseUrl,
-			contextWindow: config.contextWindow ?? 32_768,
-			maxTokens: config.maxTokens ?? 4096,
-		};
+		if (id) return { id, provider: server.provider, baseUrl: server.baseUrl, ...metadata };
 	}
 	if (modelId) throw new Error(`Model "${modelId}" was not found on a local server. Specify --base-url or --provider for its endpoint.`);
-
 	throw new Error(
 		"No local AI server found.\n" +
-			"Start one (e.g. `ollama serve` + `ollama pull qwen2.5-coder:7b`, or LM Studio's local server), or set:\n" +
-			"  REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein ...\n" +
-			"See `rein models` for what rein can see.",
+		"Start one (e.g. ollama serve or LM Studio's local server), or run rein setup with the host and port.\n" +
+		"Example: REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein ...",
 	);
-}
-
-function guessProvider(baseUrl: string, fallback = "openai-compatible"): string {
-	const normalized = baseUrl.replace(/\/$/, "");
-	for (const [provider, preset] of Object.entries(PROVIDER_PRESETS)) {
-		if (normalized === preset.baseUrl) return provider;
-	}
-	try {
-		const url = new URL(baseUrl);
-		if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
-			const local = LOCAL_SERVERS.find((server) => new URL(server.baseUrl).port === url.port);
-			if (local) return local.provider;
-		}
-	} catch { /* Invalid custom URLs are reported by the request. */ }
-	return fallback;
 }

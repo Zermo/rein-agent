@@ -28,6 +28,8 @@ import type {
 	Usage,
 } from "./types.ts";
 import { parseArgsSalvaged } from "../util/json-salvage.ts";
+import { withSshTunnel } from "./ssh.ts";
+import { postChatCompletion } from "./chat-request.ts";
 
 type OpenAIMessage = {
 	role: "system" | "user" | "assistant" | "tool";
@@ -116,6 +118,28 @@ export function stream(
 	options: StreamOptions & { toolsMode?: "native" | "text" } = {},
 ): AssistantMessageEventStream {
 	const out = new AssistantMessageEventStream();
+	if (model.sshHost) {
+		void (async () => {
+			try {
+				let final: AssistantMessageEvent | undefined;
+				await withSshTunnel(model.baseUrl, model.sshHost, async baseUrl => {
+					for await (const event of stream({ ...model, baseUrl, sshHost: undefined }, context, options)) {
+						if (event.type === "done" || event.type === "error") final = event;
+						else out.push(event);
+					}
+				}, { signal: options.signal, timeoutMs: options.timeoutMs });
+				if (final) out.push(final);
+			} catch (error) {
+				const aborted = options.signal?.aborted || (error as Error).name === "AbortError";
+				out.push({ type: "error", reason: aborted ? "aborted" : "error", error: {
+					role: "assistant", content: [], provider: model.provider, model: model.id,
+					usage: { input: 0, output: 0, totalTokens: 0 }, stopReason: aborted ? "aborted" : "error",
+					errorMessage: (error as Error).message, timestamp: Date.now(),
+				} });
+			}
+		})();
+		return out;
+	}
 
 	void (async () => {
 		const message: AssistantMessage = {
@@ -171,25 +195,15 @@ export function stream(
 			};
 			if (options.apiKey) headers["Authorization"] = `Bearer ${options.apiKey}`;
 
-			const request = () => fetch(`${model.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-				method: "POST", headers, body: JSON.stringify(body), signal: options.signal,
+			const response = await postChatCompletion(`${model.baseUrl.replace(/\/$/, "")}/chat/completions`, body, {
+				headers, signal: options.signal, redirect: "error",
 			});
-			let response = await request();
-			// Older compatible servers reject the optional usage extension. Retry
-			// only a rejected request that explicitly names this unsupported field.
-			if ((response.status === 400 || response.status === 422) && body.stream_options) {
-				const detail = await response.clone().text();
-				if (/stream_options/i.test(detail)) {
-					await response.body?.cancel();
-					delete body.stream_options;
-					response = await request();
-				}
-			}
 
 			if (!response.ok) {
 				const text = await response.text().catch(() => "");
 				message.stopReason = "error";
-				message.errorMessage = `HTTP ${response.status} from ${model.baseUrl}: ${text.slice(0, 800)}`;
+				const detail = options.apiKey ? text.split(options.apiKey).join("[redacted]") : text;
+				message.errorMessage = `HTTP ${response.status} from ${model.baseUrl}: ${detail.slice(0, 800)}`;
 				emit({ type: "error", reason: "error", error: message });
 				return;
 			}

@@ -6,6 +6,7 @@
 import { agentLoop } from "../agent/agent-loop.ts";
 import type { AgentContext, AgentMessage, AgentTool, AgentEvent } from "../agent/agent-loop.ts";
 import { stream as openaiStream, TEXT_TOOL_INSTRUCTIONS } from "../ai/openai-completions.ts";
+import { streamCli } from "../ai/cli-provider.ts";
 import { decideToolMode, looksLikeBrokenNativeTools, recordDecision } from "../ai/compat.ts";
 import type { ToolMode } from "../ai/compat.ts";
 import { apiKeyFor, loadConfig, resolveModel } from "../ai/models.ts";
@@ -25,6 +26,7 @@ export interface RunnerOptions {
 	modelOverride?: string;
 	baseUrlOverride?: string;
 	providerOverride?: string;
+	sshHostOverride?: string;
 	toolsMode?: ToolMode;
 	maxTurns?: number;
 	temperature?: number;
@@ -66,9 +68,10 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 		model: opts.modelOverride,
 		baseUrl: opts.baseUrlOverride,
 		provider: opts.providerOverride,
+		sshHost: opts.sshHostOverride,
 	});
 	if (opts.contextWindow !== undefined) model.contextWindow = opts.contextWindow;
-	const apiKey = apiKeyFor(model.provider);
+	const apiKey = apiKeyFor(model.provider, model.baseUrl, model.sshHost);
 	const config = loadConfig();
 	const reserveTokens = opts.reserveTokens ?? config.posthorse?.reserveTokens;
 	// Small local windows need a smaller implicit output budget. Explicit
@@ -78,7 +81,8 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 		if (Number.isSafeInteger(reserveTokens) && reserveTokens! > 0) model.maxTokens = Math.min(model.maxTokens, reserveTokens!);
 	}
 	const forcedMode = opts.toolsMode ?? config.toolsMode ?? "auto";
-	const decision = decideToolMode(model.provider, model.id, forcedMode);
+	const cliProvider = model.baseUrl.startsWith("cli://");
+	const decision = cliProvider ? { mode: "text" as const, source: "official CLI" } : decideToolMode(model.provider, model.id, forcedMode);
 
 	const withContextTools = opts.tools === undefined;
 	const autoContext = opts.autoContext ?? (withContextTools && config.posthorse?.enabled !== false);
@@ -144,7 +148,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					transformContext: async (messages) => posthorse.prepare(messages),
 					afterToolBatch: (info) => posthorse.afterBatch(info),
 					recoverFromError: ({ message, context: loopContext }) => posthorse.recover(message, loopContext.messages),
-					streamFn: (m, ctx, o) => openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
+					streamFn: (m, ctx, o) => cliProvider ? streamCli(m, ctx, o) : openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
 					maxTurns: opts.maxTurns ?? 60,
 					getSteeringMessages: () => steering.splice(0, steering.length),
 					beforeToolCall: async (info) => {

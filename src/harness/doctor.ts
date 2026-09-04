@@ -11,11 +11,13 @@
  * made self-healing — it feeds `rein heartbeat`, the self-sustaining loop.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { dim, green, red, yellow } from "../util/ansi.ts";
-import { loadConfig, apiKeyFor } from "../ai/models.ts";
+import { loadConfig, apiKeyFor, detectEndpoint, guessProvider, normalizeBaseUrl } from "../ai/models.ts";
+import type { ReinConfig } from "../ai/models.ts";
+import { checkCliAuth } from "./auth.ts";
 import { matchCatalog, CATALOG } from "../hardware/catalog.ts";
 import { bestAssessment } from "../hardware/fit.ts";
 import { profileHardware } from "../hardware/profile.ts";
@@ -76,20 +78,39 @@ function newestMtime(dir: string): number {
 	return newest;
 }
 
-async function checkServerModels(baseUrl: string, model: string): Promise<{ reachable: boolean; models: string[] }> {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), 5_000);
+export function usesLocalHardware(config: ReinConfig): boolean {
+	if (!config.baseUrl || config.sshHost) return false;
 	try {
-		const res = await fetch(baseUrl.replace(/\/$/, "") + "/models", { signal: controller.signal });
-		if (!res.ok) return { reachable: false, models: [] };
-		const json = (await res.json().catch(() => ({}))) as any;
-		const models: string[] = (json?.data ?? []).map((m: any) => m?.id).filter(Boolean);
-		return { reachable: true, models };
-	} catch {
-		return { reachable: false, models: [] };
-	} finally {
-		clearTimeout(timer);
+		const host = new URL(normalizeBaseUrl(config.baseUrl)).hostname;
+		return host === "localhost" || host === "[::1]" || /^127\./.test(host);
+	} catch { return false; }
+}
+
+/** Provider diagnosis never launches login or repairs an unrelated local server. */
+export async function checkConfiguredProvider(config: ReinConfig): Promise<DoctorCheck> {
+	const cli = config.auth?.type === "cli" ? config.auth.provider ?? config.provider : config.provider;
+	if (cli === "codex" || cli === "copilot") {
+		const status = await checkCliAuth(cli);
+		return { name: "server", status: !status.available || status.authenticated === false ? "fail" : status.authenticated === null ? "warn" : "ok",
+			detail: status.detail, fix: status.authenticated === true ? undefined : `rein login ${cli}` };
 	}
+	try {
+		const baseUrl = normalizeBaseUrl(config.baseUrl!);
+		const provider = config.provider ?? guessProvider(baseUrl);
+		const detected = await detectEndpoint(baseUrl, { provider, apiKey: apiKeyFor(provider, baseUrl, config.sshHost), sshHost: config.sshHost, timeoutMs: 5000 });
+		if (detected.error) return { name: "server", status: "fail", detail: detected.error, fix: "rein setup --status; check the server listener and VPN/SSH connection" };
+		if (detected.baseUrl.replace(/\/$/, "") !== baseUrl.replace(/\/$/, "")) return {
+			name: "server", status: "fail", detail: `API responds at ${detected.baseUrl}, but the saved endpoint is ${baseUrl}`,
+			fix: "rein setup --yes to save the detected API prefix",
+		};
+		const listed = detected.models.includes(config.model!) || provider === "ollama" && detected.models.includes(`${config.model}:latest`);
+		const localOllama = provider === "ollama" && usesLocalHardware(config);
+		return {
+			name: "server", status: listed ? "ok" : "warn",
+			detail: `${detected.models.length} model(s) listed${listed ? ", configured model present" : `; ${config.model} is not listed`}${config.sshHost ? ` via SSH ${config.sshHost}` : ""}`,
+			fix: listed ? undefined : localOllama ? `ollama pull ${config.model}` : "rein setup to select a model served by this endpoint",
+		};
+	} catch (error) { return { name: "server", status: "fail", detail: (error as Error).message, fix: "rein setup" }; }
 }
 
 export async function runDoctor(opts: { fix?: boolean; quiet?: boolean } = {}): Promise<DoctorResult> {
@@ -120,7 +141,13 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean } = {}): 
 			let real = binPath;
 			try { real = realpathSync(binPath); } catch { /* not a symlink */ }
 			repo = gitRootOf(real);
-			const distOk = repo && existsSync(join(repo, "dist", "rein.js"));
+			let installedPackage = false;
+			try {
+				const packageRoot = dirname(dirname(real));
+				installedPackage = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).name === "rein-agent"
+					&& real === join(packageRoot, "dist", "rein.js");
+			} catch { /* A source checkout or an incomplete install. */ }
+			const distOk = installedPackage || repo && existsSync(join(repo, "dist", "rein.js"));
 			checks.push({
 				name: "bin",
 				status: distOk ? "ok" : "fail",
@@ -180,31 +207,11 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean } = {}): 
 		fix: hasConfig ? undefined : "rein setup",
 	});
 
-	// 6. server reachable + model listed (only when we have a local-ish config)
-	let models: string[] = [];
-	let reachable = false;
-	if (hasConfig) {
-		({ reachable, models } = await checkServerModels(config.baseUrl!, config.model!));
-		if (!reachable) {
-			checks.push({ name: "server", status: "fail", detail: `${config.baseUrl} not answering /models (5s)`, fix: "start the model server (ollama serve) or fix baseUrl" });
-		} else {
-			const listed = models.some((m) => m === config.model || m.startsWith(config.model!));
-			checks.push({
-				name: "server",
-				status: listed ? "ok" : "fail",
-				detail: `${models.length} model(s) listed` + (listed ? ", configured model present" : `, "${config.model}" NOT listed`),
-				fix: listed ? undefined : `ollama pull ${config.model}`,
-				autoFix: listed ? undefined : async () => {
-					const r = sh(`ollama pull ${JSON.stringify(config.model!)}`, { timeout: 300_000 });
-					if (r.err) throw new Error(r.err);
-					return `ollama pull ${config.model}`;
-				},
-			});
-		}
-	}
+	// 6. Probe the selected endpoint, including protected APIs and SSH tunnels.
+	if (hasConfig) checks.push(await checkConfiguredProvider(config));
 
 	// 7. hardware fit (local servers only — a remote model lives on other metal)
-	const localish = /localhost|127\.0\.0\.1|192\.168\.|10\./.test(config.baseUrl ?? "");
+	const localish = usesLocalHardware(config);
 	if (hasConfig && localish) {
 		try {
 			const profile = await profileHardware();
@@ -234,8 +241,8 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean } = {}): 
 	}
 
 	// 8. config perms
-	const cfgPath = join(homedir(), ".rein", "config.json");
-	if (existsSync(cfgPath) && (config.apiKey || apiKeyFor(config.provider))) {
+	const cfgPath = join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json");
+	if (existsSync(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
 		const mode = lstatSync(cfgPath).mode & 0o777;
 		checks.push({
 			name: "perms",
