@@ -5,7 +5,8 @@ import { truncateLines } from "../../util/truncate.ts";
 
 const execFileAsync = promisify(execFile);
 
-const bashTool: AgentTool = {
+export function createBashTool(cwd?: string): AgentTool {
+	return {
 	name: "bash",
 	description:
 		"Execute a bash command in the working directory. Returns stdout and stderr combined (stderr after stdout). Long output is truncated with head+tail. Use a timeout for slow commands.",
@@ -27,6 +28,7 @@ const bashTool: AgentTool = {
 		let timedOut = false;
 		try {
 			const result = await execFileAsync("bash", ["-c", command], {
+				cwd,
 				timeout: timeoutSec * 1000,
 				maxBuffer: 8 * 1024 * 1024,
 				signal,
@@ -53,6 +55,7 @@ const bashTool: AgentTool = {
 			details: { exitCode: code, timedOut, truncated: truncated.truncated },
 		};
 	},
-};
+	};
+}
 
-export default bashTool;
+export default createBashTool();

@@ -19,6 +19,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Tool } from "./types.ts";
 
 export type ToolMode = "native" | "text" | "auto";
 
@@ -70,7 +71,8 @@ const NATIVE_NO = [
 	/starcoder[-_]?1b/i,
 ];
 
-const storePath = () => join(homedir(), ".rein", "capabilities.json");
+const reinHome = () => process.env.REIN_HOME || join(homedir(), ".rein");
+const storePath = () => join(reinHome(), "capabilities.json");
 
 function readStore(): Record<string, CapabilityDecision> {
 	try {
@@ -93,7 +95,7 @@ export function decideToolMode(provider: string, modelId: string, forced: ToolMo
 	if (forced !== "auto") {
 		const mode: CapabilityDecision = { mode: forced, source: "forced" };
 		try {
-			mkdirSync(join(homedir(), ".rein"), { recursive: true });
+			mkdirSync(reinHome(), { recursive: true });
 			store[key] = mode;
 			writeFileSync(storePath(), JSON.stringify(store, null, 2));
 		} catch {
@@ -117,7 +119,7 @@ export function decideToolMode(provider: string, modelId: string, forced: ToolMo
 /** Persist a decision (used by the runtime fallback and --tools). */
 export function recordDecision(provider: string, modelId: string, mode: "native" | "text", source: CapabilityDecision["source"]): void {
 	try {
-		mkdirSync(join(homedir(), ".rein"), { recursive: true });
+		mkdirSync(reinHome(), { recursive: true });
 		const store = readStore();
 		store[keyFor(provider, modelId)] = { mode, source };
 		writeFileSync(storePath(), JSON.stringify(store, null, 2));
@@ -126,18 +128,19 @@ export function recordDecision(provider: string, modelId: string, mode: "native"
 	}
 }
 
-/**
- * Inspect a completed toolUse turn. Returns true when the evidence says the
- * model cannot do native tool calling and we should fall back to text mode:
- *  - every call has an empty arguments object, or
- *  - at least one call has an empty name (server emitted tool_calls but the
- *    model didn't fill them in)
- */
-export function looksLikeBrokenNativeTools(toolCalls: { name: string; arguments: Record<string, unknown> }[]): boolean {
+/** Empty arguments only indicate failure for a tool that requires arguments. */
+export function looksLikeBrokenNativeTools(
+	toolCalls: { name: string; arguments: Record<string, unknown> }[],
+	tools?: Tool[],
+): boolean {
 	if (toolCalls.length === 0) return false;
-	const allEmpty = toolCalls.every((tc) => Object.keys(tc.arguments ?? {}).length === 0);
-	const anyUnnamed = toolCalls.some((tc) => !tc.name);
-	return allEmpty || anyUnnamed;
+	if (toolCalls.some((tc) => !tc.name)) return true;
+	return toolCalls.every((tc) => {
+		if (Object.keys(tc.arguments ?? {}).length > 0) return false;
+		const tool = tools?.find((t) => t.name === tc.name);
+		// Without a schema, {} may be a valid no-argument tool call.
+		return (tool?.parameters.required?.length ?? 0) > 0;
+	});
 }
 
 /** One nudge, phrased for a model that just fumbled native tool calls. */

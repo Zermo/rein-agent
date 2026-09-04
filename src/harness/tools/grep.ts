@@ -6,7 +6,7 @@ const execFileAsync = promisify(execFile);
 
 const grepTool: AgentTool = {
 	name: "grep",
-	description: "Search file contents for a pattern (regex or literal). Returns matching lines as path:line:text. Respects .gitignore in git repos.",
+	description: "Search file contents for a pattern (regex or literal). Returns matching lines as path:line:text.",
 	parameters: {
 		type: "object",
 		properties: {
@@ -26,7 +26,7 @@ const grepTool: AgentTool = {
 		if (args.literal) argsArr.push("-F");
 		const context = typeof args.context === "number" ? args.context : 0;
 		if (context > 0) argsArr.push("-C", String(context));
-		argsArr.push("-n", "--color=never");
+		argsArr.push("-r", "-n", "--color=never");
 		argsArr.push(`-m${typeof args.limit === "number" ? args.limit : 100}`);
 		if (args.glob) argsArr.push(`--include=${args.glob}`);
 		argsArr.push("--", args.pattern, args.path ?? ".");

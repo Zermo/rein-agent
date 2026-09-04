@@ -76,8 +76,8 @@ export function pickDefaultModelId(ids: string[]): string | undefined {
 	// Prefer larger models when names carry sizes (local models usually do)
 	const withSize = ids
 		.map((id) => {
-			const m = id.match(/(\d+(?:\.\d+)?)\s*[bBkKmMgG]\b/);
-			return { id, size: m ? parseFloat(m[1]) * (m[2]!.toLowerCase() === "k" ? 0.001 : 1) : -1 };
+			const m = id.match(/(\d+(?:\.\d+)?)\s*([bBkKmMgG])\b/);
+			return { id, size: m ? parseFloat(m[1]) * ({ k: 0.000001, m: 0.001, b: 1, g: 1 }[m[2].toLowerCase()] ?? 1) : -1 };
 		})
 		.filter((x) => x.size >= 7)
 		.sort((a, b) => b.size - a.size);
@@ -85,11 +85,11 @@ export function pickDefaultModelId(ids: string[]): string | undefined {
 	return ids[0];
 }
 
-async function fetchJson(url: string, timeoutMs = 1500): Promise<any> {
+async function fetchJson(url: string, timeoutMs = 1500, apiKey?: string): Promise<any> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
-		const res = await fetch(url, { signal: controller.signal });
+		const res = await fetch(url, { signal: controller.signal, headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined });
 		if (!res.ok) return undefined;
 		return await res.json();
 	} catch {
@@ -126,10 +126,12 @@ export interface ReinConfig {
 	maxTokens?: number;
 	toolsMode?: "native" | "text" | "auto";
 	contextWindow?: number;
+	posthorse?: { enabled?: boolean; reserveTokens?: number };
 	tinyfish?: { apiKey?: string };
 }
 
 export function apiKeyFor(provider?: string): string | undefined {
+	provider = provider?.toLowerCase();
 	if (provider && PROVIDER_PRESETS[provider]) {
 		const envKey = process.env[PROVIDER_PRESETS[provider].keyEnv];
 		if (envKey) return envKey;
@@ -139,7 +141,7 @@ export function apiKeyFor(provider?: string): string | undefined {
 }
 
 export function loadConfig(): ReinConfig {
-	const path = join(homedir(), ".rein", "config.json");
+	const path = join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json");
 	try {
 		if (existsSync(path)) return JSON.parse(readFileSync(path, "utf8")) as ReinConfig;
 	} catch {
@@ -150,10 +152,9 @@ export function loadConfig(): ReinConfig {
 
 /**
  * Resolve the active model:
- *   1. explicit override (env REIN_BASE_URL+REIN_MODEL, or --model with --base-url)
- *   2. config file model (if its base url is set)
- *   3. first discovered local server + preferred model
- *   4. config file base url + model with no discovery
+ *   1. CLI base URL or provider, then environment, then config
+ *   2. Selected endpoint + explicit/configured model, or its /models list
+ *   3. Local discovery only when no endpoint was selected
  */
 export async function resolveModel(
 	overrides: { model?: string; baseUrl?: string; provider?: string } = {},
@@ -174,37 +175,42 @@ export async function resolveModel(
 		providerName = overrides.provider.toLowerCase();
 	}
 
-	const baseUrl = (overrides.baseUrl ?? envBase ?? config.baseUrl ?? (providerBaseUrl ?? "")).replace(/\/$/, "");
+	const baseUrl = (overrides.baseUrl ?? providerBaseUrl ?? envBase ?? config.baseUrl ?? "").replace(/\/$/, "");
 	const modelId = overrides.model ?? envModel ?? config.model;
 
 	if (baseUrl && modelId) {
 		return {
 			id: modelId,
-			provider: providerName ?? (overrides.baseUrl ? "custom" : (await guessProvider(baseUrl))),
+			provider: providerName ?? guessProvider(baseUrl, overrides.baseUrl ? "custom" : "openai-compatible"),
 			baseUrl,
 			contextWindow: config.contextWindow ?? 32_768,
 			maxTokens: config.maxTokens ?? 4096,
 		};
 	}
 
-	const servers = await discoverLocalServers();
-	if (servers.length > 0) {
-		const server = servers[0];
-		const id = modelId && server.models?.includes(modelId) ? modelId : pickDefaultModelId(server.models ?? []);
-		if (id) {
-			return {
-				id,
-				provider: server.provider,
-				baseUrl: server.baseUrl,
-				contextWindow: config.contextWindow ?? 32_768,
-				maxTokens: config.maxTokens ?? 4096,
-			};
-		}
+	// A selected endpoint must never silently redirect to a different local server.
+	if (baseUrl) {
+		const provider = providerName ?? guessProvider(baseUrl, overrides.baseUrl ? "custom" : "openai-compatible");
+		const data = await fetchJson(`${baseUrl}/models`, 1500, apiKeyFor(provider));
+		const ids = Array.isArray(data?.data) ? data.data.map((m: any) => m.id).filter((id: unknown) => typeof id === "string") : [];
+		const id = pickDefaultModelId(ids);
+		if (!id) throw new Error(`No models found at ${baseUrl}. Specify --model or REIN_MODEL for this endpoint.`);
+		return { id, provider, baseUrl, contextWindow: config.contextWindow ?? 32_768, maxTokens: config.maxTokens ?? 4096 };
 	}
 
-	if (baseUrl && config.model) {
-		return { id: config.model, provider: "custom", baseUrl, contextWindow: config.contextWindow ?? 32_768, maxTokens: config.maxTokens ?? 4096 };
+	const servers = await discoverLocalServers();
+	const server = modelId ? servers.find((server) => server.models?.includes(modelId)) : servers[0];
+	if (server) {
+		const id = modelId ?? pickDefaultModelId(server.models ?? []);
+		if (id) return {
+			id,
+			provider: server.provider,
+			baseUrl: server.baseUrl,
+			contextWindow: config.contextWindow ?? 32_768,
+			maxTokens: config.maxTokens ?? 4096,
+		};
 	}
+	if (modelId) throw new Error(`Model "${modelId}" was not found on a local server. Specify --base-url or --provider for its endpoint.`);
 
 	throw new Error(
 		"No local AI server found.\n" +
@@ -214,10 +220,17 @@ export async function resolveModel(
 	);
 }
 
-async function guessProvider(baseUrl: string): Promise<string> {
-	if (baseUrl.includes("11434")) return "ollama";
-	if (baseUrl.includes("1234")) return "lmstudio";
-	if (baseUrl.includes("8080")) return "llamacpp";
-	if (baseUrl.includes("8000")) return "vllm";
-	return "openai-compatible";
+function guessProvider(baseUrl: string, fallback = "openai-compatible"): string {
+	const normalized = baseUrl.replace(/\/$/, "");
+	for (const [provider, preset] of Object.entries(PROVIDER_PRESETS)) {
+		if (normalized === preset.baseUrl) return provider;
+	}
+	try {
+		const url = new URL(baseUrl);
+		if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+			const local = LOCAL_SERVERS.find((server) => new URL(server.baseUrl).port === url.port);
+			if (local) return local.provider;
+		}
+	} catch { /* Invalid custom URLs are reported by the request. */ }
+	return fallback;
 }

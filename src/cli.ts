@@ -83,6 +83,9 @@ Options:
   --tools <auto|native|text>       tool protocol (auto = capability table + runtime fallback)
   --max-turns <n>                  safety cap per prompt (default 60)
   --temperature <t>                sampling temperature
+  --context-window <n>             model context window in tokens
+  --reserve-tokens <n>             tokens reserved before rollover
+  --no-auto-context                disable automatic context rollover
   --max-iterations <n>             loop/improve: max iterations
   --task-file <f>                  loop: task file (default TASK.md)
   --metric-file <f>                loop: metric file (default METRIC.md)
@@ -100,40 +103,54 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-function parseArgs(argv: string[]): ParsedArgs {
-	const _ : string[] = [];
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init"]);
+
+export function parseArgs(argv: string[]): ParsedArgs {
+	const positional: string[] = [];
 	const flags: Record<string, string | boolean> = {};
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
-		if (a.startsWith("--")) {
-			const key = a.slice(2);
-			const next = argv[i + 1];
-			if (next !== undefined && !next.startsWith("--")) {
-				flags[key] = next;
-				i++;
-			} else {
-				flags[key] = true;
-			}
-		} else if (a.startsWith("-") && a.length === 2) {
-			const key = a.slice(1);
-			const next = argv[i + 1];
-			if (next !== undefined && !next.startsWith("-")) {
-				flags[key] = next;
-				i++;
-			} else {
-				flags[key] = true;
-			}
-		} else {
-			_.push(a);
+		if (a === "--") {
+			positional.push(...argv.slice(i + 1));
+			break;
 		}
+		if (a.startsWith("--") || (a.startsWith("-") && a.length === 2)) {
+			const raw = a.slice(a.startsWith("--") ? 2 : 1);
+			const eq = raw.indexOf("=");
+			const key = eq < 0 ? raw : raw.slice(0, eq);
+			if (BOOLEAN_FLAGS.has(key)) {
+				if (eq >= 0 && !["true", "false"].includes(raw.slice(eq + 1))) throw new Error(`--${key} expects true or false`);
+				flags[key] = eq < 0 || raw.slice(eq + 1) === "true";
+			} else if (eq >= 0) {
+				flags[key] = raw.slice(eq + 1);
+			} else {
+				const next = argv[i + 1];
+				if (next !== undefined && (!next.startsWith("-") || /^-\d/.test(next))) {
+					flags[key] = next;
+					i++;
+				} else {
+					flags[key] = true;
+				}
+			}
+		} else positional.push(a);
 	}
-	return { _: _, flags };
+	return { _: positional, flags };
+}
+
+function numberFlag(flags: ParsedArgs["flags"], name: string, min: number, integer = true): number | undefined {
+	const raw = flags[name];
+	if (raw === undefined) return undefined;
+	const value = typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
+	if (!Number.isFinite(value) || value < min || (integer && !Number.isSafeInteger(value))) {
+		throw new Error(`--${name} must be ${integer ? "an integer" : "a number"} >= ${min}`);
+	}
+	return value;
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
 	const { _, flags } = parseArgs(argv);
 
-	if (flags.help === true || _[0] === "help") {
+	if (flags.help === true || flags.h === true || _[0] === "help") {
 		usage();
 		return;
 	}
@@ -143,14 +160,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 
+	if (flags.tools !== undefined && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
+	const maxIterations = numberFlag(flags, "max-iterations", 1);
 	const common = {
 		cwd: process.cwd(),
 		modelOverride: typeof flags.model === "string" ? flags.model : undefined,
 		baseUrlOverride: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined,
 		providerOverride: typeof flags.provider === "string" ? flags.provider : undefined,
 		toolsMode: (typeof flags.tools === "string" ? flags.tools : undefined) as "auto" | "native" | "text" | undefined,
-		maxTurns: typeof flags["max-turns"] === "string" ? parseInt(flags["max-turns"]) : undefined,
-		temperature: typeof flags.temperature === "string" ? parseFloat(flags.temperature) : undefined,
+		maxTurns: numberFlag(flags, "max-turns", 1),
+		temperature: numberFlag(flags, "temperature", 0, false),
+		contextWindow: numberFlag(flags, "context-window", 1),
+		reserveTokens: numberFlag(flags, "reserve-tokens", 0),
+		autoContext: flags["no-auto-context"] === true ? false : undefined,
 		askTools: typeof flags.ask === "string" ? flags.ask.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
 	};
 
@@ -211,7 +233,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 			...common,
 			taskFile: typeof flags["task-file"] === "string" ? flags["task-file"] : undefined,
 			metricFile: typeof flags["metric-file"] === "string" ? flags["metric-file"] : undefined,
-			maxIterations: typeof flags["max-iterations"] === "string" ? parseInt(flags["max-iterations"]) : undefined,
+			maxIterations: maxIterations,
 		});
 		return;
 	}
@@ -231,7 +253,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		await runImproveLoop({
 			...common,
 			goal: goal || undefined,
-			maxIterations: typeof flags["max-iterations"] === "string" ? parseInt(flags["max-iterations"]) : 5,
+			maxIterations: maxIterations ?? 5,
 		});
 		return;
 	}

@@ -11,3 +11,6 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
+
+# Posthorse notes contain local working context
+.pi/notes/

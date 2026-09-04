@@ -42,7 +42,7 @@ interface StreamingToolCall {
 	args: string;
 }
 
-function toOpenAIMessage(message: Message): OpenAIMessage | OpenAIMessage[] {
+function toOpenAIMessage(message: Message, toolsMode: "native" | "text"): OpenAIMessage | OpenAIMessage[] {
 	switch (message.role) {
 		case "user":
 			return { role: "user", content: message.content };
@@ -53,7 +53,9 @@ function toOpenAIMessage(message: Message): OpenAIMessage | OpenAIMessage[] {
 				.join("");
 			const calls = message.content.filter((c) => c.type === "toolCall") as ToolCall[];
 			const out: OpenAIMessage = { role: "assistant", content: text.length > 0 ? text : null };
-			if (calls.length > 0) {
+			if (calls.length > 0 && toolsMode === "text") {
+				out.content = [text, ...calls.map((c) => `<tool name="${c.name}">\n${JSON.stringify(c.arguments ?? {})}\n</tool>`)].filter(Boolean).join("\n\n");
+			} else if (calls.length > 0) {
 				out.tool_calls = calls.map((c) => ({
 					id: c.id,
 					type: "function" as const,
@@ -63,6 +65,10 @@ function toOpenAIMessage(message: Message): OpenAIMessage | OpenAIMessage[] {
 			return out;
 		}
 		case "toolResult":
+			if (toolsMode === "text") return {
+				role: "user",
+				content: `Result of tool ${message.toolName} (${message.toolCallId}):\n${message.content.map((c) => c.text).join("\n")}`,
+			};
 			return {
 				role: "tool",
 				tool_call_id: message.toolCallId,
@@ -89,27 +95,15 @@ const TOOL_BLOCK_RE = /<tool\s+name="([^"]+)"\s*>([\s\S]*?)<\/tool>/g;
 /** Parse <tool> blocks out of text (text tool-call mode). */
 export function parseTextToolCalls(text: string): { toolCalls: ToolCall[]; cleanText: string } {
 	const toolCalls: ToolCall[] = [];
-	let match: RegExpExecArray | null;
-	let cleanText = text;
-	let seq = 0;
-	while ((match = TOOL_BLOCK_RE.exec(text)) !== null) {
-		const name = match[1];
-		const rawArgs = match[2];
+	const cleanText = text.replace(TOOL_BLOCK_RE, (block, name: string, rawArgs: string) => {
 		const args = parseArgsSalvaged(rawArgs.trim());
-		if (Object.keys(args).length === 0) {
-			// Model wrote a tool block with no parsable args. Preserve as text so the
-			// model can see and fix it rather than silently dropping the call.
-			continue;
-		}
-		toolCalls.push({ type: "toolCall", id: `call_${Date.now()}_${seq++}`, name, arguments: args });
-	}
-	if (toolCalls.length > 0) {
-		cleanText = text
-			.replace(TOOL_BLOCK_RE, (_m) => "")
-			.replace(/\n{3,}/g, "\n\n")
-			.trim();
-	}
-	return { toolCalls, cleanText };
+		// The salvage parser returns {} for failure and valid empty objects.
+		// Accept the latter for tools with no required parameters (e.g. rollover).
+		if (Object.keys(args).length === 0 && !/^\s*\{\s*\}\s*$/.test(rawArgs)) return block;
+		toolCalls.push({ type: "toolCall", id: `call_${Date.now()}_${toolCalls.length}`, name, arguments: args });
+		return "";
+	});
+	return { toolCalls, cleanText: toolCalls.length > 0 ? cleanText.replace(/\n{3,}/g, "\n\n").trim() : text };
 }
 
 /**
@@ -142,10 +136,13 @@ export function stream(
 			const messages: OpenAIMessage[] = [];
 			const systemParts: string[] = [];
 			if (context.systemPrompt) systemParts.push(context.systemPrompt);
-			if (toolsMode === "text" && hasTools) systemParts.push(TEXT_TOOL_INSTRUCTIONS);
+			if (toolsMode === "text" && hasTools) {
+				systemParts.push(TEXT_TOOL_INSTRUCTIONS);
+				systemParts.push("Available tools:\n" + context.tools!.map((t) => `${t.name}: ${t.description}\nParameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
+			}
 			if (systemParts.length > 0) messages.push({ role: "system", content: systemParts.join("\n\n") });
 			for (const m of context.messages) {
-				const converted = toOpenAIMessage(m);
+				const converted = toOpenAIMessage(m, toolsMode);
 				if (Array.isArray(converted)) messages.push(...converted);
 				else messages.push(converted);
 			}
@@ -174,21 +171,19 @@ export function stream(
 			};
 			if (options.apiKey) headers["Authorization"] = `Bearer ${options.apiKey}`;
 
-			let response: Response;
-			try {
-				response = await fetch(`${model.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-					method: "POST",
-					headers,
-					body: JSON.stringify(body),
-					signal: options.signal,
-				});
-			} catch (err) {
-				if ((err as Error).name === "AbortError") {
-					message.stopReason = "aborted";
-					emit({ type: "error", reason: "aborted", error: message });
-					return;
+			const request = () => fetch(`${model.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+				method: "POST", headers, body: JSON.stringify(body), signal: options.signal,
+			});
+			let response = await request();
+			// Older compatible servers reject the optional usage extension. Retry
+			// only a rejected request that explicitly names this unsupported field.
+			if ((response.status === 400 || response.status === 422) && body.stream_options) {
+				const detail = await response.clone().text();
+				if (/stream_options/i.test(detail)) {
+					await response.body?.cancel();
+					delete body.stream_options;
+					response = await request();
 				}
-				throw err;
 			}
 
 			if (!response.ok) {
@@ -248,6 +243,8 @@ export function stream(
 					continue; // some servers emit non-JSON keepalives
 				}
 
+				if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? JSON.stringify(chunk.error));
+
 				if (chunk.usage) {
 					const u: Usage = {
 						input: chunk.usage.prompt_tokens ?? 0,
@@ -264,7 +261,7 @@ export function stream(
 				if (!choice) continue;
 				if (choice.finish_reason) finishReason = choice.finish_reason;
 
-				const delta = choice.delta ?? {};
+				const delta = choice.delta ?? choice.message ?? {};
 				if (typeof delta.content === "string" && delta.content.length > 0) {
 					const block = ensureTextBlock();
 					block.text += delta.content;
@@ -284,8 +281,8 @@ export function stream(
 					emit({ type: "thinking_delta", contentIndex: message.content.indexOf(block), delta: reasoning, partial: message });
 				}
 				if (Array.isArray(delta.tool_calls)) {
-					for (const tc of delta.tool_calls) {
-						const idx = typeof tc.index === "number" ? tc.index : 0;
+					for (const [position, tc] of delta.tool_calls.entries()) {
+						const idx = typeof tc.index === "number" ? tc.index : position;
 						let st = textToolCalls.get(idx);
 						if (!st) {
 							st = { id: "", name: "", args: "" };
@@ -348,9 +345,10 @@ export function stream(
 				emit({ type: "done", reason: message.stopReason, message });
 			}
 		} catch (err) {
-			message.stopReason = "error";
+			const aborted = options.signal?.aborted || (err as Error)?.name === "AbortError";
+			message.stopReason = aborted ? "aborted" : "error";
 			message.errorMessage = (err as Error)?.message ?? String(err);
-			emit({ type: "error", reason: "error", error: message });
+			emit({ type: "error", reason: aborted ? "aborted" : "error", error: message });
 		}
 	})();
 

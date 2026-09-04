@@ -9,10 +9,9 @@
  * - sessions: every exchange appends to ~/.rein/sessions; /resume picks one up
  */
 import * as readline from "node:readline";
-import { randomUUID } from "node:crypto";
-import { appendEntries, branchSession, createSession, listSessions, loadSession } from "../agent/session.ts";
+import { branchSession, createSession, listSessions } from "../agent/session.ts";
 import type { AgentMessage } from "../agent/agent-loop.ts";
-import { cyan, dim, gray, green, red, yellow, bold, stripAnsi } from "../util/ansi.ts";
+import { cyan, dim, gray, green, red, yellow, bold } from "../util/ansi.ts";
 import type { Runner } from "./runner.ts";
 import type { AgentTool } from "../agent/agent-loop.ts";
 import * as nodeterm from "./nodeterm.ts";
@@ -26,7 +25,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	const { runner } = opts;
 	let sessionId = opts.resumeSessionId ?? createSession({ model: runner.model.id, provider: runner.model.provider, cwd: process.cwd() });
 
-	const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true, prompt: dim("❯ ") });
+	runner.setSession(sessionId);
+
+	const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY), prompt: dim("❯ ") });
 
 	console.log(
 		gray(
@@ -38,15 +39,16 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	}
 
 	let busy = false;
+	let controller: AbortController | undefined;
+	let approvalAnswer: ((line: string) => void) | undefined;
 
 	// --- live rendering state -------------------------------------------------
 	let currentText = "";
 	let thinkingOn = false;
 
 	const flushLine = () => {
-		if (currentText.trim()) {
-			process.stdout.write("\n" + currentText.trimEnd() + "\n");
-		}
+		if (currentText || thinkingOn) process.stdout.write("\n");
+		thinkingOn = false;
 		currentText = "";
 	};
 
@@ -72,6 +74,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			}
 			case "message_end": {
 				flushLine();
+				if (event.message.role === "assistant" && event.message.stopReason === "error") {
+					console.log(red(event.message.errorMessage ?? "model error"));
+				}
 				break;
 			}
 			case "tool_execution_start": {
@@ -92,20 +97,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		}
 	};
 
-	// Wire events into the runner's loop for every run.
-	const originalRun = runner.run.bind(runner);
-	runner.run = (prompt: AgentMessage, runOpts?: { signal?: AbortSignal }) => {
-		busy = true;
-		return originalRun(prompt, runOpts)
-			.then((messages) => {
-				appendEntries(sessionId, messages);
-				return messages;
-			})
-			.finally(() => {
-				busy = false;
-			});
-	};
-
 	// --- command handling ------------------------------------------------------
 	const handleCommand = async (line: string): Promise<boolean> => {
 		const [cmd, ...rest] = line.slice(1).split(/\s+/);
@@ -118,10 +109,12 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 						"  /new             start a fresh session",
 						"  /model           show the active model + tool mode",
 						"  /tools <list>    show available tools",
-					"  /ask [tools]   tools that need approval (y/N here, or canvas/phone)",
+						"  /ask [tools]    tools that need approval (y/N here, or canvas/phone)",
 						"  /sessions        list recent sessions",
 						"  /resume <id>     continue a previous session (reloads its messages)",
 						"  /branch          branch the current session and continue there",
+						"  /context         show context window usage",
+						"  /new-context [handoff]  start a fresh window in this session",
 						"  /quit            exit",
 					].join("\n"),
 				);
@@ -163,12 +156,12 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			}
 			case "new":
 				sessionId = createSession({ model: runner.model.id, provider: runner.model.provider, cwd: process.cwd() });
-				runner.context.messages = [];
+				runner.setSession(sessionId);
 				console.log(gray(`fresh session ${sessionId.slice(-8)}`));
 				return true;
 			case "sessions":
 				for (const s of listSessions(10)) {
-					console.log(`  ${s.id.slice(-12)}  ${gray(s.updated)}  ${dim(s.provider ?? "?")}/${dim(s.model ?? "?")}  ${s.messageCount} msgs`);
+					console.log(`  ${s.id}  ${gray(s.updated)}  ${dim(s.provider ?? "?")}/${dim(s.model ?? "?")}  ${s.messageCount} msgs`);
 				}
 				return true;
 			case "resume": {
@@ -176,18 +169,25 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 					console.log(yellow("usage: /resume <session id>"));
 					return true;
 				}
-				const { messages } = loadSession(arg);
+				runner.setSession(arg);
 				sessionId = arg;
-				runner.context.messages = [...messages];
-				console.log(gray(`resumed ${arg} with ${messages.length} messages`));
+				console.log(gray(`resumed ${arg} with ${runner.context.messages.length} messages`));
 				return true;
 			}
 			case "branch": {
 				const id = branchSession(sessionId);
+				runner.setSession(id);
 				sessionId = id;
 				console.log(gray(`branched to ${id.slice(-8)}`));
 				return true;
 			}
+			case "context":
+				console.log(gray(runner.contextStatus()));
+				return true;
+			case "new-context":
+				runner.newContext(arg || undefined);
+				console.log(gray(runner.contextStatus()));
+				return true;
 			case "quit":
 			case "exit":
 				return false;
@@ -204,6 +204,18 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	let inputClosed = false;
 	const lineQueue: string[] = [];
 	rl.on("line", (line) => {
+		if (approvalAnswer) {
+			const answer = approvalAnswer;
+			approvalAnswer = undefined;
+			answer(line);
+			return;
+		}
+		if (busy && line.trim() && !line.startsWith("/")) {
+			runner.steer({ role: "user", content: line, timestamp: Date.now() });
+			console.log(gray("(queued — I'll fold that in after the current step)"));
+			return;
+		}
+		if (busy && /^\/(quit|exit)\s*$/.test(line)) controller?.abort();
 		if (resolveLine) {
 			const r = resolveLine;
 			resolveLine = null;
@@ -214,6 +226,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	});
 	rl.on("close", () => {
 		inputClosed = true;
+		approvalAnswer?.("");
+		approvalAnswer = undefined;
 		if (resolveLine) {
 			const r = resolveLine;
 			resolveLine = null;
@@ -221,14 +235,25 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		}
 	});
 
-	// Approval fallback: the main loop is idle while the agent runs, so a queued
-	// line answer is exactly what we want (y/N). Outside a TTY there is nobody to ask.
-	runner.askFallback = async (name, args) => {
-		if (!process.stdin.isTTY) return false;
-		const s = JSON.stringify(args);
-		process.stdout.write(`\n\u26a1 approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} \u2014 [y/N] `);
-		const line = (await ask()) ?? "";
-		return /^y(es)?$/i.test(line.trim());
+	// Approval answers get a separate input slot so steering cannot consume them.
+	rl.on("SIGINT", () => {
+		if (busy) {
+			controller?.abort();
+			approvalAnswer?.("");
+			approvalAnswer = undefined;
+		} else rl.close();
+	});
+	let approvalTail = Promise.resolve(false);
+	runner.askFallback = (name, args) => {
+		const pending = approvalTail.then(async () => {
+			if (!process.stdin.isTTY || inputClosed || controller?.signal.aborted) return false;
+			const s = JSON.stringify(args);
+			process.stdout.write(`\n\u26a1 approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} \u2014 [y/N] `);
+			const line = await new Promise<string>((resolve) => { approvalAnswer = resolve; });
+			return /^y(es)?$/i.test(line.trim());
+		});
+		approvalTail = pending.catch(() => false);
+		return pending;
 	};
 
 	/** Next line; null means input is gone (EOF/Ctrl-D) and the queue is empty. */
@@ -237,7 +262,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		if (inputClosed) return Promise.resolve(null);
 		return new Promise((resolve) => {
 			resolveLine = (line) => resolve(line);
-			if (!rl.closed) rl.prompt();
+			if (!rl.closed && process.stdout.isTTY) rl.prompt();
 		});
 	};
 
@@ -246,30 +271,28 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		console.log(gray("ask me anything, or /help for commands. while I'm working, just type — I'll fold it in."));
 	}
 
-	let first = true;
 	while (true) {
 		const line = await ask();
 		if (line === null) break;
 		if (!line) continue;
 
 		if (line.startsWith("/")) {
-			const keep = await handleCommand(line);
-			if (!keep) break;
+			try {
+				const keep = await handleCommand(line);
+				if (!keep) break;
+			} catch (err) {
+				console.log(red((err as Error).message));
+			}
 			continue;
 		}
 
 		const userMsg: AgentMessage = { role: "user", content: line, timestamp: Date.now() };
 
-		if (busy) {
-			// Steering: the agent is mid-run; queue it and keep going.
-			runner.steer(userMsg);
-			console.log(gray("(queued — I'll fold that in after the current step)"));
-			continue;
-		}
-
 		try {
 			const started = Date.now();
-			await runner.run(userMsg);
+			busy = true;
+			controller = new AbortController();
+			await runner.run(userMsg, { signal: controller.signal, onEvent });
 			if (process.stdout.isTTY) process.stdout.write("\n");
 			const secs = ((Date.now() - started) / 1000).toFixed(1);
 			const usage = runner.context.messages[runner.context.messages.length - 1];
@@ -277,8 +300,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			console.log(gray(`${secs}s${tokens ? ` · ${tokens} out-tokens` : ""}`));
 		} catch (err) {
 			console.log(red(`something broke: ${(err as Error).message}`));
+		} finally {
+			busy = false;
+			controller = undefined;
+			flushLine();
 		}
-		if (first) first = false;
 	}
 
 	if (!rl.closed) rl.close();

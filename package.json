@@ -31,8 +31,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/smoke.ts",
-    "bundle": "node scripts/build.mjs"
+    "test": "node test/smoke.ts && node --test test/*.test.ts",
+    "bundle": "node scripts/build.mjs",
+    "check:posthorse": "node scripts/check-posthorse.mjs"
   },
   "keywords": [
     "agent",

@@ -12,6 +12,8 @@
  *   encoded in the stream, never thrown at the caller.
  */
 
+import type { AssistantMessageEventStream } from "./event-stream.ts";
+
 export interface TextContent {
 	type: "text";
 	text: string;
