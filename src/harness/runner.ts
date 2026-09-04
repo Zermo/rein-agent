@@ -4,18 +4,24 @@
  * experiment-loop modes.
  */
 import { agentLoop } from "../agent/agent-loop.ts";
-import type { AgentContext, AgentMessage, AgentTool } from "../agent/agent-loop.ts";
+import type { AgentContext, AgentMessage, AgentTool, AgentEvent } from "../agent/agent-loop.ts";
 import { stream as openaiStream, TEXT_TOOL_INSTRUCTIONS } from "../ai/openai-completions.ts";
 import { decideToolMode, looksLikeBrokenNativeTools, recordDecision } from "../ai/compat.ts";
 import type { ToolMode } from "../ai/compat.ts";
 import { apiKeyFor, loadConfig, resolveModel } from "../ai/models.ts";
 import type { AssistantMessage, Model } from "../ai/types.ts";
 import { buildSystemPrompt } from "./system-prompt.ts";
-import { TOOLS } from "./tools/index.ts";
+import { toolsForCwd } from "./tools/index.ts";
 import * as nodeterm from "./nodeterm.ts";
+import { Posthorse, POSTHORSE_GUIDANCE } from "./posthorse.ts";
+import { contextTools } from "./tools/context.ts";
 
 export interface RunnerOptions {
 	cwd: string;
+	contextWindow?: number;
+	reserveTokens?: number;
+	autoContext?: boolean;
+	sessionId?: string;
 	modelOverride?: string;
 	baseUrlOverride?: string;
 	providerOverride?: string;
@@ -45,10 +51,14 @@ export interface Runner {
 	/** Approval fallback (timeout, or outside nodeterm). REPL sets this to a stdin prompt. */
 	askFallback?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
 	context: AgentContext;
+	readonly sessionId?: string;
+	setSession(id: string): void;
+	contextStatus(): string;
+	newContext(handoff?: string): void;
 	/** Queue a message to be injected after the current tool batch. */
 	steer(message: AgentMessage): void;
 	/** One prompt through the loop; returns all new messages. */
-	run(prompt: AgentMessage, opts?: { signal?: AbortSignal }): Promise<AgentMessage[]>;
+	run(prompt: AgentMessage, opts?: { signal?: AbortSignal; onEvent?: (event: AgentEvent) => void | Promise<void> }): Promise<AgentMessage[]>;
 }
 
 export async function createRunner(opts: RunnerOptions): Promise<Runner> {
@@ -57,17 +67,31 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 		baseUrl: opts.baseUrlOverride,
 		provider: opts.providerOverride,
 	});
-	const apiKey = apiKeyFor(opts.providerOverride ?? (opts.baseUrlOverride ? undefined : model.provider));
+	if (opts.contextWindow !== undefined) model.contextWindow = opts.contextWindow;
+	const apiKey = apiKeyFor(model.provider);
 	const config = loadConfig();
+	const reserveTokens = opts.reserveTokens ?? config.posthorse?.reserveTokens;
+	// Small local windows need a smaller implicit output budget. Explicit
+	// maxTokens remains authoritative and is validated by Posthorse below.
+	if (config.maxTokens === undefined) {
+		model.maxTokens = Math.min(model.maxTokens, Math.max(1, Math.floor(model.contextWindow / 4)));
+		if (Number.isSafeInteger(reserveTokens) && reserveTokens! > 0) model.maxTokens = Math.min(model.maxTokens, reserveTokens!);
+	}
 	const forcedMode = opts.toolsMode ?? config.toolsMode ?? "auto";
 	const decision = decideToolMode(model.provider, model.id, forcedMode);
 
-	const basePrompt = opts.systemPrompt ?? buildSystemPrompt(opts.cwd);
-	const tools = opts.tools ?? TOOLS;
+	const withContextTools = opts.tools === undefined;
+	const autoContext = opts.autoContext ?? (withContextTools && config.posthorse?.enabled !== false);
+	const contextGuidance = autoContext ? POSTHORSE_GUIDANCE : POSTHORSE_GUIDANCE.replace("Automatic rollover starts a fresh window without generating a summary.", "Automatic rollover is disabled. Use new_context to start a fresh window without generating a summary.");
+	const basePrompt = (opts.systemPrompt ?? buildSystemPrompt(opts.cwd)) + (withContextTools ? contextGuidance : "");
+	const tools = [...(opts.tools ?? toolsForCwd(opts.cwd))];
 	let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
 
 	const steering: AgentMessage[] = [];
-	const context: AgentContext = { systemPrompt, messages: [], tools };
+	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools });
+	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd));
+	const context: AgentContext = { systemPrompt, messages: posthorse.messages, tools };
+	let running = false;
 	const askTools = [...(opts.askTools ?? [])];
 
 	/** Human summary of a tool call for approval prompts. */
@@ -91,18 +115,36 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 		tools,
 		askTools,
 		context,
+		askFallback: opts.askFallback,
+		get sessionId() { return posthorse.sessionId; },
+		setSession(id) {
+			if (running) throw new Error("Cannot switch sessions during an active run");
+			posthorse.setSession(id);
+			context.messages = posthorse.messages;
+			steering.length = 0;
+		},
+		contextStatus() { return posthorse.status(); },
+		newContext(handoff) {
+			if (running) throw new Error("Cannot manually reset context during an active run");
+			posthorse.rollover(handoff);
+		},
 
 		steer(message) {
 			steering.push(message);
 		},
 
-		run: (prompt, runOpts) =>
-			agentLoop(
+		run: async (prompt, runOpts) => {
+			if (running) throw new Error("Runner already active; use steer() for mid-run input");
+			running = true;
+			try { return await agentLoop(
 				[prompt],
 				runner.context,
 				{
 					model,
-					streamFn: (m, ctx, o) => openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: config.maxTokens, toolsMode: runner.toolsMode }),
+					transformContext: async (messages) => posthorse.prepare(messages),
+					afterToolBatch: (info) => posthorse.afterBatch(info),
+					recoverFromError: ({ message, context: loopContext }) => posthorse.recover(message, loopContext.messages),
+					streamFn: (m, ctx, o) => openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
 					maxTurns: opts.maxTurns ?? 60,
 					getSteeringMessages: () => steering.splice(0, steering.length),
 					beforeToolCall: async (info) => {
@@ -114,9 +156,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 							const verdict = await nodeterm.requestApproval(name, args);
 							if (verdict === "allow") return undefined;
 							if (verdict === "deny") return { block: true, reason: `Denied: ${name} ${summarizeArgs(args)} (canvas/phone said no)` };
-							// timeout — nodeterm's reference behavior is fail-open
-							console.error(`\n[approval] ${name}: no answer in time — proceeding (fail-open)\n`);
-							return undefined;
+							console.error(`\n[approval] ${name}: no answer in time — ${runner.askFallback ? "requesting local approval" : "denying execution"}\n`);
 						}
 						// Outside nodeterm (or on timeout there): the harness's own fallback
 						const ok = (await runner.askFallback?.(name, args)) ?? false;
@@ -125,6 +165,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 				},
 				runOpts?.signal,
 				async (event) => {
+					if (event.type === "message_end") posthorse.record(event.message);
 					// nodeterm status + title (no-ops outside a nodeterm node / non-TTY)
 					switch (event.type) {
 						case "agent_start":
@@ -143,17 +184,16 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 						nodeterm.setTitle("rein · idle");
 						break;
 					}
-					if (event.type === "turn_end") {
+					if (event.type === "turn_end" && forcedMode === "auto") {
 						await maybeFallBackToTextMode(runner, (event as { message: AssistantMessage }).message);
 					}
+					await runOpts?.onEvent?.(event);
 				},
-			).then((newMessages) => {
-				// Accumulate the conversation so the next prompt has memory.
-				context.messages.push(...newMessages);
-				return newMessages;
-			}),
+			); } finally { running = false; }
+		},
 	};
 
+	if (opts.sessionId) runner.setSession(opts.sessionId);
 	return runner;
 }
 
@@ -168,7 +208,7 @@ async function maybeFallBackToTextMode(runner: Runner, message: AssistantMessage
 	if (runner.toolsMode === "text") return;
 	const toolCalls = message.content.filter((c) => c.type === "toolCall") as { name: string; arguments: Record<string, unknown> }[];
 	if (message.stopReason !== "toolUse" || toolCalls.length === 0) return;
-	if (!looksLikeBrokenNativeTools(toolCalls)) return;
+	if (!looksLikeBrokenNativeTools(toolCalls, runner.tools)) return;
 
 	runner.toolsMode = "text";
 	runner.toolsModeSource = "runtime";

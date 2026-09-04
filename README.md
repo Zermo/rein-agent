@@ -67,7 +67,7 @@ build step and no devDependencies. To rebuild the bundle after changing
 source: `npm install && npm run bundle` (esbuild, dev-only).
 The compatibility commands `rein-agent` and `rein` point to the same CLI.
 
-Developing from source: `npm install && npm test` (63 checks, offline).
+Developing from source: `npm install && npm test` (offline smoke and regression suites).
 
 ```sh
 # local (the default):
@@ -96,7 +96,7 @@ rein setup                    onboarding wizard (also: --yes, --status)
 rein --version                print version
 ```
 
-REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /quit`.
+REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /context /new-context [handoff] /quit`.
 While the agent is working, just type — it's injected as a steering message
 after the current tool batch (pi's steering, not pi's queue).
 
@@ -120,6 +120,67 @@ small models (trailing commas, raw newlines, invalid escapes, prose around
 the JSON) are repaired, never fatal.
 
 Override with `--tools native|text|auto` (auto is the default).
+
+### Fresh context with Posthorse
+
+Rein includes a native adaptation of [pi-posthorse](https://github.com/fitchmultz/pi-posthorse).
+The pinned upstream 0.4.1 source and MIT license are in `vendor/pi-posthorse`.
+Rein uses its own session and tool interfaces, so it needs neither the Pi fork
+nor additional runtime dependencies.
+
+The default toolset includes:
+
+- `get_context_remaining({})` reports estimated tokens until rollover and the hard limit.
+- `new_context({handoff?})` requests a fresh window after the entire tool batch succeeds.
+  A failed or cancelled sibling prevents the boundary from committing.
+- `notes({op, path?, content?, query?, offset?})` lists, reads, writes, appends,
+  or searches plaintext files in `.pi/notes`. Reads and searches are paged.
+- `history({op, query?, id?, all?, limit?, offset?})` searches and reads saved
+  messages across windows. Results include stable entry and window ids.
+  `all: true` includes sessions from the same repository and deduplicates forks.
+
+A rollover removes earlier messages from model input while keeping the complete
+transcript. The new window gets an optional handoff. Automatic rollover uses a
+bounded record of user inputs, an older checkpoint, and the latest unconsumed
+tool batch, with history references for the full text. It makes no summarization
+request. The record is not proof of progress; the agent must restore notes and
+check live state before continuing. A single input that cannot fit a fresh window
+still needs a larger context setting or a smaller input.
+
+Automatic rollover and one best-effort checkpoint reminder are enabled with the
+default tools. Context overflow errors get at most one recovery retry for the same
+request, within `--max-turns`. Configuration in `~/.rein/config.json`:
+
+```json
+{
+  "contextWindow": 32768,
+  "maxTokens": 4096,
+  "posthorse": { "enabled": true, "reserveTokens": 4096 }
+}
+```
+
+Set `contextWindow` to the server's actual configured limit. Token counts are
+estimates refined by reported usage. The reserve must cover the output limit and
+leave room for the prompt, tools, and recovery state. CLI overrides are
+`--context-window <tokens>`, `--reserve-tokens <tokens>`, and `--no-auto-context`.
+Manual `/new-context [handoff]` and the `new_context` tool remain available when
+automatic rollover is disabled. `/context` prints the current budget.
+
+Sessions persist incrementally in the REPL and with `-p --save`. Resume and branch
+preserve window boundaries, and old Rein JSONL sessions remain readable. Print,
+loop, and improve runs without a saved session retain history only for the lifetime
+of their runner. Supplying a custom `RunnerOptions.tools` array replaces the
+entire toolset and disables automatic rollover by default; `--no-tools` remains
+pure chat.
+
+Notes belong to the repository and are shared by linked worktrees. Normal
+worktrees use the main checkout. Repositories with a separate Git directory use
+`core.worktree` when configured, or the common Git directory otherwise. Outside
+Git, notes belong to the working directory. Rein ignores `.pi/notes/` in this repo;
+add that ignore rule to other projects if their working notes should stay local.
+Notes survive session changes and package removal. History reads send the selected
+stored text to the active model provider. Pi's JSONL sessions and image/custom
+message types are not supported by this adaptation.
 
 ### Web: TinyFish is the web layer
 
@@ -172,8 +233,8 @@ The loop (autoresearch's keep/discard, pointed at rein's own source):
 
 1. read the goal or the `## harness` section of `LESSONS.md`
 2. one concrete weakness → smallest fix
-3. run `node --experimental-strip-types test/smoke.ts` — the metric
-4. pass → `git commit` + append the lesson · fail → `git checkout .`
+3. run `npm test`, including the smoke and regression suites
+4. pass → commit the change and lesson · fail → discard the experiment and commit its lesson
 5. repeat until `--max-iterations` (default 5) or the agent says no-change
 
 Two things make it a *system* rather than a one-off: the system prompt tells
@@ -225,6 +286,10 @@ your-project/
 └── METRIC.md    fenced bash block; its output must print METRIC=<number>
 rein loop --max-iterations 10
 ```
+
+Run from a clean Git repository root with an initial commit, including `TASK.md`
+and `METRIC.md`. The harness owns commits and discards; if the agent changes
+HEAD, the loop stops for review.
 
 Fixed budget per iteration, one metric, keep/discard with git, auto-stops
 after three no-change iterations, never otherwise stops until the budget or a
@@ -350,7 +415,9 @@ test/
 ## Testing
 
 ```sh
-npm test          # node --experimental-strip-types test/smoke.ts
+npm test          # offline smoke + node:test regression suites
+npm run bundle    # rebuild the committed Node 18 CLI
+npm run check:posthorse  # verify the pinned upstream source/license snapshot
 ```
 
 Covers: JSON salvage (7), edit semantics (6), capability table (5),
@@ -388,8 +455,9 @@ What you get:
   REPL), gated tools go through nodeterm's pending-files protocol
   (`~/.nodeterm/pending/<id>.json`, the phone writes `<id>.answer`). The
   answer channel is the filesystem, not loopback, so a phone over SSH can
-  answer. Timeout fails open with a visible note, matching nodeterm's own
-  reference behavior. Outside a nodeterm node the same gate falls back to a
+  answer. On timeout, rein asks for local approval when a fallback is
+  available; otherwise it denies execution, with a visible note. Outside a
+  nodeterm node the same gate falls back to a
   `[y/N]` prompt on stdin.
 
 The integration lives in one file (`src/harness/nodeterm.ts`) and is inert
@@ -400,15 +468,14 @@ no code coupling either way.
 ## Known limits (honest list)
 
 - Single model per session (no mid-run model switching)
-- No streaming UI niceties: no live token counts, no thinking trace (shown as
+- No live token counts, no thinking trace (shown as
   "thinking…"), no tool-call diff preview
-- Compaction isn't in yet: long sessions will eventually hit the context
-  window (the loop will show the error; `--max-turns` bounds the damage)
-- `rein improve` (and `heartbeat --improve` self-advance) refuses to run on a
-  dirty working tree — a discarded iteration is `git checkout .`, which would eat
-  uncommitted work. Commit or stash first
-- `rein improve` trusts its own smoke test as the metric — add more tests if
-  you make it run unattended
+- Posthorse uses estimated token budgets. Configure the server's actual context
+  limit; a prompt or tool schema that cannot fit fresh still needs a larger window.
+- `rein loop` and `rein improve` require a clean Git root with an initial commit.
+  Commit or stash existing work before allowing automatic keep/discard.
+- `rein improve` uses its own test suite as the metric. Tests still need to cover
+  the behavior you expect it to preserve.
 - Text tool protocol assumes the model can follow one example; 1–3B models
   still need nudging (the fallback nudge is built in)
 
@@ -418,6 +485,8 @@ Architecture: [earendil-works/pi](https://github.com/earendil-works/pi)
 (especially `packages/ai` — "the hard part is the translation layer" — and
 `packages/agent`). Loop philosophy: [karpathy/autoresearch](https://github.com/karpathy/autoresearch).
 Simplicity bar: [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT).
+Context windows: [fitchmultz/pi-posthorse](https://github.com/fitchmultz/pi-posthorse)
+(MIT, pinned source and native Rein adaptation).
 Completion discipline: [Leonxlnx/unlazy](https://github.com/Leonxlnx/unlazy)
 (MIT, vendored — the gate ledger and runnable oracles).
 Web layer: [TinyFish](https://www.tinyfish.ai) Search + Fetch APIs.

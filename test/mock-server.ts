@@ -99,7 +99,7 @@ export function createMockServer(): Server {
 				}
 				const model = body.model ?? "mock-native";
 				const text = lastUserOrSystemText(body);
-				const toolResults = (body.messages ?? []).filter((m: any) => m.role === "tool");
+				const toolResults = (body.messages ?? []).filter((m: any) => m.role === "tool" || (m.role === "user" && typeof m.content === "string" && m.content.startsWith("Result of tool ")));
 				const hasToolResults = toolResults.length > 0;
 				const inTextMode = text.includes("<tool name=");
 
@@ -107,7 +107,7 @@ export function createMockServer(): Server {
 					if (!hasToolResults) {
 						streamToolCall(res, model, "bash", JSON.stringify({ command: "echo hi-from-native" }), "call_1");
 					} else {
-						streamText(res, model, `Ran the command. Result was: ${body.messages.find((m: any) => m.role === "tool")?.content ?? "?"}`);
+						streamText(res, model, `Ran the command. Result was: ${toolResults[0]?.content ?? "?"}`);
 					}
 					return;
 				}
@@ -131,7 +131,7 @@ export function createMockServer(): Server {
 					if (!hasToolResults) {
 						streamText(res, model, 'Let me run it.\n<tool name="bash">\n{"command": "echo text-mode-works"}\n</tool>');
 					} else {
-						streamText(res, model, `Got it: ${body.messages.find((m: any) => m.role === "tool")?.content ?? "?"}`);
+						streamText(res, model, `Got it: ${toolResults[0]?.content ?? "?"}`);
 					}
 					return;
 				}

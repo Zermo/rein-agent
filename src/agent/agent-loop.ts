@@ -49,6 +49,8 @@ export interface AgentToolResult {
 	details?: unknown;
 	/** When every tool result in a batch sets this, the loop stops after the batch. */
 	terminate?: boolean;
+	/** Request a fresh context after the complete tool batch succeeds. */
+	newContext?: { handoff?: string };
 }
 
 export type AgentEvent =
@@ -92,6 +94,10 @@ export interface AgentLoopConfig {
 	/** May be async (e.g. an approval prompt that waits on a phone). */
 	beforeToolCall?: (info: BeforeToolCallInfo) => { block?: boolean; reason?: string } | undefined | Promise<{ block?: boolean; reason?: string } | undefined>;
 	afterToolCall?: (info: AfterToolCallInfo) => Partial<AgentToolResult> | undefined;
+	/** Called after every tool result is recorded; rollover is allowed only for one successful request. */
+	afterToolBatch?: (info: { message: AssistantMessage; toolResults: ToolResultMessage[]; context: AgentContext; newContext?: { handoff?: string } }) => void | Promise<void>;
+	/** Return true to retry a failed model turn after repairing its context. Retries count toward maxTurns. */
+	recoverFromError?: (info: { message: AssistantMessage; context: AgentContext }) => boolean | Promise<boolean>;
 	shouldStopAfterTurn?: (info: { message: AssistantMessage; context: AgentContext }) => boolean;
 	getSteeringMessages?: () => AgentMessage[] | Promise<AgentMessage[]>;
 	getFollowUpMessages?: () => AgentMessage[] | Promise<AgentMessage[]>;
@@ -138,84 +144,66 @@ export async function agentLoop(
 	}
 
 	const maxTurns = config.maxTurns ?? 60;
-	let turns = 0;
-
-	// Outer loop: continues when follow-up messages arrive after the agent would stop.
-	while (true) {
-		if (turns >= maxTurns) break;
-		let hasMoreToolCalls = true;
-		let pending: AgentMessage[] = [];
-
-		// Inner loop: process tool calls and steering messages.
-		while (hasMoreToolCalls || pending.length > 0) {
-			turns++;
-			if (signal?.aborted) break;
-
-			// Steering: messages queued while the agent was working, injected now.
-			if (pending.length === 0) {
-				pending = (await config.getSteeringMessages?.()) ?? [];
-			}
-			for (const message of pending) {
-				await emit({ type: "message_start", message });
-				await emit({ type: "message_end", message });
-				ctx.messages.push(message);
-				newMessages.push(message);
-			}
-			pending = [];
-
-			// Stream the assistant response.
-			const message = await streamAssistantResponse(ctx, config, signal, emit);
+	let pending: AgentMessage[] = [];
+	for (let turns = 0; turns < maxTurns && !signal?.aborted; turns++) {
+		if (turns > 0) await emit({ type: "turn_start" });
+		pending.push(...((await config.getSteeringMessages?.()) ?? []));
+		if (signal?.aborted) break;
+		for (const message of pending) {
+			await emit({ type: "message_start", message });
+			await emit({ type: "message_end", message });
 			ctx.messages.push(message);
 			newMessages.push(message);
-
-			if (message.stopReason === "error" || message.stopReason === "aborted") {
-				await emit({ type: "turn_end", message, toolResults: [] });
-				await emit({ type: "agent_end", messages: newMessages });
-				return newMessages;
-			}
-			if (turns >= maxTurns) {
-				await emit({ type: "turn_end", message, toolResults: [] });
-				await emit({ type: "agent_end", messages: newMessages });
-				return newMessages;
-			}
-
-			const toolCalls = message.content.filter((c) => c.type === "toolCall") as Extract<
-				AssistantMessage["content"][number],
-				{ type: "toolCall" }
-			>[];
-
-			const toolResults: ToolResultMessage[] = [];
-			hasMoreToolCalls = false;
-			if (toolCalls.length > 0) {
-				const batch =
-					message.stopReason === "length"
-						? await failTruncatedToolCalls(toolCalls, ctx, emit)
-						: await executeToolCalls(ctx, message, toolCalls, config, signal, emit);
-				toolResults.push(...batch.messages);
-				hasMoreToolCalls = !batch.terminate;
-				for (const result of toolResults) {
-					ctx.messages.push(result);
-					newMessages.push(result);
-				}
-			}
-
-			await emit({ type: "turn_end", message, toolResults });
-
-			if (config.shouldStopAfterTurn?.({ message, context: ctx })) {
-				await emit({ type: "agent_end", messages: newMessages });
-				return newMessages;
-			}
-
-			pending = (await config.getSteeringMessages?.()) ?? [];
 		}
+		pending = [];
 
-		// Agent would stop here. Check for follow-up messages.
-		const followUps = (await config.getFollowUpMessages?.()) ?? [];
-		if (followUps.length > 0) {
-			pending = followUps;
-			continue;
+		let message: AssistantMessage;
+		let assistantStarted = false;
+		try {
+			message = await streamAssistantResponse(ctx, config, signal, (event) => {
+				if (event.type === "message_start") assistantStarted = true;
+				return emit(event);
+			});
+		} catch (error) {
+			message = {
+				role: "assistant", content: [], provider: config.model.provider, model: config.model.id,
+				usage: { input: 0, output: 0, totalTokens: 0 }, timestamp: Date.now(),
+				stopReason: signal?.aborted ? "aborted" : "error",
+				errorMessage: error instanceof Error ? error.message : String(error),
+			};
+			if (!assistantStarted) await emit({ type: "message_start", message });
+			await emit({ type: "message_end", message });
 		}
-		break;
+		ctx.messages.push(message);
+		newMessages.push(message);
+
+		const toolCalls = message.content.filter((c) => c.type === "toolCall");
+		const failed = message.stopReason === "error" || message.stopReason === "aborted";
+		let batch: ExecutedBatch = { messages: [], terminate: false };
+		if (toolCalls.length > 0) {
+			batch = failed
+				? await failTruncatedToolCalls(toolCalls, ctx, emit, "the model response failed or was aborted")
+				: message.stopReason === "length"
+					? await failTruncatedToolCalls(toolCalls, ctx, emit)
+					: await executeToolCalls(ctx, message, toolCalls, config, signal, emit);
+			ctx.messages.push(...batch.messages);
+			newMessages.push(...batch.messages);
+			await config.afterToolBatch?.({
+				message, toolResults: batch.messages, context: ctx,
+				newContext: !signal?.aborted ? batch.newContext : undefined,
+			});
+		}
+		await emit({ type: "turn_end", message, toolResults: batch.messages });
+		if (signal?.aborted || turns + 1 >= maxTurns || message.stopReason === "aborted") break;
+		if (failed) {
+			if (await config.recoverFromError?.({ message, context: ctx })) continue;
+			break;
+		}
+		if (config.shouldStopAfterTurn?.({ message, context: ctx })) break;
+		pending = (await config.getSteeringMessages?.()) ?? [];
+		if (pending.length > 0 || (toolCalls.length > 0 && !batch.terminate)) continue;
+		pending = (await config.getFollowUpMessages?.()) ?? [];
+		if (pending.length === 0) break;
 	}
 
 	await emit({ type: "agent_end", messages: newMessages });
@@ -271,18 +259,19 @@ async function streamAssistantResponse(
 	return final;
 }
 
-type ExecutedBatch = { messages: ToolResultMessage[]; terminate: boolean };
+type ExecutedBatch = { messages: ToolResultMessage[]; terminate: boolean; newContext?: { handoff?: string } };
 
 async function failTruncatedToolCalls(
 	toolCalls: { id: string; name: string; arguments: Record<string, unknown> }[],
 	ctx: AgentContext,
 	emit: AgentEventSink,
+	reason = "the response hit the output token limit, so its arguments may be truncated",
 ): Promise<ExecutedBatch> {
 	const messages: ToolResultMessage[] = [];
 	for (const tc of toolCalls) {
 		await emit({ type: "tool_execution_start", toolCallId: tc.id, toolName: tc.name, args: tc.arguments });
 		const result: AgentToolResult = {
-			content: `Tool call "${tc.name}" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue it with complete arguments.`,
+			content: `Tool call "${tc.name}" was not executed: ${reason}. Re-issue it with complete arguments.`,
 			isError: true,
 		};
 		await emit({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError: true });
@@ -349,39 +338,39 @@ async function runOne(
 		return { toolCallId: tc.id, toolName: tc.name, result, isError: true };
 	}
 
-	const before = await config.beforeToolCall?.({ assistantMessage, toolCall: tc, args, context: ctx });
-	if (before?.block) {
-		const result: AgentToolResult = { content: before.reason ?? "Tool execution was blocked", isError: true };
-		await emit({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError: true });
-		return { toolCallId: tc.id, toolName: tc.name, result, isError: true };
-	}
-	if (signal?.aborted) {
-		const result: AgentToolResult = { content: "Operation aborted", isError: true };
-		await emit({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError: true });
-		return { toolCallId: tc.id, toolName: tc.name, result, isError: true };
-	}
-
 	let result: AgentToolResult;
-	let isError = false;
 	try {
-		result = await tool.execute(
-			tc.id,
-			args,
-			signal,
-			(partial) => {
-				void emit({ type: "tool_execution_update", toolCallId: tc.id, toolName: tc.name, partial });
-			},
-		);
-	} catch (err) {
-		result = { content: (err as Error).message ?? String(err), isError: true };
-		isError = true;
-	}
+		if (signal?.aborted) throw new Error("Operation aborted");
+		const before = await config.beforeToolCall?.({ assistantMessage, toolCall: tc, args, context: ctx });
+		if (before?.block) {
+			const result: AgentToolResult = { content: before.reason ?? "Tool execution was blocked", isError: true };
+			await emit({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError: true });
+			return { toolCallId: tc.id, toolName: tc.name, result, isError: true };
+		}
+		if (signal?.aborted) {
+			const result: AgentToolResult = { content: "Operation aborted", isError: true };
+			await emit({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError: true });
+			return { toolCallId: tc.id, toolName: tc.name, result, isError: true };
+		}
 
-	const after = config.afterToolCall?.({ assistantMessage, toolCall: tc, args, result, isError, context: ctx });
-	if (after) {
-		result = { ...result, ...after };
-		isError = after.isError ?? isError;
+		try {
+			result = await tool.execute(
+				tc.id,
+				args,
+				signal,
+				(partial) => {
+					void emit({ type: "tool_execution_update", toolCallId: tc.id, toolName: tc.name, partial });
+				},
+			);
+		} catch (err) {
+			result = { content: err instanceof Error ? err.message : String(err), isError: true };
+		}
+		const after = config.afterToolCall?.({ assistantMessage, toolCall: tc, args, result, isError: result.isError === true, context: ctx });
+		if (after) result = { ...result, ...after };
+	} catch (err) {
+		result = { content: err instanceof Error ? err.message : String(err), isError: true };
 	}
+	const isError = result.isError === true;
 
 	await emit({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError });
 	return { toolCallId: tc.id, toolName: tc.name, result, isError };
@@ -397,11 +386,10 @@ async function executeSequential(
 ): Promise<ExecutedBatch> {
 	const finalized: FinalizedCall[] = [];
 	for (const tc of toolCalls) {
-		if (signal?.aborted) break;
 		finalized.push(await runOne(tc, ctx, assistantMessage, config, signal, emit));
 	}
 	const messages = await toToolResultMessages(finalized, emit);
-	return { messages, terminate: allTerminate(finalized) };
+	return finalizeBatch(messages, finalized, signal);
 }
 
 async function executeParallel(
@@ -412,19 +400,10 @@ async function executeParallel(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 ): Promise<ExecutedBatch> {
-	// Preflight (validation, hooks) sequentially; execution concurrently.
-	const ready: typeof toolCalls = [];
-	const immediate: FinalizedCall[] = [];
-	for (const tc of toolCalls) {
-		if (signal?.aborted) break;
-		// runOne does preflight+execute together; to keep preflight ordered we
-		// simply launch all and rely on the model having issued independent calls.
-		ready.push(tc);
-	}
-	const settled = await Promise.all(ready.map((tc) => runOne(tc, ctx, assistantMessage, config, signal, emit)));
-	const finalized = [...immediate, ...settled];
+	// Every declared call receives a result, including calls skipped by an abort.
+	const finalized = await Promise.all(toolCalls.map((tc) => runOne(tc, ctx, assistantMessage, config, signal, emit)));
 	const messages = await toToolResultMessages(finalized, emit);
-	return { messages, terminate: allTerminate(finalized) };
+	return finalizeBatch(messages, finalized, signal);
 }
 
 async function toToolResultMessages(finalized: FinalizedCall[], emit: AgentEventSink): Promise<ToolResultMessage[]> {
@@ -447,4 +426,14 @@ async function toToolResultMessages(finalized: FinalizedCall[], emit: AgentEvent
 
 function allTerminate(finalized: FinalizedCall[]): boolean {
 	return finalized.length > 0 && finalized.every((f) => f.result.terminate === true);
+}
+
+function finalizeBatch(messages: ToolResultMessage[], finalized: FinalizedCall[], signal?: AbortSignal): ExecutedBatch {
+	const requests = finalized.filter((call) => call.result.newContext !== undefined);
+	return {
+		messages,
+		terminate: allTerminate(finalized),
+		newContext: !signal?.aborted && finalized.every((call) => !call.isError) && requests.length === 1
+			? requests[0].result.newContext : undefined,
+	};
 }

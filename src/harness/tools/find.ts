@@ -6,7 +6,7 @@ const execFileAsync = promisify(execFile);
 
 const findTool: AgentTool = {
 	name: "find",
-	description: "Find files by glob pattern. Returns matching paths relative to the search directory. Respects .gitignore.",
+	description: "Find files by glob pattern. Returns matching paths under the search directory.",
 	parameters: {
 		type: "object",
 		properties: {
@@ -21,7 +21,7 @@ const findTool: AgentTool = {
 		const path = args.path ?? ".";
 		try {
 			// Prefer fd if present (much faster), fall back to find
-			const { stdout } = await execFileAsync("bash", ["-c", `command -v fd >/dev/null 2>&1 && fd -g ${shellQuote(args.pattern)} --max-results ${limit} . ${shellQuote(path)} || find ${shellQuote(path)} -name ${shellQuote(args.pattern)} -print | head -n ${limit}`], { maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
+			const { stdout } = await execFileAsync("bash", ["-c", `command -v fd >/dev/null 2>&1 && fd -g ${shellQuote(args.pattern)} --max-results ${limit} ${shellQuote(path)} || find ${shellQuote(path)} -name ${shellQuote(args.pattern)} -print | head -n ${limit}`], { maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
 			const out = stdout.trimEnd();
 			return { content: out || "No matches" };
 		} catch (err) {

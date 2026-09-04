@@ -1,28 +1,24 @@
-# Gates: tinyfish web + unlazy gates integration
+# Gates: Posthorse integration and harness compatibility
 
-Scope: TinyFish web_search/web_fetch and the unlazy gates tool wired into the rein harness
+Scope: native no-summary windows, durable notes/history, session persistence,
+and fixes from parallel harness review.
 
-- [x] G1: full smoke suite passes with the new web + gates + nodeterm tests
-  CHECK: node --experimental-strip-types test/smoke.ts
+- [x] G1: offline smoke and regression suites pass on Node 22.19
+  CHECK: npm exec --yes --package=node@22.19.0 -- npm test
   EXPECT: smoke test OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/portal/dev/rein; path=9aed8e6f2fa7/18 entries; EXPECT=matched; output-sha256=4e6837bb2301d307620d1b2764baebf86a6bce0a4806ca300c46e249d97e5a02; output-bytes=2168
+  EVIDENCE: exit=0; cwd=/Users/portal/Documents/GitHub/rein-agent; command=npm exec --yes --package=node@22.19.0 -- npm test; EXPECT=matched; output-sha256=07bf88b5a2dc2ea87eafe613f1d66d4ccc9b9724c8c67750fd2f12041ce3b1e7; output-bytes=18490
 
-- [x] G2: web_search, web_fetch, and gates are registered harness tools
-  CHECK: node --experimental-strip-types -e "import('./src/harness/tools/index.ts').then(m => { const names = m.TOOLS.map(t => t.name); const need = ['web_search', 'web_fetch', 'gates']; const missing = need.filter(n => !names.includes(n)); if (missing.length) { console.error('missing: ' + missing); process.exit(1); } console.log('tool registration passed'); })"
-  EXPECT: tool registration passed
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/portal/dev/rein; path=9aed8e6f2fa7/18 entries; EXPECT=matched; output-sha256=5fc0ca11c88db8b3e0a5ebca8a7bd1c1fa4c066c0b2b50405d0b12f3f62ba00c; output-bytes=25
+- [x] G2: CLI bundles and the saved rollover works on Node 18
+  CHECK: bash -c 'npm run bundle && npm exec --yes --package=node@18.20.8 -- node test/bundle-smoke.mjs'
+  EXPECT: bundle smoke OK
+  EVIDENCE: exit=0; cwd=/Users/portal/Documents/GitHub/rein-agent; command=bash -c 'npm run bundle && npm exec --yes --package=node@18.20.8 -- node test/bundle-smoke.mjs'; EXPECT=matched; output-sha256=3e1756d46aa9eee17930cf4adde80762ae3a6a9dbceb7fffcb896cb779a13728; output-bytes=99
 
-- [x] G3: unlazy is vendored with its checker, skill, and MIT license intact
-  CHECK: test -f vendor/unlazy/SKILL.md && test -f vendor/unlazy/scripts/gate-check.mjs && test -f vendor/unlazy/scripts/lib/gates.mjs && grep -q "MIT License" vendor/unlazy/LICENSE && echo "vendoring passed"
-  EXPECT: vendoring passed
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/portal/dev/rein; path=9aed8e6f2fa7/18 entries; EXPECT=matched; output-sha256=e5e2abd175fbeedc0482597cd06ee19fe6ab0054e22c3baf5ad4dd9c7219d6a1; output-bytes=17
+- [x] G3: upstream Posthorse source and license match the pinned revision
+  CHECK: node scripts/check-posthorse.mjs
+  EXPECT: Posthorse provenance OK
+  EVIDENCE: exit=0; cwd=/Users/portal/Documents/GitHub/rein-agent; command=node scripts/check-posthorse.mjs; EXPECT=matched; output-sha256=ebe55509b7f1f33944828cb0adef11015a2c9d4e5d83aaaf40af059c044d5b8c; output-bytes=24
 
-- [x] G4: system prompt carries the TinyFish web and unlazy gates sections
-  CHECK: grep -q "TinyFish" src/harness/system-prompt.ts && grep -q "unlazy" src/harness/system-prompt.ts && echo "prompt sections passed"
-  EXPECT: prompt sections passed
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/portal/dev/rein; path=9aed8e6f2fa7/18 entries; EXPECT=matched; output-sha256=51a31346ee689e7815dfafc5388982831e951dfdaf2c25d787aebcec469bb086; output-bytes=23
-
-- [x] G5: rein gates CLI mode dispatches to the gates tool
-  CHECK: grep -q 'gatesTool.execute' src/cli.ts && echo "cli wiring passed"
-  EXPECT: cli wiring passed
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/portal/dev/rein; path=9aed8e6f2fa7/18 entries; EXPECT=matched; output-sha256=27b881314798f23cc80ddaa0eb813b10d82977d966e032c8dd770d4fed30bf97; output-bytes=18
+- [x] G4: package can be packed with the shipped bundle and vendor files
+  CHECK: npm pack --dry-run
+  EXPECT: rein-agent-0.3.0.tgz
+  EVIDENCE: exit=0; cwd=/Users/portal/Documents/GitHub/rein-agent; command=npm pack --dry-run; EXPECT=matched; output-sha256=6d7daaf7b1b796f2d1cda8b9df6d65cfe6cbb76f884233ef05510fe8b41b3a97; output-bytes=3968

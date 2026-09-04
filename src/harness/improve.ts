@@ -6,9 +6,9 @@
  *   read LESSONS.md ("## harness") + the goal
  *   → pick ONE concrete weakness
  *   → make the smallest change that fixes it
- *   → run the smoke test (node --experimental-strip-types test/smoke.ts)
- *   → pass?  git commit, append the lesson, next weakness
- *     fail?  git checkout ., note what went wrong, next weakness
+ *   → run the complete npm test suite
+ *   → pass?  append the lesson, git commit, next weakness
+ *     fail?  discard the experiment, commit its lesson, next weakness
  *   → until nothing left, or --max-iterations reached
  *
  * This is the "never stop, one metric, keep/discard" pattern from
@@ -20,9 +20,9 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { cyan, dim, gray, green, red, yellow, bold } from "../util/ansi.ts";
+import { dim, gray, green, red, yellow, bold } from "../util/ansi.ts";
+import { requireCleanGit, discardIteration, recordLesson } from "./loop.ts";
 import { createRunner } from "./runner.ts";
-import type { Runner } from "./runner.ts";
 import { buildImprovePrompt } from "./system-prompt.ts";
 import type { RunnerOptions } from "./runner.ts";
 
@@ -43,35 +43,21 @@ function sh(cmd: string, cwd: string): string {
 	return execFileSync("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 
-function gitAvailable(cwd: string): boolean {
+export function runHarnessTests(repoDir: string): { pass: boolean; output: string } {
+	// Node cannot strip types below node_modules; test a scratch source copy there.
+	const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync(join(tmpdir(), "rein-validation-")) : repoDir;
 	try {
-		sh("git rev-parse --is-inside-work-tree", cwd);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function runSmokeTest(repoDir: string): { pass: boolean; output: string } {
-	const run = (dir: string): string =>
-		execFileSync("node", ["--experimental-strip-types", "test/smoke.ts"], {
-			cwd: dir,
-			encoding: "utf8",
-			timeout: 120_000,
-			stdio: ["ignore", "pipe", "pipe"],
+		if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
+			if (existsSync(join(repoDir, name))) cpSync(join(repoDir, name), join(dir, name), { recursive: true });
+		}
+		const output = execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
+			cwd: dir, encoding: "utf8", timeout: 300_000, stdio: ["ignore", "pipe", "pipe"],
 		});
-	// Node refuses to type-strip .ts under node_modules, so a copy installed there
-	// must run the same test from a scratch copy outside node_modules (fresh source).
-	const underNodeModules = repoDir.split(/[\\/]/).includes("node_modules");
-	const dir = underNodeModules ? mkdtempSync(join(tmpdir(), "rein-smoke-")) : repoDir;
-	if (dir !== repoDir) for (const name of ["src", "test", "vendor"]) cpSync(join(repoDir, name), join(dir, name), { recursive: true });
-	try {
-		const out = run(dir);
-		if (dir !== repoDir) rmSync(dir, { recursive: true, force: true });
-		return { pass: true, output: out };
+		return { pass: true, output };
 	} catch (err: any) {
+		return { pass: false, output: `${err.stdout ?? ""}${err.stderr ?? ""}${err.message ?? ""}` };
+	} finally {
 		if (dir !== repoDir) rmSync(dir, { recursive: true, force: true });
-		return { pass: false, output: `${err.stdout ?? ""}${err.stderr ?? ""}` };
 	}
 }
 
@@ -88,21 +74,9 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 	const repoDir = REIN_REPO;
 	const maxIters = opts.maxIterations ?? 5;
 	const goal = opts.goal ?? "";
-	const useGit = gitAvailable(repoDir);
-
-	if (!useGit) {
-		console.log(yellow(`not a git repo (${repoDir}) — running without keep/discard; review changes manually`));
-	}
-
-	// A discard is `git checkout .` — it must never eat work that was already
-	// there. Refuse to self-advance on a dirty tree (heartbeat rule).
-	if (useGit) {
-		const pre = sh("git status --porcelain", repoDir).trim();
-		if (pre) {
-			console.log(yellow(`working tree is dirty (${pre.split("\n").length} file(s)) — commit or stash before self-advancing; refusing to risk your work`));
-			return;
-		}
-	}
+	if (opts.dryRun) { console.log(`rein improve dry run: target ${repoDir}, up to ${maxIters} iterations; no changes made`); return; }
+	requireCleanGit(repoDir);
+	const useGit = true;
 
 	const runner = await createRunner({
 		...opts,
@@ -129,13 +103,14 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 
 	while (iterations < maxIters) {
 		iterations++;
+		const head = sh("git rev-parse HEAD", repoDir);
 		const tag = randomUUID().slice(0, 8);
 		console.log(`\n${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
 
 		const prompt =
 			iterations === 1
-				? queueText + "\n\nPick the single most concrete weakness and fix it with the smallest change that works. Then run the smoke test and report the result as: RESULT: improved | no-change | failed"
-				: "Continue: pick the next concrete weakness (not the one you just fixed). Same rules. Report as: RESULT: improved | no-change | failed";
+				? queueText + "\n\nDo not commit, reset, stage, or switch Git branches; the harness owns keep/discard. Pick the single most concrete weakness and fix it with the smallest change that works. Then run npm test and report the result as: RESULT: improved | no-change | failed"
+				: "Continue: pick the next concrete weakness (not the one you just fixed). Same rules. Do not commit, reset, stage, or switch Git branches. Report as: RESULT: improved | no-change | failed";
 
 		let outcome: "improved" | "no-change" | "failed" = "failed";
 		let report = "";
@@ -157,32 +132,32 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 
 		// Verify independently of what the model claims (autoresearch's rule:
 		// trust the metric, not the model).
+		if (sh("git rev-parse HEAD", repoDir) !== head) throw new Error("Agent changed Git HEAD; stopping without discarding or committing additional work");
 		const dirty = useGit ? sh("git status --porcelain", repoDir) : "unknown";
 		if (outcome === "improved") {
 			if (!useGit || (dirty && dirty.length > 0)) {
-				const test = runSmokeTest(repoDir);
+				const test = runHarnessTests(repoDir);
+				if (sh("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
 				if (test.pass) {
-					if (useGit) {
-						sh(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
-					}
 					appendFileSync(join(repoDir, "LESSONS.md"), `\n- [improve ${tag}] fixed: ${firstLine(report)}\n`);
+					if (useGit) sh(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
 					improved++;
-					console.log(green(`kept ${dim(tag)} — smoke test passed${useGit ? " · committed" : ""}`));
+					console.log(green(`kept ${dim(tag)} — test suite passed${useGit ? " · committed" : ""}`));
 				} else {
-					if (useGit) sh("git checkout . && git clean -fd", repoDir);
-					console.log(red(`discarded ${dim(tag)} — smoke test failed`));
+					if (useGit) discardIteration(repoDir, head);
+					console.log(red(`discarded ${dim(tag)} — test suite failed`));
 					console.log(dim(test.output.slice(-600)));
-					appendFileSync(join(repoDir, "LESSONS.md"), `\n- [improve ${tag}] tried and failed: ${firstLine(report)}\n`);
+					recordLesson(repoDir, `- [improve ${tag}] tried and failed: ${firstLine(report)}`, `rein improve: ${tag} failed experiment lesson`);
 				}
 			} else {
 				console.log(yellow(`${dim(tag)} claimed improved but the tree is clean — counting as no-change`));
 				outcome = "no-change";
 			}
 		} else if (outcome === "no-change") {
-			if (useGit && dirty) sh("git checkout . && git clean -fd", repoDir);
+			if (useGit && dirty) discardIteration(repoDir, head);
 			console.log(gray(`${dim(tag)}: no change worth making — ${firstLine(report) || "no report"}`));
 		} else {
-			if (useGit) sh("git checkout . && git clean -fd", repoDir);
+			if (useGit) discardIteration(repoDir, head);
 			console.log(red(`${dim(tag)}: failed — ${firstLine(report) || (report ? report.slice(0, 120) : "no report")}`));
 		}
 
