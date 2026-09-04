@@ -50,8 +50,9 @@ curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | 
 ```
 
 Flags after `bash -s --`: `--skip-setup` (install only), `--yes` (no prompts).
-The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM)
-or cloud providers, marks each model with a fit verdict + rough tok/s (see `rein hardware`), tests the connection, and saves `~/.rein/config.json`.
+The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM),
+accepts remote hosts, and offers cloud API keys or supported subscription logins.
+It tests API connections and saves `~/.rein/config.json` (or `$REIN_HOME/config.json`).
 You can always re-run it: `rein setup` (`--yes` non-interactive,
 `--status` config + connection check).
 
@@ -93,12 +94,85 @@ rein-agent hardware [--json]  profile this machine + what it can run (tok/s esti
 rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
 rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
 rein setup                    onboarding wizard (also: --yes, --status)
+rein login codex|copilot       official browser/device account sign-in
 rein --version                print version
 ```
 
 REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /context /new-context [handoff] /quit`.
 While the agent is working, just type — it's injected as a steering message
 after the current tool batch (pi's steering, not pi's queue).
+
+### Remote servers, API keys, and subscription login
+
+For a server reachable over LAN or NetBird, enter its hostname or IP and port.
+Rein detects common API prefixes, accepts pasted `/models` or `/chat/completions`
+URLs, and preserves custom proxy paths. It probes only the host and port you supply.
+
+```sh
+rein setup --base-url dgx.internal:18083
+# Unattended setup discovers the model; set REIN_API_KEY in the environment if required:
+rein setup --yes --base-url dgx.internal:18083
+```
+
+A server bound to `127.0.0.1` on the DGX is reachable only from that DGX.
+Use an existing SSH alias to reach it without changing the server listener:
+
+```sh
+ssh dgx                            # verify your existing SSH key/config
+rein setup --yes --ssh dgx --base-url 127.0.0.1:18083
+rein -p "hello"                    # reconnects through SSH automatically
+rein setup --status
+```
+
+The tunnel listens on an ephemeral local loopback port and closes after each
+request. SSH forwarding supports HTTP APIs, requires noninteractive SSH key
+authentication, and uses the remote host's view of the target URL. Direct HTTPS
+APIs use their reachable URL. Connection errors distinguish DNS, refusal, timeout,
+authentication, missing API paths, and responses from a web UI.
+
+For cloud APIs, setup opens the provider's key page when a key is needed, then
+queries the authenticated model list. Standard environment variables such as
+`OPENAI_API_KEY` or `GEMINI_API_KEY` work; `REIN_API_KEY` explicitly supplies a key
+for a custom endpoint. Environment keys are not saved. Entered keys are hidden,
+stored in a mode-600 config, and scoped to the saved API endpoint and SSH host.
+Switching endpoints cannot reuse that saved key automatically.
+
+```sh
+rein setup --provider openai
+rein setup --provider gemini
+rein setup --provider openrouter --no-browser  # print the key-page link
+```
+
+Subscription connections use installed official CLIs:
+
+| Connection | Install once | Configure Rein |
+| --- | --- | --- |
+| ChatGPT through Codex | `npm install -g @openai/codex` | `rein setup --provider codex` |
+| GitHub Copilot | `npm install -g @github/copilot` | `rein setup --provider copilot` |
+
+Setup opens device sign-in and lets the official CLI display the one-time code.
+`rein login codex` or `rein login copilot` repeats login; `--device-auth=false`
+selects the CLI's browser callback flow. `--no-browser` prints the link without
+launching a browser. Login requires user interaction; `setup --yes` never starts it.
+ChatGPT device login may need enabling in your account or workspace security
+settings. Subscription access and API billing are separate. See the official
+[Codex authentication guide](https://learn.chatgpt.com/docs/auth) and
+[Copilot authentication guide](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli).
+
+Rein gives each CLI its own configuration under `$REIN_HOME/cli-auth` and leaves
+credential storage and refresh to that CLI. Copilot may use its shared OS keychain.
+Use `rein login`, rather than a bare CLI login, to select Rein's configuration.
+The default model follows the official CLI; pass `--model` for an available model.
+CLI responses use Rein's text tool protocol and retain Rein's tool approvals and
+Posthorse history. Each turn starts in a temporary directory with native tools
+disabled or sandboxed; unexpected native Codex tool events stop the turn.
+CLI output is returned when that CLI turn finishes, rather than token by token.
+These bridges require current CLIs with the isolation flags used by Rein.
+
+Gemini API uses its documented [OpenAI-compatible endpoint](https://ai.google.dev/gemini-api/docs/openai).
+The retired GitHub Models API is no longer offered; [GitHub's retirement notice](https://docs.github.com/en/github-models)
+applies to that API, while Copilot CLI is a separate connection. Other subscription
+CLIs are not integrated. Compatible cloud APIs continue to use API keys.
 
 ### Tool calls work for every model
 
@@ -355,12 +429,12 @@ with its verdict. `--json` for machines.
 
 **Cut — deliberate:**
 
-- No provider registry, no auth flows, no image/audio blocks, no reasoning
-  provider-specific APIs. One adapter shape, extended by adding files.
+- No image/audio blocks or native provider-specific reasoning APIs.
+  OpenAI-compatible HTTP and official CLI adapters share the same message model.
 - No framework: no React TUI, no config DSL. A REPL is ~200 lines of
   readline; the print mode is ~80.
 - TypeBox → a 60-line hand-rolled schema validator for the subset we use.
-- 40+ deps → 0. `package.json` has no `dependencies` key at all.
+- Zero runtime package dependencies; subscription connections use separately installed CLIs.
 
 **Added (requirements):**
 
@@ -385,6 +459,9 @@ src/
 │   ├── event-stream.ts        async queue + iterator + final-result promise
 │   ├── sse.ts                 SSE line parser
 │   ├── openai-completions.ts  the adapter (native + text tool protocols)
+│   ├── cli-provider.ts        official Codex/Copilot CLI transports
+│   ├── endpoints.ts           URL inference + authenticated model discovery
+│   ├── ssh.ts                 request-scoped SSH forwarding for remote APIs
 │   ├── compat.ts              capability table + runtime fallback + learned modes
 │   └── models.ts              local-server discovery + provider presets + config
 ├── hardware/                  (stolen from Magnitude, Apache-2.0)
@@ -468,6 +545,9 @@ no code coupling either way.
 ## Known limits (honest list)
 
 - Single model per session (no mid-run model switching)
+- Subscription login needs a current official CLI and an eligible account. Cloud
+  login/paid inference is not exercised by offline tests. Copilot has no read-only
+  auth status command, so status reports its authentication as unverified until use.
 - No live token counts, no thinking trace (shown as
   "thinking…"), no tool-call diff preview
 - Posthorse uses estimated token budgets. Configure the server's actual context

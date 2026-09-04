@@ -67,19 +67,26 @@ Usage:
   rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
-  rein setup                    interactive onboarding: provider → model → key
-                                → connection test → saves ~/.rein/config.json
+  rein setup                    provider → login/key → model → connection test
+                                saves $REIN_HOME/config.json (default ~/.rein)
   rein setup --yes              non-interactive (first local server / existing config)
   rein setup --status           show config, detected servers, test the connection
+  rein login codex|copilot      open official subscription device sign-in
+  rein setup --provider codex   use a ChatGPT subscription through the official CLI
+  rein setup --ssh dgx --base-url 127.0.0.1:18083
+                                reach a remote loopback API through SSH
 
 Model selection (highest wins):
   --model <id> --base-url <url>    explicit endpoint
   --provider <name> --model <id>   preset (openai, deepseek, groq, together, openrouter, mistral, ...)
+  --ssh <host>                    SSH config alias for a remote HTTP API
   REIN_BASE_URL / REIN_MODEL       environment
   ~/.rein/config.json              {"model": "...", "baseUrl": "...", "apiKey": "..."}
   auto-detect                      Ollama, LM Studio, llama.cpp, vLLM (in that order)
 
 Options:
+  --auth <api-key|cli>            setup: API credentials or official subscription CLI
+  --device-auth=false             login/setup: browser callback instead of device code
   --tools <auto|native|text>       tool protocol (auto = capability table + runtime fallback)
   --max-turns <n>                  safety cap per prompt (default 60)
   --temperature <t>                sampling temperature
@@ -103,7 +110,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -147,6 +154,13 @@ function numberFlag(flags: ParsedArgs["flags"], name: string, min: number, integ
 	return value;
 }
 
+function stringFlag(flags: ParsedArgs["flags"], name: string): string | undefined {
+	const value = flags[name];
+	if (value === undefined) return undefined;
+	if (typeof value !== "string" || !value.trim()) throw new Error(`--${name} must have a value`);
+	return value.trim();
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
 	const { _, flags } = parseArgs(argv);
 
@@ -164,9 +178,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	const maxIterations = numberFlag(flags, "max-iterations", 1);
 	const common = {
 		cwd: process.cwd(),
-		modelOverride: typeof flags.model === "string" ? flags.model : undefined,
-		baseUrlOverride: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined,
-		providerOverride: typeof flags.provider === "string" ? flags.provider : undefined,
+		modelOverride: stringFlag(flags, "model"),
+		baseUrlOverride: stringFlag(flags, "base-url"),
+		providerOverride: stringFlag(flags, "provider"),
+		sshHostOverride: stringFlag(flags, "ssh"),
 		toolsMode: (typeof flags.tools === "string" ? flags.tools : undefined) as "auto" | "native" | "text" | undefined,
 		maxTurns: numberFlag(flags, "max-turns", 1),
 		temperature: numberFlag(flags, "temperature", 0, false),
@@ -189,8 +204,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		for (const [name, p] of Object.entries(PROVIDER_PRESETS)) {
 			console.log(`  ${name.padEnd(12)} ${p.baseUrl}  (key: ${p.keyEnv})`);
 		}
+		console.log("\nsubscription CLIs (official sign-in, separate from API billing):\n  codex        rein setup --provider codex\n  copilot      rein setup --provider copilot");
 		const config = loadConfig();
-		if (config.model || config.baseUrl) console.log(`\nconfig: ~/.rein/config.json → ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl })}`);
+		if (config.model || config.baseUrl) console.log(`\nconfig → ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, sshHost: config.sshHost })}`);
 		await printHardwareSection();
 		return;
 	}
@@ -220,9 +236,26 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 
+	if (_[0] === "login") {
+		const provider = (_[1] ?? common.providerOverride)?.toLowerCase();
+		if (provider !== "codex" && provider !== "copilot") throw new Error("Use rein login codex or rein login copilot. API-key providers are configured with rein setup.");
+		if (flags.yes === true) throw new Error("Login requires browser interaction. Run rein login without --yes.");
+		const { loginCli } = await import("./harness/auth.ts");
+		const result = await loginCli(provider, { deviceAuth: flags["device-auth"] !== false, openBrowser: flags["no-browser"] !== true });
+		console.log(result.detail);
+		process.exitCode = result.ok ? 0 : 1;
+		return;
+	}
+
 	if (_[0] === "setup") {
+		const auth = stringFlag(flags, "auth");
+		if (auth !== undefined && auth !== "api-key" && auth !== "cli") throw new Error("--auth must be api-key or cli");
+		const cliProvider = stringFlag(flags, "cli-provider");
+		if (cliProvider !== undefined && cliProvider !== "codex" && cliProvider !== "copilot") throw new Error("--cli-provider must be codex or copilot");
 		const { runSetup } = await import("./harness/setup.ts");
-		const code = await runSetup({ yes: flags.yes === true, status: flags.status === true });
+		const code = await runSetup({ yes: flags.yes === true, status: flags.status === true,
+			provider: common.providerOverride, baseUrl: common.baseUrlOverride, model: common.modelOverride,
+			sshHost: common.sshHostOverride, auth, cliProvider, deviceAuth: flags["device-auth"] !== false, noBrowser: flags["no-browser"] === true });
 		process.exitCode = code;
 		return;
 	}

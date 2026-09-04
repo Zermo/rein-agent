@@ -58,3 +58,41 @@ saved rollover against a local mock server using only the shipped bundle.
 
 No paid-provider inference or production deployment was performed. Context
 budgets remain estimates, and Pi's session/image formats are outside this port.
+
+## 0.4.0 connection and authentication review
+
+Three parallel reviewers covered URL and credential resolution, the setup wizard,
+and official CLI transports, then reviewed each other's changes. The review fixed:
+
+- Authenticated APIs were queried before setup collected a key. Discovery now
+  follows authentication and uses the selected endpoint's credentials.
+- Scheme-less NetBird addresses and pasted request URLs produced invalid paths.
+  Normalization and bounded discovery preserve proxy prefixes and root APIs.
+- Saved keys and model IDs could follow a different endpoint or SSH host.
+  Saved credentials and model selection now remain scoped to their connection.
+- CLI/environment/config precedence differed between setup and execution. Both
+  honor explicit selection and ignore empty environment overrides.
+- Remote loopback APIs could not be reached. Managed SSH forwarding now binds
+  only a local ephemeral port and closes on completion, failure, or cancellation.
+- Setup could hang on EOF, expose key fragments, retain stale keys, or save a
+  failed connection. It now closes input, redacts keys, saves atomically with
+  private permissions, and preserves the previous config when validation fails.
+- Subscription CLI processes could inherit BYOK settings or custom tools.
+  Their configuration and environment are restricted; credentials stay managed
+  by the official CLI. Copilot's OS keychain may be shared with its native CLI.
+- Current OpenAI models can reject `max_tokens`. Setup and inference share
+  bounded retries only for explicitly rejected compatibility fields; auth,
+  validation, and server errors are not retried indiscriminately.
+- Doctor could assess remote models against local hardware, suggest an unrelated
+  Ollama repair, or report a stale API prefix as healthy. Those cases now receive
+  endpoint-specific diagnosis.
+
+Validation includes fake CLI processes, mocked authenticated APIs, CLI-to-config
+integration, and subprocess forwarding/cleanup tests. Actual current Codex and
+Copilot parsers accepted the generated flags with `--help`; no cloud account login
+or paid cloud inference was performed. A live DGX loopback server was reached over
+SSH: model discovery, saved setup, chat, and a read-only fixture tool round trip
+all passed. The server listener was left unchanged.
+
+Local release checks passed on Node 22.19: 73 smoke assertions and 125 regression
+tests. The bundled Node 18 smoke test and Posthorse provenance check also passed.

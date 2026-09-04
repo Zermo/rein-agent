@@ -14,14 +14,309 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/ai/ssh.ts
+import { spawn } from "node:child_process";
+import { createConnection, createServer } from "node:net";
+function validateSshHost(host) {
+  if (!/^[a-zA-Z0-9_][a-zA-Z0-9_.@:[\]-]*$/.test(host)) {
+    throw new Error("SSH host must be an SSH config alias or user@hostname, without spaces or command options.");
+  }
+}
+function sshArguments(host, baseUrl, localPort) {
+  validateSshHost(host);
+  const url = new URL(baseUrl);
+  if (url.protocol !== "http:" || url.username || url.password) throw new Error("SSH forwarding requires an http:// API URL without embedded credentials.");
+  return [
+    "-N",
+    "-T",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-o",
+    "ConnectTimeout=10",
+    "-o",
+    "ControlMaster=no",
+    "-o",
+    "ControlPath=none",
+    "-o",
+    "PermitLocalCommand=no",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=2",
+    "-L",
+    `127.0.0.1:${localPort}:${url.hostname}:${url.port || "80"}`,
+    "--",
+    host
+  ];
+}
+async function unusedPort() {
+  const server = createServer();
+  await new Promise((resolve7, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve7);
+  });
+  const port = server.address().port;
+  await new Promise((resolve7, reject) => server.close((error) => error ? reject(error) : resolve7()));
+  return port;
+}
+function portReady(port) {
+  return new Promise((resolve7) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let done = false;
+    const finish = (ready) => {
+      if (done) return;
+      done = true;
+      socket.destroy();
+      resolve7(ready);
+    };
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.setTimeout(100, () => finish(false));
+  });
+}
+async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
+  if (!sshHost) return use(baseUrl);
+  validateSshHost(sshHost);
+  if (options.signal?.aborted) throw new DOMException("SSH connection aborted", "AbortError");
+  const port = await unusedPort();
+  const args = sshArguments(sshHost, baseUrl, port);
+  const child = options.spawnSsh ? options.spawnSsh(args) : spawn("ssh", args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+  let failure;
+  let closed = false;
+  let stderr = "";
+  const exited = new Promise((resolve7) => {
+    child.once("error", (error) => {
+      failure = error;
+      closed = true;
+      resolve7();
+    });
+    child.once("close", (code) => {
+      closed = true;
+      failure ??= new Error(`SSH exited (${code ?? "signal"}). ${stderr.trim()}`);
+      resolve7();
+    });
+  });
+  child.stderr?.on("data", (chunk) => {
+    if (stderr.length < 2e3) stderr += String(chunk).slice(0, 2e3 - stderr.length);
+  });
+  const abort = () => {
+    child.kill("SIGTERM");
+  };
+  options.signal?.addEventListener("abort", abort, { once: true });
+  process.once("exit", abort);
+  try {
+    const deadline = Date.now() + (options.timeoutMs ?? 12e3);
+    while (true) {
+      if (options.signal?.aborted) throw new DOMException("SSH connection aborted", "AbortError");
+      if (failure) throw new Error(`Cannot open SSH tunnel through ${sshHost}: ${failure.message}. Check that ssh ${sshHost} works with key authentication.`);
+      if (Date.now() >= deadline) throw new Error(`SSH tunnel through ${sshHost} timed out. Check the VPN and SSH connection.`);
+      if (await portReady(port)) break;
+      await new Promise((resolve7) => setTimeout(resolve7, 40));
+    }
+    const forwarded = new URL(baseUrl);
+    forwarded.hostname = "127.0.0.1";
+    forwarded.port = String(port);
+    return await use(forwarded.href.replace(/\/$/, ""));
+  } finally {
+    options.signal?.removeEventListener("abort", abort);
+    process.removeListener("exit", abort);
+    if (!closed) {
+      child.kill("SIGTERM");
+      const hardKill = setTimeout(() => child.kill("SIGKILL"), 500);
+      await exited;
+      clearTimeout(hardKill);
+    }
+  }
+}
+var init_ssh = __esm({
+  "src/ai/ssh.ts"() {
+  }
+});
+
+// src/ai/endpoints.ts
+function localHost(hostname) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "::1" || host.startsWith("fc") && host.includes(":") || host.startsWith("fd") && host.includes(":")) return true;
+  if (!host.includes(".") && !host.includes(":")) return true;
+  if (/\.(?:localhost|local|lan|internal|netbird\.cloud|netbird\.selfhosted|ts\.net)$/.test(host)) return true;
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  return parts[0] === 10 || parts[0] === 127 || parts[0] === 192 && parts[1] === 168 || parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31 || parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127 || parts[0] === 169 && parts[1] === 254;
+}
+function parseEndpoint(input) {
+  const value = input.trim();
+  if (!value) throw new Error("Enter the host or API URL, for example 100.64.0.5:1234 or https://server.example/v1.");
+  let url;
+  try {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) url = new URL(value);
+    else {
+      const bare = value.replace(/^\/\//, "");
+      const candidate = new URL(`http://${bare}`);
+      url = new URL(`${localHost(candidate.hostname) || candidate.port && candidate.port !== "443" ? "http" : "https"}://${bare}`);
+    }
+  } catch {
+    throw new Error("Invalid API URL. Use a host and optional port, or an http:// or https:// URL.");
+  }
+  if (!["http:", "https:"].includes(url.protocol) || !url.hostname) throw new Error("API endpoints must use http:// or https://.");
+  if (url.username || url.password) throw new Error("Do not put credentials in the API URL. Enter the API key separately.");
+  if (url.search || url.hash) throw new Error("Use the API base URL without query parameters or a fragment; enter credentials separately.");
+  return url;
+}
+function guessProvider(input, fallback = "openai-compatible") {
+  const url = parseEndpoint(input);
+  if (["models.github.ai", "models.inference.ai.azure.com"].includes(url.hostname)) return "github";
+  for (const [name, preset] of Object.entries(PROVIDER_PRESETS)) {
+    if (url.origin === new URL(preset.baseUrl).origin) return name;
+  }
+  if (localHost(url.hostname) && PORT_PROVIDERS[url.port]) return PORT_PROVIDERS[url.port];
+  return fallback;
+}
+function normalizeBaseUrl(input, provider) {
+  const url = parseEndpoint(input);
+  const inferred = guessProvider(url.toString());
+  if (inferred === "github" || provider?.toLowerCase() === "github") throw new Error(GITHUB_MODELS_RETIRED);
+  let path2 = url.pathname.replace(/\/+$/, "");
+  const wasRoute = /\/(?:chat\/completions|models)$/.test(path2);
+  path2 = path2.replace(/\/(?:chat\/completions|models)$/, "");
+  const preset = PROVIDER_PRESETS[inferred];
+  if (preset && url.origin === new URL(preset.baseUrl).origin && (!path2 || path2 === "/v1" || new URL(preset.baseUrl).pathname.startsWith(path2 + "/"))) {
+    path2 = new URL(preset.baseUrl).pathname;
+  } else if ((provider === "ollama" || inferred === "ollama") && ["/api", "/api/chat", "/api/tags", "/api/generate"].includes(path2)) {
+    path2 = "/v1";
+  } else if (!path2 && !wasRoute && !/^https?:\/\/[^/]+\/$/i.test(input.trim())) path2 = "/v1";
+  return url.origin + (path2 || "/");
+}
+function modelIds(doc) {
+  const values = Array.isArray(doc?.data) ? doc.data : Array.isArray(doc?.models) ? doc.models : void 0;
+  if (!values) return void 0;
+  const ids = values.map((item) => typeof item === "string" ? item : item?.id ?? item?.name ?? item?.model).filter((id) => typeof id === "string" && id.length > 0);
+  if (values.length && !ids.length) return void 0;
+  return [...new Set(ids)];
+}
+async function detectEndpoint(input, options = {}) {
+  const logicalBase = normalizeBaseUrl(input, options.provider);
+  const provider = options.provider?.toLowerCase() ?? guessProvider(logicalBase, "custom");
+  try {
+    return await withSshTunnel(logicalBase, options.sshHost, async (forwardedBase) => {
+      const detected = await detectEndpointDirect(forwardedBase, { ...options, provider });
+      const logicalOrigin = new URL(logicalBase).origin;
+      const forwardedOrigin = new URL(forwardedBase).origin;
+      return {
+        ...detected,
+        baseUrl: logicalOrigin + (new URL(detected.baseUrl).pathname === "/" ? "/" : new URL(detected.baseUrl).pathname.replace(/\/$/, "")),
+        ...detected.error ? { error: detected.error.replaceAll(forwardedOrigin, logicalOrigin) } : {}
+      };
+    });
+  } catch (error) {
+    return { baseUrl: logicalBase, provider, models: [], error: error.message };
+  }
+}
+async function detectEndpointDirect(input, options) {
+  const baseUrl = normalizeBaseUrl(input, options.provider);
+  const provider = options.provider?.toLowerCase() ?? guessProvider(baseUrl, "custom");
+  const result = { baseUrl, provider, models: [] };
+  const url = new URL(baseUrl);
+  const bases = [baseUrl.replace(/\/$/, "")];
+  if (url.pathname.endsWith("/v1")) bases.push(baseUrl.slice(0, -3));
+  else if (provider === "custom" || provider === "openai-compatible") bases.push(`${baseUrl.replace(/\/$/, "")}/v1`);
+  const probes = [...new Set(bases)].map((base) => ({ base, endpoint: `${base}/models` }));
+  if (provider === "ollama") probes.push({ base: `${url.origin}/v1`, endpoint: `${url.origin}/api/tags` });
+  const deadline = Date.now() + Math.max(1, options.timeoutMs ?? 2500);
+  let error = "No compatible model list was found.";
+  for (const probe of probes) {
+    const controller = new AbortController();
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
+    const timer = setTimeout(() => controller.abort(), remaining);
+    try {
+      let endpoint = probe.endpoint;
+      let response;
+      for (let redirects = 0; redirects <= 2; redirects++) {
+        response = await fetch(endpoint, { signal: controller.signal, redirect: "manual", headers: options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : void 0 });
+        if (![301, 302, 303, 307, 308].includes(response.status)) break;
+        const location = response.headers.get("location");
+        if (!location) break;
+        const target = new URL(location, endpoint);
+        await response.body?.cancel();
+        if (target.origin !== url.origin || target.username || target.password) return { ...result, error: "Endpoint redirected to another origin. Enter the final trusted API URL explicitly; credentials were not forwarded." };
+        endpoint = target.toString();
+        if (redirects === 2) return { ...result, error: "Too many API endpoint redirects. Enter the final API base URL." };
+      }
+      if (response.status === 401 || response.status === 403) {
+        await response.body?.cancel();
+        return { ...result, baseUrl: probe.base, error: `Authentication ${options.apiKey ? "was rejected" : "is required"} (HTTP ${response.status}). Enter a valid API key for this endpoint.` };
+      }
+      if (!response.ok) {
+        error = response.status === 404 ? `API path not found (HTTP 404) at ${probe.endpoint}. Check the server's OpenAI-compatible API prefix.` : `API returned HTTP ${response.status} at ${probe.endpoint}.`;
+        await response.body?.cancel();
+        continue;
+      }
+      let doc;
+      try {
+        doc = await response.json();
+      } catch {
+        if (controller.signal.aborted) throw new Error("Timed out");
+        error = `Invalid model list at ${probe.endpoint}: expected JSON, but received another response (possibly a web UI).`;
+        continue;
+      }
+      const models = modelIds(doc);
+      if (!models) {
+        error = `Invalid model list at ${probe.endpoint}: expected a data[] or models[] array of model IDs.`;
+        continue;
+      }
+      const rawDetectedBase = endpoint.endsWith("/models") ? endpoint.slice(0, -7) : probe.base;
+      const detectedBase = new URL(rawDetectedBase).pathname === "/" ? new URL(rawDetectedBase).origin + "/" : rawDetectedBase;
+      return { baseUrl: detectedBase, provider, models, ...models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." } };
+    } catch (err) {
+      if (controller.signal.aborted || err.name === "AbortError") return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
+      const cause = err;
+      const code = cause.cause?.code ?? cause.code;
+      return { ...result, error: `${code === "ECONNREFUSED" ? "Connection refused" : code === "ENOTFOUND" || code === "EAI_AGAIN" ? "Host name could not be resolved" : "Could not connect"} at ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return { ...result, error };
+}
+var PROVIDER_PRESETS, GITHUB_MODELS_RETIRED, PORT_PROVIDERS;
+var init_endpoints = __esm({
+  "src/ai/endpoints.ts"() {
+    init_ssh();
+    PROVIDER_PRESETS = {
+      ollama: { baseUrl: "http://localhost:11434/v1", keyEnv: "OLLAMA_API_KEY" },
+      lmstudio: { baseUrl: "http://localhost:1234/v1", keyEnv: "LMSTUDIO_API_KEY" },
+      llamacpp: { baseUrl: "http://localhost:8080/v1", keyEnv: "LLAMACPP_API_KEY" },
+      vllm: { baseUrl: "http://localhost:8000/v1", keyEnv: "VLLM_API_KEY" },
+      openai: { baseUrl: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
+      deepseek: { baseUrl: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY" },
+      groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY" },
+      together: { baseUrl: "https://api.together.xyz/v1", keyEnv: "TOGETHER_API_KEY" },
+      openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
+      mistral: { baseUrl: "https://api.mistral.ai/v1", keyEnv: "MISTRAL_API_KEY" },
+      fireworks: { baseUrl: "https://api.fireworks.ai/inference/v1", keyEnv: "FIREWORKS_API_KEY" },
+      cerebras: { baseUrl: "https://api.cerebras.ai/v1", keyEnv: "CEREBRAS_API_KEY" },
+      huggingface: { baseUrl: "https://router.huggingface.co/v1", keyEnv: "HF_TOKEN" },
+      // https://ai.google.dev/gemini-api/docs/openai
+      gemini: { baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", keyEnv: "GEMINI_API_KEY" }
+    };
+    GITHUB_MODELS_RETIRED = "GitHub Models was retired on July 30, 2026. Choose an active API provider, or explicitly choose Copilot CLI subscription authentication. See https://docs.github.com/en/github-models.";
+    PORT_PROVIDERS = { "11434": "ollama", "1234": "lmstudio", "8080": "llamacpp", "8000": "vllm" };
+  }
+});
+
 // src/ai/models.ts
 var models_exports = {};
 __export(models_exports, {
   LOCAL_SERVERS: () => LOCAL_SERVERS,
   PROVIDER_PRESETS: () => PROVIDER_PRESETS,
   apiKeyFor: () => apiKeyFor,
+  detectEndpoint: () => detectEndpoint,
   discoverLocalServers: () => discoverLocalServers,
+  guessProvider: () => guessProvider,
   loadConfig: () => loadConfig,
+  normalizeBaseUrl: () => normalizeBaseUrl,
   pickDefaultModelId: () => pickDefaultModelId,
   resolveModel: () => resolveModel
 });
@@ -41,43 +336,40 @@ function pickDefaultModelId(ids) {
   if (withSize.length > 0) return withSize[0].id;
   return ids[0];
 }
-async function fetchJson(url, timeoutMs = 1500, apiKey) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+async function discoverLocalServers() {
+  const results = await Promise.all(LOCAL_SERVERS.map(async (server) => {
+    const detected = await detectEndpoint(server.baseUrl, { provider: server.provider, apiKey: scopedApiKeyFor(server.provider, server.baseUrl, void 0, false), timeoutMs: 1500 });
+    return detected.models.length ? { ...server, baseUrl: detected.baseUrl, models: detected.models } : void 0;
+  }));
+  return results.filter((server) => server !== void 0);
+}
+function apiKeyFor(provider, baseUrl, sshHost) {
+  return scopedApiKeyFor(provider, baseUrl, sshHost, true);
+}
+function scopedApiKeyFor(provider, baseUrl, sshHost, allowGeneric = true) {
+  provider = provider?.toLowerCase();
+  if (provider === "codex" || provider === "copilot" || baseUrl?.startsWith("cli://")) return void 0;
+  const config = loadConfig();
+  const preset = provider ? PROVIDER_PRESETS[provider] : void 0;
+  const target = baseUrl ?? preset?.baseUrl ?? config.baseUrl;
+  let normalized;
   try {
-    const res = await fetch(url, { signal: controller.signal, headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : void 0 });
-    if (!res.ok) return void 0;
-    return await res.json();
+    if (target) normalized = normalizeBaseUrl(target);
   } catch {
     return void 0;
-  } finally {
-    clearTimeout(timer);
   }
-}
-async function discoverLocalServers() {
-  const alive = [];
-  for (const server of LOCAL_SERVERS) {
-    let models = [];
-    let data = await fetchJson(server.baseUrl + "/models");
-    if (data?.data?.map) models = data.data.map((m) => m.id).filter(Boolean);
-    if (models.length === 0) {
-      data = await fetchJson(server.modelsEndpoint);
-      if (data?.models?.map) models = data.models.map((m) => m.name ?? m.model ?? m.id).filter(Boolean);
-    }
-    if (models.length === 0) continue;
-    alive.push({ ...server, models });
-    if (alive.length >= 1 && server.provider === "ollama") continue;
+  if (allowGeneric && process.env.REIN_API_KEY) return process.env.REIN_API_KEY;
+  if (preset && normalized && new URL(normalized).origin === new URL(preset.baseUrl).origin) {
+    const key = process.env[preset.keyEnv];
+    if (key) return key;
   }
-  return alive;
-}
-function apiKeyFor(provider) {
-  provider = provider?.toLowerCase();
-  if (provider && PROVIDER_PRESETS[provider]) {
-    const envKey = process.env[PROVIDER_PRESETS[provider].keyEnv];
-    if (envKey) return envKey;
+  if (!normalized || !config.apiKey || config.auth?.type === "cli" || config.sshHost !== sshHost) return void 0;
+  const configured = config.baseUrl ?? (config.provider ? PROVIDER_PRESETS[config.provider]?.baseUrl : void 0);
+  try {
+    return configured && normalizeBaseUrl(configured) === normalized ? config.apiKey : void 0;
+  } catch {
+    return void 0;
   }
-  const config = loadConfig();
-  return config.apiKey;
 }
 function loadConfig() {
   const path2 = join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json");
@@ -89,88 +381,64 @@ function loadConfig() {
 }
 async function resolveModel(overrides = {}) {
   const config = loadConfig();
-  const envBase = process.env.REIN_BASE_URL;
-  const envModel = process.env.REIN_MODEL;
-  let providerBaseUrl;
-  let providerName;
-  if (overrides.provider) {
-    const preset = PROVIDER_PRESETS[overrides.provider.toLowerCase()];
-    if (!preset) {
-      throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}`);
-    }
-    providerBaseUrl = preset.baseUrl;
-    providerName = overrides.provider.toLowerCase();
-  }
-  const baseUrl = (overrides.baseUrl ?? providerBaseUrl ?? envBase ?? config.baseUrl ?? "").replace(/\/$/, "");
-  const modelId = overrides.model ?? envModel ?? config.model;
-  if (baseUrl && modelId) {
+  const envBase = process.env.REIN_BASE_URL?.trim() || void 0;
+  const envModel = process.env.REIN_MODEL?.trim() || void 0;
+  const providerOverride = overrides.provider?.toLowerCase();
+  const selectingEndpoint = overrides.baseUrl !== void 0 || !!envBase;
+  const configuredProvider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0);
+  const providerName = providerOverride ?? (selectingEndpoint ? void 0 : configuredProvider);
+  if (providerName === "github") throw new Error(GITHUB_MODELS_RETIRED);
+  if (providerName === "codex" || providerName === "copilot") {
+    if (overrides.baseUrl !== void 0 || envBase) throw new Error(`CLI provider ${providerName} cannot be combined with an HTTP base URL. Remove --base-url/REIN_BASE_URL or select an API provider.`);
+    if (overrides.sshHost) throw new Error("SSH forwarding applies to HTTP API providers, not subscription CLI providers.");
     return {
-      id: modelId,
-      provider: providerName ?? guessProvider(baseUrl, overrides.baseUrl ? "custom" : "openai-compatible"),
-      baseUrl,
+      id: overrides.model ?? envModel ?? (configuredProvider === providerName ? config.model : void 0) ?? "default",
+      provider: providerName,
+      baseUrl: `cli://${providerName}`,
       contextWindow: config.contextWindow ?? 32768,
       maxTokens: config.maxTokens ?? 4096
     };
   }
+  const preset = providerName ? PROVIDER_PRESETS[providerName] : void 0;
+  if (providerOverride && !preset && !["custom", "openai-compatible"].includes(providerOverride)) {
+    throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, custom`);
+  }
+  const configuredBase = config.auth?.type !== "cli" && !config.baseUrl?.startsWith("cli://") ? config.baseUrl : void 0;
+  const rawBase = overrides.baseUrl ?? (providerOverride ? preset?.baseUrl : void 0) ?? envBase ?? configuredBase ?? preset?.baseUrl;
+  const baseUrl = rawBase ? normalizeBaseUrl(rawBase, providerName) : "";
+  let sameEndpoint = false;
+  try {
+    sameEndpoint = !!baseUrl && normalizeBaseUrl(configuredBase ?? (configuredProvider ? PROVIDER_PRESETS[configuredProvider]?.baseUrl ?? "" : "")) === baseUrl;
+  } catch {
+  }
+  if (overrides.sshHost !== void 0 && overrides.sshHost !== config.sshHost) sameEndpoint = false;
+  const modelId = overrides.model ?? envModel ?? (sameEndpoint || !baseUrl && !configuredBase && config.auth?.type !== "cli" ? config.model : void 0);
+  const sshHost = overrides.sshHost ?? (sameEndpoint ? config.sshHost : void 0);
+  const metadata = { contextWindow: config.contextWindow ?? 32768, maxTokens: config.maxTokens ?? 4096, ...sshHost ? { sshHost } : {} };
   if (baseUrl) {
-    const provider = providerName ?? guessProvider(baseUrl, overrides.baseUrl ? "custom" : "openai-compatible");
-    const data = await fetchJson(`${baseUrl}/models`, 1500, apiKeyFor(provider));
-    const ids = Array.isArray(data?.data) ? data.data.map((m) => m.id).filter((id2) => typeof id2 === "string") : [];
-    const id = pickDefaultModelId(ids);
-    if (!id) throw new Error(`No models found at ${baseUrl}. Specify --model or REIN_MODEL for this endpoint.`);
-    return { id, provider, baseUrl, contextWindow: config.contextWindow ?? 32768, maxTokens: config.maxTokens ?? 4096 };
+    const provider = providerName ?? guessProvider(baseUrl, "custom");
+    if (modelId) return { id: modelId, provider, baseUrl, ...metadata };
+    const detected = await detectEndpoint(baseUrl, { provider, apiKey: apiKeyFor(provider, baseUrl, sshHost), sshHost });
+    const id = pickDefaultModelId(detected.models);
+    if (!id) throw new Error(`No models found at ${baseUrl}. ${detected.error ?? "Specify --model or REIN_MODEL for this endpoint."}`);
+    return { id, provider: detected.provider, baseUrl: detected.baseUrl, ...metadata };
   }
   const servers = await discoverLocalServers();
   const server = modelId ? servers.find((server2) => server2.models?.includes(modelId)) : servers[0];
   if (server) {
     const id = modelId ?? pickDefaultModelId(server.models ?? []);
-    if (id) return {
-      id,
-      provider: server.provider,
-      baseUrl: server.baseUrl,
-      contextWindow: config.contextWindow ?? 32768,
-      maxTokens: config.maxTokens ?? 4096
-    };
+    if (id) return { id, provider: server.provider, baseUrl: server.baseUrl, ...metadata };
   }
   if (modelId) throw new Error(`Model "${modelId}" was not found on a local server. Specify --base-url or --provider for its endpoint.`);
   throw new Error(
-    "No local AI server found.\nStart one (e.g. `ollama serve` + `ollama pull qwen2.5-coder:7b`, or LM Studio's local server), or set:\n  REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein ...\nSee `rein models` for what rein can see."
+    "No local AI server found.\nStart one (e.g. ollama serve or LM Studio's local server), or run rein setup with the host and port.\nExample: REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein ..."
   );
 }
-function guessProvider(baseUrl, fallback = "openai-compatible") {
-  const normalized = baseUrl.replace(/\/$/, "");
-  for (const [provider, preset] of Object.entries(PROVIDER_PRESETS)) {
-    if (normalized === preset.baseUrl) return provider;
-  }
-  try {
-    const url = new URL(baseUrl);
-    if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
-      const local = LOCAL_SERVERS.find((server) => new URL(server.baseUrl).port === url.port);
-      if (local) return local.provider;
-    }
-  } catch {
-  }
-  return fallback;
-}
-var PROVIDER_PRESETS, LOCAL_SERVERS, PREFERRED_MODELS;
+var LOCAL_SERVERS, PREFERRED_MODELS;
 var init_models = __esm({
   "src/ai/models.ts"() {
-    PROVIDER_PRESETS = {
-      ollama: { baseUrl: "http://localhost:11434/v1", keyEnv: "OLLAMA_API_KEY" },
-      lmstudio: { baseUrl: "http://localhost:1234/v1", keyEnv: "LMSTUDIO_API_KEY" },
-      llamacpp: { baseUrl: "http://localhost:8080/v1", keyEnv: "LLAMACPP_API_KEY" },
-      vllm: { baseUrl: "http://localhost:8000/v1", keyEnv: "VLLM_API_KEY" },
-      openai: { baseUrl: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
-      deepseek: { baseUrl: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY" },
-      groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY" },
-      together: { baseUrl: "https://api.together.xyz/v1", keyEnv: "TOGETHER_API_KEY" },
-      openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
-      mistral: { baseUrl: "https://api.mistral.ai/v1", keyEnv: "MISTRAL_API_KEY" },
-      fireworks: { baseUrl: "https://api.fireworks.ai/inference/v1", keyEnv: "FIREWORKS_API_KEY" },
-      cerebras: { baseUrl: "https://api.cerebras.ai/v1", keyEnv: "CEREBRAS_API_KEY" },
-      huggingface: { baseUrl: "https://router.huggingface.co/v1", keyEnv: "HF_TOKEN" },
-      github: { baseUrl: "https://models.inference.ai.azure.com/v1", keyEnv: "GITHUB_TOKEN" }
-    };
+    init_endpoints();
+    init_endpoints();
     LOCAL_SERVERS = [
       { provider: "ollama", baseUrl: "http://localhost:11434/v1", modelsEndpoint: "http://localhost:11434/api/tags" },
       { provider: "lmstudio", baseUrl: "http://localhost:1234/v1", modelsEndpoint: "http://localhost:1234/v1/models" },
@@ -394,11 +662,6 @@ var init_profile = __esm({
 });
 
 // src/hardware/catalog.ts
-var catalog_exports = {};
-__export(catalog_exports, {
-  CATALOG: () => CATALOG,
-  matchCatalog: () => matchCatalog
-});
 function matchCatalog(modelId) {
   const id = modelId.toLowerCase();
   for (const m of CATALOG) {
@@ -716,15 +979,905 @@ var init_report = __esm({
   }
 });
 
+// src/ai/event-stream.ts
+var EventStream, AssistantMessageEventStream;
+var init_event_stream = __esm({
+  "src/ai/event-stream.ts"() {
+    EventStream = class {
+      queue = [];
+      waiting = [];
+      done = false;
+      finalResultPromise;
+      resolveFinalResult;
+      isComplete;
+      extractResult;
+      constructor(isComplete, extractResult) {
+        this.isComplete = isComplete ?? (() => false);
+        this.extractResult = extractResult ?? ((event) => event);
+        this.finalResultPromise = new Promise((resolve7) => {
+          this.resolveFinalResult = resolve7;
+        });
+      }
+      push(event) {
+        if (this.done) return;
+        if (this.isComplete(event)) {
+          this.done = true;
+          try {
+            this.resolveFinalResult(this.extractResult(event));
+          } catch {
+          }
+        }
+        const waiter = this.waiting.shift();
+        if (waiter) waiter({ value: event, done: false });
+        else this.queue.push(event);
+      }
+      end(result) {
+        if (this.done) return;
+        this.done = true;
+        if (result !== void 0) this.resolveFinalResult(result);
+        while (this.waiting.length > 0) {
+          this.waiting.shift()({ value: void 0, done: true });
+        }
+      }
+      async *[Symbol.asyncIterator]() {
+        while (true) {
+          if (this.queue.length > 0) yield this.queue.shift();
+          else if (this.done) return;
+          else {
+            const result = await new Promise((resolve7) => this.waiting.push(resolve7));
+            if (result.done) return;
+            yield result.value;
+          }
+        }
+      }
+      get finished() {
+        return this.done;
+      }
+      result() {
+        return this.finalResultPromise;
+      }
+    };
+    AssistantMessageEventStream = class extends EventStream {
+      constructor() {
+        super(
+          (event) => event.type === "done" || event.type === "error",
+          (event) => {
+            if (event.type === "done") return event.message;
+            if (event.type === "error") return event.error;
+            throw new Error("Unexpected final event type");
+          }
+        );
+      }
+    };
+  }
+});
+
+// src/ai/sse.ts
+async function* sseDataLines(body) {
+  if (!body) return;
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let data = [];
+  const consume = (line) => {
+    if (line === "") {
+      if (data.length === 0) return void 0;
+      const event = data.join("\n");
+      data = [];
+      return event;
+    }
+    if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+    return void 0;
+  };
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buf += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      let newline;
+      while ((newline = buf.indexOf("\n")) !== -1) {
+        const event2 = consume(buf.slice(0, newline).replace(/\r$/, ""));
+        buf = buf.slice(newline + 1);
+        if (event2?.trim() === "[DONE]") return;
+        if (event2 !== void 0) yield event2;
+      }
+      if (done) break;
+    }
+    if (buf) consume(buf.replace(/\r$/, ""));
+    const event = consume("");
+    if (event !== void 0 && event.trim() !== "[DONE]") yield event;
+  } finally {
+    await reader.cancel().catch(() => {
+    });
+    reader.releaseLock();
+  }
+}
+var init_sse = __esm({
+  "src/ai/sse.ts"() {
+  }
+});
+
+// src/util/json-salvage.ts
+function isControl(c) {
+  const cp = c.codePointAt(0);
+  return cp >= 0 && cp <= 31;
+}
+function escapeControl(c) {
+  switch (c) {
+    case "\b":
+      return "\\b";
+    case "\f":
+      return "\\f";
+    case "\n":
+      return "\\n";
+    case "\r":
+      return "\\r";
+    case "	":
+      return "\\t";
+    default:
+      return `\\u${c.codePointAt(0).toString(16).padStart(4, "0")}`;
+  }
+}
+function repairJson(json) {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (!inString) {
+      out += ch;
+      if (ch === '"') inString = true;
+      continue;
+    }
+    if (ch === '"') {
+      out += ch;
+      inString = false;
+      continue;
+    }
+    if (ch === "\\") {
+      const next = json[i + 1];
+      if (next === void 0) {
+        out += "\\\\";
+        continue;
+      }
+      if (next === "u") {
+        const hex = json.slice(i + 2, i + 6);
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += `\\u${hex}`;
+          i += 5;
+          continue;
+        }
+      }
+      if (VALID_ESCAPES.has(next)) {
+        out += `\\${next}`;
+        i += 1;
+        continue;
+      }
+      out += "\\\\";
+      continue;
+    }
+    out += isControl(ch) ? escapeControl(ch) : ch;
+  }
+  return out;
+}
+function stripTrailingCommas(json) {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (inString) {
+      out += ch;
+      if (ch === "\\" && i + 1 < json.length) {
+        out += json[i + 1];
+        i++;
+      } else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < json.length && /\s/.test(json[j])) j++;
+      if (j < json.length && (json[j] === "}" || json[j] === "]")) continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+function closeOpenBrackets(json) {
+  let depth = [];
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") depth.push(ch);
+    else if (ch === "}") {
+      if (depth[depth.length - 1] === "{") depth.pop();
+    } else if (ch === "]") {
+      if (depth[depth.length - 1] === "[") depth.pop();
+    }
+  }
+  let suffix = "";
+  if (inString) suffix += '"';
+  for (let i = depth.length - 1; i >= 0; i--) suffix += depth[i] === "{" ? "}" : "]";
+  return json + suffix;
+}
+function extractFirstObject(json) {
+  const start = json.indexOf("{");
+  if (start === -1) return void 0;
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < json.length; i++) {
+    const ch = json[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return json.slice(start, i + 1);
+    }
+  }
+  return void 0;
+}
+function parseArgsSalvaged(json) {
+  if (!json || json.trim() === "") return {};
+  const attempts = [];
+  const obj = extractFirstObject(json.trim());
+  if (obj) attempts.push(obj);
+  attempts.push(json, repairJson(json), stripTrailingCommas(repairJson(json)), closeOpenBrackets(stripTrailingCommas(repairJson(json))));
+  for (const candidate of attempts) {
+    try {
+      const value = JSON.parse(candidate);
+      if (value && typeof value === "object" && !Array.isArray(value)) return value;
+    } catch {
+    }
+  }
+  return {};
+}
+var VALID_ESCAPES;
+var init_json_salvage = __esm({
+  "src/util/json-salvage.ts"() {
+    VALID_ESCAPES = /* @__PURE__ */ new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
+  }
+});
+
+// src/ai/chat-request.ts
+function rejectedField(detail) {
+  let message = detail;
+  let parameter;
+  let code = "";
+  try {
+    const data = JSON.parse(detail);
+    const error = data.error ?? data;
+    if (typeof error.message === "string") message = error.message;
+    parameter = error.param;
+    if (typeof error.code === "string") code = error.code;
+    if (Array.isArray(data.detail)) {
+      const issue = data.detail.find((entry) => Array.isArray(entry.loc) && entry.loc.some((value) => typeof value === "string" && FIELD.test(value)) && UNSUPPORTED.test(entry.msg ?? entry.type ?? ""));
+      if (issue) {
+        message = issue.msg ?? "";
+        parameter = issue.loc.find((value) => typeof value === "string" && FIELD.test(value));
+      }
+    }
+  } catch {
+  }
+  if (!UNSUPPORTED.test(`${code} ${message}`)) return { message };
+  const rejectedClause = message.split(/[.!?;\n]/).find((clause) => UNSUPPORTED.test(clause));
+  const named = rejectedClause?.match(/(?:unsupported(?:[_ ](?:parameter|argument|field|value))?|unrecognized(?: request)?(?: argument)?(?: supplied)?|unknown(?: (?:parameter|field|argument))?|unexpected(?: keyword)?(?: argument)?)[\s:="'`]*([a-z_]+)/i)?.[1];
+  const before = rejectedClause?.match(/\b(max_tokens|stream_options|temperature|top_p)\b[\s"'`]*(?:is |does )?(?:not supported|not support|unsupported)/i)?.[1];
+  const field = typeof parameter === "string" ? parameter.match(FIELD)?.[1] : named ? named.match(FIELD)?.[0] === named ? named : void 0 : before;
+  return { field: field === "max_completion_tokens" ? void 0 : field, message };
+}
+async function postChatCompletion(url, body, init = {}, fetchFn = fetch) {
+  const requestBody = { ...body };
+  const changed = /* @__PURE__ */ new Set();
+  for (; ; ) {
+    init.signal?.throwIfAborted();
+    const response = await fetchFn(url, { ...init, method: "POST", body: JSON.stringify(requestBody), redirect: "error" });
+    if (response.status !== 400 && response.status !== 422) return response;
+    const detail = await response.clone().text();
+    const { field, message } = rejectedField(detail);
+    if (!field || changed.has(field) || !Object.hasOwn(requestBody, field)) return response;
+    if (field === "max_tokens") {
+      if (!/\bmax_completion_tokens\b/.test(message) || !/\bmax_tokens\b/.test(detail)) return response;
+      if (!Object.hasOwn(requestBody, "max_completion_tokens")) requestBody.max_completion_tokens = requestBody.max_tokens;
+    }
+    delete requestBody[field];
+    changed.add(field);
+    await response.body?.cancel();
+  }
+}
+var FIELD, UNSUPPORTED;
+var init_chat_request = __esm({
+  "src/ai/chat-request.ts"() {
+    FIELD = /\b(max_tokens|max_completion_tokens|stream_options|temperature|top_p)\b/;
+    UNSUPPORTED = /unsupported|not supported|does not support|unrecognized|unknown (?:parameter|field|argument)|unexpected (?:keyword )?argument|extra inputs are not permitted/i;
+  }
+});
+
+// src/ai/openai-completions.ts
+function toOpenAIMessage(message, toolsMode) {
+  switch (message.role) {
+    case "user":
+      return { role: "user", content: message.content };
+    case "assistant": {
+      const text = message.content.filter((c) => c.type === "text").map((c) => c.text).join("");
+      const calls = message.content.filter((c) => c.type === "toolCall");
+      const out = { role: "assistant", content: text.length > 0 ? text : null };
+      if (calls.length > 0 && toolsMode === "text") {
+        out.content = [text, ...calls.map((c) => `<tool name="${c.name}">
+${JSON.stringify(c.arguments ?? {})}
+</tool>`)].filter(Boolean).join("\n\n");
+      } else if (calls.length > 0) {
+        out.tool_calls = calls.map((c) => ({
+          id: c.id,
+          type: "function",
+          function: { name: c.name, arguments: JSON.stringify(c.arguments ?? {}) }
+        }));
+      }
+      return out;
+    }
+    case "toolResult":
+      if (toolsMode === "text") return {
+        role: "user",
+        content: `Result of tool ${message.toolName} (${message.toolCallId}):
+${message.content.map((c) => c.text).join("\n")}`
+      };
+      return {
+        role: "tool",
+        tool_call_id: message.toolCallId,
+        content: message.content.map((c) => c.text).join("\n")
+      };
+  }
+}
+function parseTextToolCalls(text) {
+  const toolCalls = [];
+  const cleanText = text.replace(TOOL_BLOCK_RE, (block, name, rawArgs) => {
+    const args = parseArgsSalvaged(rawArgs.trim());
+    if (Object.keys(args).length === 0 && !/^\s*\{\s*\}\s*$/.test(rawArgs)) return block;
+    toolCalls.push({ type: "toolCall", id: `call_${Date.now()}_${toolCalls.length}`, name, arguments: args });
+    return "";
+  });
+  return { toolCalls, cleanText: toolCalls.length > 0 ? cleanText.replace(/\n{3,}/g, "\n\n").trim() : text };
+}
+function stream(model, context, options = {}) {
+  const out = new AssistantMessageEventStream();
+  if (model.sshHost) {
+    void (async () => {
+      try {
+        let final;
+        await withSshTunnel(model.baseUrl, model.sshHost, async (baseUrl) => {
+          for await (const event of stream({ ...model, baseUrl, sshHost: void 0 }, context, options)) {
+            if (event.type === "done" || event.type === "error") final = event;
+            else out.push(event);
+          }
+        }, { signal: options.signal, timeoutMs: options.timeoutMs });
+        if (final) out.push(final);
+      } catch (error) {
+        const aborted = options.signal?.aborted || error.name === "AbortError";
+        out.push({ type: "error", reason: aborted ? "aborted" : "error", error: {
+          role: "assistant",
+          content: [],
+          provider: model.provider,
+          model: model.id,
+          usage: { input: 0, output: 0, totalTokens: 0 },
+          stopReason: aborted ? "aborted" : "error",
+          errorMessage: error.message,
+          timestamp: Date.now()
+        } });
+      }
+    })();
+    return out;
+  }
+  void (async () => {
+    const message = {
+      role: "assistant",
+      content: [],
+      provider: model.provider,
+      model: model.id,
+      usage: { input: 0, output: 0, totalTokens: 0 },
+      stopReason: "pending",
+      timestamp: Date.now()
+    };
+    const emit = (event) => out.push(event);
+    try {
+      const toolsMode = options.toolsMode ?? "native";
+      const hasTools = (context.tools?.length ?? 0) > 0;
+      const messages = [];
+      const systemParts = [];
+      if (context.systemPrompt) systemParts.push(context.systemPrompt);
+      if (toolsMode === "text" && hasTools) {
+        systemParts.push(TEXT_TOOL_INSTRUCTIONS);
+        systemParts.push("Available tools:\n" + context.tools.map((t) => `${t.name}: ${t.description}
+Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
+      }
+      if (systemParts.length > 0) messages.push({ role: "system", content: systemParts.join("\n\n") });
+      for (const m of context.messages) {
+        const converted = toOpenAIMessage(m, toolsMode);
+        if (Array.isArray(converted)) messages.push(...converted);
+        else messages.push(converted);
+      }
+      const body = {
+        model: model.id,
+        messages,
+        stream: true
+      };
+      if (typeof options.temperature === "number") body.temperature = options.temperature;
+      if (typeof options.topP === "number") body.top_p = options.topP;
+      if (typeof options.maxTokens === "number") body.max_tokens = options.maxTokens;
+      else body.max_tokens = model.maxTokens || 4096;
+      if (options.includeUsage !== false) body.stream_options = { include_usage: true };
+      if (options.extra) Object.assign(body, options.extra);
+      if (toolsMode === "native" && hasTools) {
+        body.tools = (context.tools ?? []).map((t) => ({
+          type: "function",
+          function: { name: t.name, description: t.description, parameters: t.parameters }
+        }));
+      }
+      const headers = {
+        "Content-Type": "application/json",
+        ...options.headers
+      };
+      if (options.apiKey) headers["Authorization"] = `Bearer ${options.apiKey}`;
+      const response = await postChatCompletion(`${model.baseUrl.replace(/\/$/, "")}/chat/completions`, body, {
+        headers,
+        signal: options.signal,
+        redirect: "error"
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        message.stopReason = "error";
+        const detail = options.apiKey ? text.split(options.apiKey).join("[redacted]") : text;
+        message.errorMessage = `HTTP ${response.status} from ${model.baseUrl}: ${detail.slice(0, 800)}`;
+        emit({ type: "error", reason: "error", error: message });
+        return;
+      }
+      emit({ type: "start", partial: message });
+      const ct = (response.headers.get("content-type") ?? "").toLowerCase();
+      let dataLines;
+      if (ct.includes("json")) {
+        const doc = JSON.parse(await response.text());
+        if (doc?.choices?.[0]?.message) doc.choices[0].delta = doc.choices[0].message;
+        dataLines = [JSON.stringify(doc)];
+      } else {
+        dataLines = sseDataLines(response.body);
+      }
+      let textBlock = null;
+      let thinkingBlock = null;
+      let contentIndex = -1;
+      const nextIndex = () => ++contentIndex;
+      const textToolCalls = /* @__PURE__ */ new Map();
+      let finishReason = null;
+      const ensureTextBlock = () => {
+        if (!textBlock) {
+          textBlock = { type: "text", text: "" };
+          message.content.push(textBlock);
+          emit({ type: "text_start", contentIndex: nextIndex(), partial: message });
+        }
+        return textBlock;
+      };
+      const ensureThinkingBlock = () => {
+        if (!thinkingBlock) {
+          thinkingBlock = { type: "thinking", thinking: "" };
+          message.content.push(thinkingBlock);
+          emit({ type: "thinking_start", contentIndex: nextIndex(), partial: message });
+        }
+        return thinkingBlock;
+      };
+      for await (const data of dataLines) {
+        let chunk;
+        try {
+          chunk = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? JSON.stringify(chunk.error));
+        if (chunk.usage) {
+          const u = {
+            input: chunk.usage.prompt_tokens ?? 0,
+            output: chunk.usage.completion_tokens ?? 0,
+            totalTokens: chunk.usage.total_tokens ?? 0
+          };
+          if (typeof chunk.usage.completion_tokens_details?.reasoning_tokens === "number") {
+            u.reasoning = chunk.usage.completion_tokens_details.reasoning_tokens;
+          }
+          message.usage = u;
+        }
+        const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : void 0;
+        if (!choice) continue;
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+        const delta = choice.delta ?? choice.message ?? {};
+        if (typeof delta.content === "string" && delta.content.length > 0) {
+          const block = ensureTextBlock();
+          block.text += delta.content;
+          emit({ type: "text_delta", contentIndex: message.content.indexOf(block), delta: delta.content, partial: message });
+        }
+        const reasoning = typeof delta.reasoning_content === "string" ? delta.reasoning_content : typeof delta.reasoning === "string" ? delta.reasoning : typeof delta.thinking === "string" ? delta.thinking : "";
+        if (reasoning) {
+          const block = ensureThinkingBlock();
+          block.thinking += reasoning;
+          emit({ type: "thinking_delta", contentIndex: message.content.indexOf(block), delta: reasoning, partial: message });
+        }
+        if (Array.isArray(delta.tool_calls)) {
+          for (const [position, tc] of delta.tool_calls.entries()) {
+            const idx = typeof tc.index === "number" ? tc.index : position;
+            let st = textToolCalls.get(idx);
+            if (!st) {
+              st = { id: "", name: "", args: "" };
+              textToolCalls.set(idx, st);
+            }
+            if (tc.id) st.id = tc.id;
+            if (tc.function?.name) st.name += tc.function.name;
+            if (typeof tc.function?.arguments === "string") st.args += tc.function.arguments;
+          }
+        }
+      }
+      if (textBlock) emit({ type: "text_end", contentIndex: message.content.indexOf(textBlock), content: textBlock.text, partial: message });
+      if (thinkingBlock) emit({ type: "thinking_end", contentIndex: message.content.indexOf(thinkingBlock), content: thinkingBlock.thinking, partial: message });
+      const toolCalls = [];
+      if (toolsMode === "text" && textBlock) {
+        const { toolCalls: parsed, cleanText } = parseTextToolCalls(textBlock.text);
+        if (parsed.length > 0) {
+          textBlock.text = cleanText;
+          for (const tc of parsed) toolCalls.push(tc);
+        }
+      } else {
+        const sorted = [...textToolCalls.entries()].sort((a, b) => a[0] - b[0]);
+        for (const [, st] of sorted) {
+          toolCalls.push({
+            type: "toolCall",
+            id: st.id || `call_${Math.random().toString(36).slice(2, 10)}`,
+            name: st.name,
+            arguments: parseArgsSalvaged(st.args)
+          });
+        }
+      }
+      for (const tc of toolCalls) {
+        message.content.push(tc);
+        emit({ type: "toolcall_end", contentIndex: message.content.indexOf(tc), toolCall: tc, partial: message });
+      }
+      if (message.usage.totalTokens === 0) {
+        const chars = message.content.reduce((n, c) => n + ("text" in c ? c.text.length : "thinking" in c ? c.thinking.length : 0), 0);
+        message.usage = { input: 0, output: Math.ceil(chars / 4), totalTokens: Math.ceil(chars / 4) };
+      }
+      if (finishReason === "tool_calls" || finishReason === "tool_use" || toolCalls.length > 0) {
+        message.stopReason = "toolUse";
+      } else if (finishReason === "length") {
+        message.stopReason = "length";
+      } else if (finishReason === "stop" || finishReason === null || finishReason === "content_filter") {
+        message.stopReason = "stop";
+      } else {
+        message.stopReason = finishReason === "aborted" ? "aborted" : "stop";
+      }
+      if (message.stopReason === "aborted") {
+        emit({ type: "error", reason: "aborted", error: message });
+      } else {
+        emit({ type: "done", reason: message.stopReason, message });
+      }
+    } catch (err) {
+      const aborted = options.signal?.aborted || err?.name === "AbortError";
+      message.stopReason = aborted ? "aborted" : "error";
+      message.errorMessage = err?.message ?? String(err);
+      emit({ type: "error", reason: aborted ? "aborted" : "error", error: message });
+    }
+  })();
+  return out;
+}
+var TEXT_TOOL_INSTRUCTIONS, TOOL_BLOCK_RE;
+var init_openai_completions = __esm({
+  "src/ai/openai-completions.ts"() {
+    init_event_stream();
+    init_sse();
+    init_json_salvage();
+    init_ssh();
+    init_chat_request();
+    TEXT_TOOL_INSTRUCTIONS = `
+To use a tool, write a tool block exactly like this (one block per tool, valid JSON inside):
+
+<tool name="bash">
+{"command": "ls -la"}
+</tool>
+
+Rules for tool blocks:
+- The JSON inside must be a single complete JSON object.
+- Put each tool block on its own lines. No markdown fences around them.
+- After writing tool blocks, wait for the results before continuing.
+`;
+    TOOL_BLOCK_RE = /<tool\s+name="([^"]+)"\s*>([\s\S]*?)<\/tool>/g;
+  }
+});
+
+// src/ai/cli-provider.ts
+import { spawn as spawn2 } from "node:child_process";
+import { existsSync as existsSync2, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir as homedir2, tmpdir } from "node:os";
+import { join as join2 } from "node:path";
+function cliAuthDirectory(provider, env = process.env) {
+  return join2(env.REIN_HOME || join2(homedir2(), ".rein"), "cli-auth", provider);
+}
+function cliEnvironment(provider, overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  for (const key of Object.keys(env)) if (key.startsWith("COPILOT_PROVIDER_")) delete env[key];
+  for (const key of ["ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "COPILOT_ALLOW_ALL", "NODE_OPTIONS", "BASH_ENV", "ENV"]) delete env[key];
+  env[provider === "codex" ? "CODEX_HOME" : "COPILOT_HOME"] = cliAuthDirectory(provider, env);
+  if (provider === "copilot") env.GH_CONFIG_DIR = join2(cliAuthDirectory(provider, env), "gh");
+  env.GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS = "false";
+  env.GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS = "false";
+  return env;
+}
+function missingCli(provider) {
+  return `${CLI_PROVIDERS[provider].command} was not found. Install the official CLI with '${CLI_PROVIDERS[provider].installCommand}', then run 'rein login ${provider}'.`;
+}
+function renderCliPrompt(context) {
+  return `You are the text-generation backend for Rein. Rein executes all tools and handles approvals. Respond only with the next assistant message. Do not execute native CLI tools. When a tool is needed, emit Rein's text tool block and stop.
+${TEXT_TOOL_INSTRUCTIONS}
+
+The JSON below contains the system instructions, available Rein tools, and conversation in role order. Follow its system instructions and respond to its latest user/tool messages.
+${JSON.stringify(context)}`;
+}
+function cliArguments(provider, model, _prompt = "") {
+  if (provider === "codex") return ["exec", "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-c", 'approval_policy="never"', "-c", 'web_search="disabled"', "-c", "mcp_servers={}", "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false", ...CODEX_DISABLED_FEATURES.flatMap((name) => ["-c", `features.${name}=false`]), ...model && model !== "default" ? ["--model", model] : [], "-"];
+  return ["--agent", "rein-bridge", "--silent", "--no-color", "--no-ask-user", "--no-custom-instructions", "--no-auto-update", "--no-bash-env", "--no-experimental", "--no-remote", "--no-remote-export", "--disable-builtin-mcps", "--deny-tool", "shell,write,read,url,memory", ...model && model !== "default" ? ["--model", model] : []];
+}
+function prepareProfile(provider, env) {
+  const directory = cliAuthDirectory(provider, env);
+  mkdirSync(directory, { recursive: true, mode: 448 });
+  if (provider !== "copilot") return;
+  for (const name of ["mcp-config.json", "hooks.json", "hooks", "plugins", "agents", "extensions"]) {
+    const path2 = join2(directory, name);
+    if (existsSync2(path2)) throw new Error(`Rein's isolated Copilot profile contains custom ${name}. Remove that customization from ${directory} or use the native CLI directly.`);
+  }
+}
+function streamCli(model, context, options = {}) {
+  const out = new AssistantMessageEventStream();
+  const message = { role: "assistant", content: [], provider: model.provider, model: model.id, usage: { input: 0, output: 0, totalTokens: 0 }, stopReason: "pending", timestamp: Date.now() };
+  out.push({ type: "start", partial: message });
+  void (async () => {
+    let directory;
+    try {
+      if (model.provider !== "codex" && model.provider !== "copilot") throw new Error(`Unsupported CLI provider: ${model.provider}`);
+      const provider = model.provider;
+      if (options.signal?.aborted) throw new Error("Operation aborted");
+      const env = cliEnvironment(provider, options.env);
+      prepareProfile(provider, env);
+      const prompt = renderCliPrompt(context);
+      if (Buffer.byteLength(prompt) > 8e6) throw new Error(`${provider} CLI prompt exceeds its transport size limit. Start a fresh context window or use an API provider.`);
+      directory = mkdtempSync(join2(tmpdir(), "rein-cli-"));
+      if (provider === "copilot") {
+        mkdirSync(join2(directory, ".github", "agents"), { recursive: true });
+        writeFileSync(join2(directory, ".github", "agents", "rein-bridge.agent.md"), "---\nname: rein-bridge\ndescription: Generate the next Rein assistant message without native tools\ntools: []\n---\nUse only the Rein text-tool protocol in the supplied conversation. Never call native tools.\n", { mode: 384 });
+      }
+      const result = await runCliProcess(provider, cliArguments(provider, model.id, prompt), prompt, directory, env, options);
+      let text = result;
+      if (provider === "codex") {
+        const parts = [];
+        for (const line of result.split(/\r?\n/).filter(Boolean)) {
+          let event;
+          try {
+            event = JSON.parse(line);
+          } catch {
+            throw new Error("Codex returned invalid JSON events. Update the official Codex CLI.");
+          }
+          if (/command_execution|file_change|mcp_tool_call|web_search|image_generation|browser|computer/.test(event.item?.type ?? "")) throw new Error("Codex attempted a native tool; Rein tools must use text tool blocks.");
+          if (event.type === "error" || event.type === "turn.failed") throw new Error(event.error?.message ?? event.message ?? "Codex request failed");
+          if (event.type === "item.completed" && event.item?.type === "agent_message") parts.push(event.item.text ?? "");
+          if (event.type === "turn.completed" && event.usage) {
+            message.usage.input = Number(event.usage.input_tokens) || 0;
+            message.usage.output = Number(event.usage.output_tokens) || 0;
+            message.usage.totalTokens = message.usage.input + message.usage.output;
+          }
+        }
+        text = parts.join("\n");
+      }
+      if (!text.trim()) throw new Error(`${provider} CLI produced no assistant response. Check 'rein login ${provider}' and update the official CLI.`);
+      const parsed = parseTextToolCalls(text);
+      if (parsed.cleanText) {
+        message.content.push({ type: "text", text: parsed.cleanText });
+        out.push({ type: "text_start", contentIndex: 0, partial: message });
+        out.push({ type: "text_delta", contentIndex: 0, delta: parsed.cleanText, partial: message });
+        out.push({ type: "text_end", contentIndex: 0, content: parsed.cleanText, partial: message });
+      }
+      for (const call2 of parsed.toolCalls) {
+        const contentIndex = message.content.length;
+        message.content.push(call2);
+        out.push({ type: "toolcall_start", contentIndex, partial: message });
+        out.push({ type: "toolcall_end", contentIndex, toolCall: call2, partial: message });
+      }
+      message.stopReason = parsed.toolCalls.length ? "toolUse" : "stop";
+      out.push({ type: "done", reason: message.stopReason, message });
+    } catch (error) {
+      message.stopReason = options.signal?.aborted ? "aborted" : "error";
+      message.errorMessage = error instanceof Error ? error.message : String(error);
+      out.push({ type: "error", reason: message.stopReason, error: message });
+    } finally {
+      if (directory) rmSync(directory, { recursive: true, force: true });
+    }
+  })();
+  return out;
+}
+function runCliProcess(provider, args, input, cwd, env, options) {
+  return new Promise((resolve7, reject) => {
+    const child = spawn2(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
+    let stdout = "", stderr = "", pendingLine = "", bytes = 0, error, forceKill;
+    const kill = (signal) => {
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch {
+      }
+    };
+    const stop = (reason) => {
+      if (error) return;
+      error = new Error(reason);
+      kill("SIGTERM");
+      forceKill = setTimeout(() => kill("SIGKILL"), 1e3);
+      forceKill.unref();
+    };
+    const abort = () => stop("Operation aborted");
+    const timer = setTimeout(() => stop(`${provider} CLI timed out`), options.timeoutMs ?? 3e5);
+    timer.unref();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) abort();
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (forceKill) clearTimeout(forceKill);
+      options.signal?.removeEventListener("abort", abort);
+    };
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (data) => {
+      bytes += Buffer.byteLength(data);
+      if (bytes > (options.maxOutputBytes ?? 2e6)) {
+        stop(`${provider} CLI output exceeded its size limit`);
+        return;
+      }
+      stdout += data;
+      if (provider === "codex") {
+        pendingLine += data;
+        const lines = pendingLine.split("\n");
+        pendingLine = lines.pop() ?? "";
+        for (const line of lines) {
+          try {
+            const event = JSON.parse(line);
+            if (/command_execution|file_change|mcp_tool_call|web_search|image_generation|browser|computer/.test(event.item?.type ?? "")) stop("Codex attempted a native tool. The bridge canceled this turn; Rein tools must use text tool blocks.");
+          } catch {
+          }
+        }
+      }
+    });
+    child.stderr.on("data", (data) => {
+      bytes += Buffer.byteLength(data);
+      stderr = (stderr + data).slice(-8e3);
+      if (bytes > (options.maxOutputBytes ?? 2e6)) stop(`${provider} CLI output exceeded its size limit`);
+    });
+    child.stdin.on("error", () => {
+    });
+    child.on("error", (err) => {
+      cleanup();
+      reject(new Error(err.code === "ENOENT" ? missingCli(provider) : err.message));
+    });
+    child.on("close", (code, signal) => {
+      cleanup();
+      if (error) reject(error);
+      else if (code !== 0) reject(new Error(`${provider} CLI exited ${code ?? signal}. ${stderr.trim().slice(-2e3)} Run 'rein login ${provider}' if authentication is required.`));
+      else resolve7(stdout);
+    });
+    child.stdin.end(input);
+  });
+}
+var CLI_PROVIDERS, CODEX_DISABLED_FEATURES;
+var init_cli_provider = __esm({
+  "src/ai/cli-provider.ts"() {
+    init_event_stream();
+    init_openai_completions();
+    CLI_PROVIDERS = {
+      codex: { label: "ChatGPT subscription via Codex CLI", command: "codex", installCommand: "npm install -g @openai/codex", loginUrl: "https://auth.openai.com/codex/device", defaultModel: "default", baseUrl: "cli://codex" },
+      copilot: { label: "GitHub Copilot subscription via Copilot CLI", command: "copilot", installCommand: "npm install -g @github/copilot", loginUrl: "https://github.com/login/device", defaultModel: "default", baseUrl: "cli://copilot" }
+    };
+    CODEX_DISABLED_FEATURES = ["shell_tool", "unified_exec", "apply_patch_freeform", "view_image", "apps", "plugins", "hooks", "codex_hooks", "plugin_hooks", "multi_agent", "multi_agent_v2", "browser_use", "computer_use", "image_generation", "imagegenext", "js_repl", "code_mode", "code_mode_host", "memory_tool", "memories", "tool_suggest", "skill_search", "skill_mcp_dependency_install", "remote_plugin", "workspace_dependencies", "in_app_browser", "in_app_chat", "in_app_local_automation"];
+  }
+});
+
+// src/harness/auth.ts
+var auth_exports = {};
+__export(auth_exports, {
+  CLI_PROVIDERS: () => CLI_PROVIDERS,
+  checkCliAuth: () => checkCliAuth,
+  loginCli: () => loginCli
+});
+import { spawn as spawn3, execFile as execFile2 } from "node:child_process";
+import { mkdirSync as mkdirSync2 } from "node:fs";
+function openLoginPage(url) {
+  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
+  const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
+  const child = spawn3(command, args, { stdio: "ignore", detached: true, shell: false });
+  child.on("error", () => {
+  });
+  child.unref();
+}
+async function loginCli(provider, options = {}) {
+  if (!(provider in CLI_PROVIDERS)) return { ok: false, detail: `Unknown CLI provider: ${provider}` };
+  if (options.interactive === false) return { ok: false, detail: `Login requires user interaction. Run 'rein login ${provider}' in a terminal.` };
+  if (options.signal?.aborted) return { ok: false, detail: "Login canceled" };
+  const env = cliEnvironment(provider, options.env);
+  const directory = cliAuthDirectory(provider, env);
+  mkdirSync2(directory, { recursive: true, mode: 448 });
+  const device = options.deviceAuth !== false;
+  const args = ["login", ...device ? [provider === "codex" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
+  return new Promise((resolve7) => {
+    const child = spawn3(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: "inherit", shell: false });
+    child.once("spawn", () => {
+      if (device && options.openBrowser !== false) openLoginPage(CLI_PROVIDERS[provider].loginUrl);
+    });
+    let timedOut = false;
+    let forceKill;
+    const stop = () => {
+      child.kill("SIGTERM");
+      forceKill = setTimeout(() => child.kill("SIGKILL"), 1e3);
+      forceKill.unref();
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, options.timeoutMs ?? 9e5);
+    timer.unref();
+    options.signal?.addEventListener("abort", stop, { once: true });
+    if (options.signal?.aborted) stop();
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (forceKill) clearTimeout(forceKill);
+      options.signal?.removeEventListener("abort", stop);
+    };
+    child.on("error", (error) => {
+      cleanup();
+      resolve7({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
+    });
+    child.on("close", (code) => {
+      cleanup();
+      if (options.signal?.aborted || timedOut) resolve7({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
+      else resolve7(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
+    });
+  });
+}
+async function checkCliAuth(provider, options = {}) {
+  if (!(provider in CLI_PROVIDERS)) return { available: false, authenticated: false, detail: `Unknown CLI provider: ${provider}` };
+  const env = cliEnvironment(provider, options.env);
+  const run = (args) => new Promise((resolve7) => {
+    execFile2(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve7({ ok: !error, missing: error?.code === "ENOENT" }));
+  });
+  const version = await run(["--version"]);
+  if (!version.ok) return { available: false, authenticated: false, detail: version.missing ? missingCli(provider) : `${provider} CLI could not be checked. Update it and try again.` };
+  if (provider === "copilot") return { available: true, authenticated: null, detail: "Copilot CLI is installed. Authentication cannot be checked without starting a session; run 'rein login copilot' if needed." };
+  const status2 = await run(["login", "status"]);
+  return { available: true, authenticated: status2.ok, detail: status2.ok ? "Codex CLI reports authenticated in Rein's isolated profile." : "Codex CLI is not authenticated in Rein's profile. Run 'rein login codex'." };
+}
+var init_auth = __esm({
+  "src/harness/auth.ts"() {
+    init_cli_provider();
+  }
+});
+
 // src/harness/doctor.ts
 var doctor_exports = {};
 __export(doctor_exports, {
-  runDoctor: () => runDoctor
+  checkConfiguredProvider: () => checkConfiguredProvider,
+  runDoctor: () => runDoctor,
+  usesLocalHardware: () => usesLocalHardware
 });
 import { execFileSync } from "node:child_process";
-import { existsSync as existsSync2, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { dirname, join as join2 } from "node:path";
+import { existsSync as existsSync3, lstatSync, readFileSync as readFileSync2, readdirSync, realpathSync, statSync } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { dirname, join as join3 } from "node:path";
 function sh2(cmd, opts = {}) {
   try {
     const out = execFileSync("sh", ["-c", cmd], {
@@ -738,9 +1891,9 @@ function sh2(cmd, opts = {}) {
   }
 }
 function gitRootOf(file, maxDepth = 4) {
-  let dir = existsSync2(file) && statSync(file).isFile() ? dirname(file) : file;
+  let dir = existsSync3(file) && statSync(file).isFile() ? dirname(file) : file;
   for (let i = 0; i < maxDepth; i++) {
-    if (existsSync2(join2(dir, ".git"))) return dir;
+    if (existsSync3(join3(dir, ".git"))) return dir;
     const up = dirname(dir);
     if (up === dir) return void 0;
     dir = up;
@@ -752,7 +1905,7 @@ function newestMtime(dir) {
   const walk = (d) => {
     for (const entry of readdirSync(d, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name === ".git") continue;
-      const p = join2(d, entry.name);
+      const p = join3(d, entry.name);
       if (entry.isDirectory()) walk(p);
       else newest = Math.max(newest, statSync(p).mtimeMs);
     }
@@ -760,19 +1913,47 @@ function newestMtime(dir) {
   walk(dir);
   return newest;
 }
-async function checkServerModels(baseUrl, model) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5e3);
+function usesLocalHardware(config) {
+  if (!config.baseUrl || config.sshHost) return false;
   try {
-    const res = await fetch(baseUrl.replace(/\/$/, "") + "/models", { signal: controller.signal });
-    if (!res.ok) return { reachable: false, models: [] };
-    const json = await res.json().catch(() => ({}));
-    const models = (json?.data ?? []).map((m) => m?.id).filter(Boolean);
-    return { reachable: true, models };
+    const host = new URL(normalizeBaseUrl(config.baseUrl)).hostname;
+    return host === "localhost" || host === "[::1]" || /^127\./.test(host);
   } catch {
-    return { reachable: false, models: [] };
-  } finally {
-    clearTimeout(timer);
+    return false;
+  }
+}
+async function checkConfiguredProvider(config) {
+  const cli = config.auth?.type === "cli" ? config.auth.provider ?? config.provider : config.provider;
+  if (cli === "codex" || cli === "copilot") {
+    const status2 = await checkCliAuth(cli);
+    return {
+      name: "server",
+      status: !status2.available || status2.authenticated === false ? "fail" : status2.authenticated === null ? "warn" : "ok",
+      detail: status2.detail,
+      fix: status2.authenticated === true ? void 0 : `rein login ${cli}`
+    };
+  }
+  try {
+    const baseUrl = normalizeBaseUrl(config.baseUrl);
+    const provider = config.provider ?? guessProvider(baseUrl);
+    const detected = await detectEndpoint(baseUrl, { provider, apiKey: apiKeyFor(provider, baseUrl, config.sshHost), sshHost: config.sshHost, timeoutMs: 5e3 });
+    if (detected.error) return { name: "server", status: "fail", detail: detected.error, fix: "rein setup --status; check the server listener and VPN/SSH connection" };
+    if (detected.baseUrl.replace(/\/$/, "") !== baseUrl.replace(/\/$/, "")) return {
+      name: "server",
+      status: "fail",
+      detail: `API responds at ${detected.baseUrl}, but the saved endpoint is ${baseUrl}`,
+      fix: "rein setup --yes to save the detected API prefix"
+    };
+    const listed = detected.models.includes(config.model) || provider === "ollama" && detected.models.includes(`${config.model}:latest`);
+    const localOllama = provider === "ollama" && usesLocalHardware(config);
+    return {
+      name: "server",
+      status: listed ? "ok" : "warn",
+      detail: `${detected.models.length} model(s) listed${listed ? ", configured model present" : `; ${config.model} is not listed`}${config.sshHost ? ` via SSH ${config.sshHost}` : ""}`,
+      fix: listed ? void 0 : localOllama ? `ollama pull ${config.model}` : "rein setup to select a model served by this endpoint"
+    };
+  } catch (error) {
+    return { name: "server", status: "fail", detail: error.message, fix: "rein setup" };
   }
 }
 async function runDoctor(opts = {}) {
@@ -804,7 +1985,13 @@ async function runDoctor(opts = {}) {
       } catch {
       }
       repo = gitRootOf(real);
-      const distOk = repo && existsSync2(join2(repo, "dist", "rein.js"));
+      let installedPackage = false;
+      try {
+        const packageRoot = dirname(dirname(real));
+        installedPackage = JSON.parse(readFileSync2(join3(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join3(packageRoot, "dist", "rein.js");
+      } catch {
+      }
+      const distOk = installedPackage || repo && existsSync3(join3(repo, "dist", "rein.js"));
       checks.push({
         name: "bin",
         status: distOk ? "ok" : "fail",
@@ -834,8 +2021,8 @@ async function runDoctor(opts = {}) {
     }
   }
   if (repo) {
-    const bundle = join2(repo, "dist", "rein.js");
-    if (!existsSync2(bundle)) {
+    const bundle = join3(repo, "dist", "rein.js");
+    if (!existsSync3(bundle)) {
       checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => {
         const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
         if (r.err) throw new Error(r.err);
@@ -843,7 +2030,7 @@ async function runDoctor(opts = {}) {
       } });
     } else {
       const bundleMtime = statSync(bundle).mtimeMs;
-      const srcMtime = newestMtime(join2(repo, "src"));
+      const srcMtime = newestMtime(join3(repo, "src"));
       const fresh = bundleMtime >= srcMtime;
       checks.push({
         name: "bundle",
@@ -865,28 +2052,8 @@ async function runDoctor(opts = {}) {
     detail: hasConfig ? `model=${config.model} base=${config.baseUrl}` : "~/.rein/config.json missing or incomplete",
     fix: hasConfig ? void 0 : "rein setup"
   });
-  let models = [];
-  let reachable = false;
-  if (hasConfig) {
-    ({ reachable, models } = await checkServerModels(config.baseUrl, config.model));
-    if (!reachable) {
-      checks.push({ name: "server", status: "fail", detail: `${config.baseUrl} not answering /models (5s)`, fix: "start the model server (ollama serve) or fix baseUrl" });
-    } else {
-      const listed = models.some((m) => m === config.model || m.startsWith(config.model));
-      checks.push({
-        name: "server",
-        status: listed ? "ok" : "fail",
-        detail: `${models.length} model(s) listed` + (listed ? ", configured model present" : `, "${config.model}" NOT listed`),
-        fix: listed ? void 0 : `ollama pull ${config.model}`,
-        autoFix: listed ? void 0 : async () => {
-          const r = sh2(`ollama pull ${JSON.stringify(config.model)}`, { timeout: 3e5 });
-          if (r.err) throw new Error(r.err);
-          return `ollama pull ${config.model}`;
-        }
-      });
-    }
-  }
-  const localish = /localhost|127\.0\.0\.1|192\.168\.|10\./.test(config.baseUrl ?? "");
+  if (hasConfig) checks.push(await checkConfiguredProvider(config));
+  const localish = usesLocalHardware(config);
   if (hasConfig && localish) {
     try {
       const profile = await profileHardware();
@@ -911,8 +2078,8 @@ async function runDoctor(opts = {}) {
       checks.push({ name: "hardware", status: "warn", detail: "hardware profile failed (continuing)" });
     }
   }
-  const cfgPath = join2(homedir2(), ".rein", "config.json");
-  if (existsSync2(cfgPath) && (config.apiKey || apiKeyFor(config.provider))) {
+  const cfgPath = join3(process.env.REIN_HOME || join3(homedir3(), ".rein"), "config.json");
+  if (existsSync3(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
     const mode = lstatSync(cfgPath).mode & 511;
     checks.push({
       name: "perms",
@@ -928,7 +2095,7 @@ async function runDoctor(opts = {}) {
   }
   try {
     const { statfsSync } = await import("node:fs");
-    const free = statfsSync(homedir2()).bavail * statfsSync(homedir2()).bsize;
+    const free = statfsSync(homedir3()).bavail * statfsSync(homedir3()).bsize;
     const GiB3 = free / 2 ** 30;
     checks.push({ name: "disk", status: GiB3 >= 1 ? "ok" : "warn", detail: `${GiB3.toFixed(1)} GiB free in $HOME` });
   } catch {
@@ -970,6 +2137,7 @@ var init_doctor = __esm({
   "src/harness/doctor.ts"() {
     init_ansi();
     init_models();
+    init_auth();
     init_catalog();
     init_fit();
     init_profile();
@@ -1279,557 +2447,13 @@ var init_agent_loop = __esm({
   }
 });
 
-// src/ai/event-stream.ts
-var EventStream, AssistantMessageEventStream;
-var init_event_stream = __esm({
-  "src/ai/event-stream.ts"() {
-    EventStream = class {
-      queue = [];
-      waiting = [];
-      done = false;
-      finalResultPromise;
-      resolveFinalResult;
-      isComplete;
-      extractResult;
-      constructor(isComplete, extractResult) {
-        this.isComplete = isComplete ?? (() => false);
-        this.extractResult = extractResult ?? ((event) => event);
-        this.finalResultPromise = new Promise((resolve7) => {
-          this.resolveFinalResult = resolve7;
-        });
-      }
-      push(event) {
-        if (this.done) return;
-        if (this.isComplete(event)) {
-          this.done = true;
-          try {
-            this.resolveFinalResult(this.extractResult(event));
-          } catch {
-          }
-        }
-        const waiter = this.waiting.shift();
-        if (waiter) waiter({ value: event, done: false });
-        else this.queue.push(event);
-      }
-      end(result) {
-        if (this.done) return;
-        this.done = true;
-        if (result !== void 0) this.resolveFinalResult(result);
-        while (this.waiting.length > 0) {
-          this.waiting.shift()({ value: void 0, done: true });
-        }
-      }
-      async *[Symbol.asyncIterator]() {
-        while (true) {
-          if (this.queue.length > 0) yield this.queue.shift();
-          else if (this.done) return;
-          else {
-            const result = await new Promise((resolve7) => this.waiting.push(resolve7));
-            if (result.done) return;
-            yield result.value;
-          }
-        }
-      }
-      get finished() {
-        return this.done;
-      }
-      result() {
-        return this.finalResultPromise;
-      }
-    };
-    AssistantMessageEventStream = class extends EventStream {
-      constructor() {
-        super(
-          (event) => event.type === "done" || event.type === "error",
-          (event) => {
-            if (event.type === "done") return event.message;
-            if (event.type === "error") return event.error;
-            throw new Error("Unexpected final event type");
-          }
-        );
-      }
-    };
-  }
-});
-
-// src/ai/sse.ts
-async function* sseDataLines(body) {
-  if (!body) return;
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  let data = [];
-  const consume = (line) => {
-    if (line === "") {
-      if (data.length === 0) return void 0;
-      const event = data.join("\n");
-      data = [];
-      return event;
-    }
-    if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
-    return void 0;
-  };
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      buf += done ? decoder.decode() : decoder.decode(value, { stream: true });
-      let newline;
-      while ((newline = buf.indexOf("\n")) !== -1) {
-        const event2 = consume(buf.slice(0, newline).replace(/\r$/, ""));
-        buf = buf.slice(newline + 1);
-        if (event2?.trim() === "[DONE]") return;
-        if (event2 !== void 0) yield event2;
-      }
-      if (done) break;
-    }
-    if (buf) consume(buf.replace(/\r$/, ""));
-    const event = consume("");
-    if (event !== void 0 && event.trim() !== "[DONE]") yield event;
-  } finally {
-    await reader.cancel().catch(() => {
-    });
-    reader.releaseLock();
-  }
-}
-var init_sse = __esm({
-  "src/ai/sse.ts"() {
-  }
-});
-
-// src/util/json-salvage.ts
-function isControl(c) {
-  const cp = c.codePointAt(0);
-  return cp >= 0 && cp <= 31;
-}
-function escapeControl(c) {
-  switch (c) {
-    case "\b":
-      return "\\b";
-    case "\f":
-      return "\\f";
-    case "\n":
-      return "\\n";
-    case "\r":
-      return "\\r";
-    case "	":
-      return "\\t";
-    default:
-      return `\\u${c.codePointAt(0).toString(16).padStart(4, "0")}`;
-  }
-}
-function repairJson(json) {
-  let out = "";
-  let inString = false;
-  for (let i = 0; i < json.length; i++) {
-    const ch = json[i];
-    if (!inString) {
-      out += ch;
-      if (ch === '"') inString = true;
-      continue;
-    }
-    if (ch === '"') {
-      out += ch;
-      inString = false;
-      continue;
-    }
-    if (ch === "\\") {
-      const next = json[i + 1];
-      if (next === void 0) {
-        out += "\\\\";
-        continue;
-      }
-      if (next === "u") {
-        const hex = json.slice(i + 2, i + 6);
-        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
-          out += `\\u${hex}`;
-          i += 5;
-          continue;
-        }
-      }
-      if (VALID_ESCAPES.has(next)) {
-        out += `\\${next}`;
-        i += 1;
-        continue;
-      }
-      out += "\\\\";
-      continue;
-    }
-    out += isControl(ch) ? escapeControl(ch) : ch;
-  }
-  return out;
-}
-function stripTrailingCommas(json) {
-  let out = "";
-  let inString = false;
-  for (let i = 0; i < json.length; i++) {
-    const ch = json[i];
-    if (inString) {
-      out += ch;
-      if (ch === "\\" && i + 1 < json.length) {
-        out += json[i + 1];
-        i++;
-      } else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === ",") {
-      let j = i + 1;
-      while (j < json.length && /\s/.test(json[j])) j++;
-      if (j < json.length && (json[j] === "}" || json[j] === "]")) continue;
-    }
-    out += ch;
-  }
-  return out;
-}
-function closeOpenBrackets(json) {
-  let depth = [];
-  let inString = false;
-  for (let i = 0; i < json.length; i++) {
-    const ch = json[i];
-    if (inString) {
-      if (ch === "\\") i++;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{" || ch === "[") depth.push(ch);
-    else if (ch === "}") {
-      if (depth[depth.length - 1] === "{") depth.pop();
-    } else if (ch === "]") {
-      if (depth[depth.length - 1] === "[") depth.pop();
-    }
-  }
-  let suffix = "";
-  if (inString) suffix += '"';
-  for (let i = depth.length - 1; i >= 0; i--) suffix += depth[i] === "{" ? "}" : "]";
-  return json + suffix;
-}
-function extractFirstObject(json) {
-  const start = json.indexOf("{");
-  if (start === -1) return void 0;
-  let depth = 0;
-  let inString = false;
-  for (let i = start; i < json.length; i++) {
-    const ch = json[i];
-    if (inString) {
-      if (ch === "\\") i++;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return json.slice(start, i + 1);
-    }
-  }
-  return void 0;
-}
-function parseArgsSalvaged(json) {
-  if (!json || json.trim() === "") return {};
-  const attempts = [];
-  const obj = extractFirstObject(json.trim());
-  if (obj) attempts.push(obj);
-  attempts.push(json, repairJson(json), stripTrailingCommas(repairJson(json)), closeOpenBrackets(stripTrailingCommas(repairJson(json))));
-  for (const candidate of attempts) {
-    try {
-      const value = JSON.parse(candidate);
-      if (value && typeof value === "object" && !Array.isArray(value)) return value;
-    } catch {
-    }
-  }
-  return {};
-}
-var VALID_ESCAPES;
-var init_json_salvage = __esm({
-  "src/util/json-salvage.ts"() {
-    VALID_ESCAPES = /* @__PURE__ */ new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
-  }
-});
-
-// src/ai/openai-completions.ts
-function toOpenAIMessage(message, toolsMode) {
-  switch (message.role) {
-    case "user":
-      return { role: "user", content: message.content };
-    case "assistant": {
-      const text = message.content.filter((c) => c.type === "text").map((c) => c.text).join("");
-      const calls = message.content.filter((c) => c.type === "toolCall");
-      const out = { role: "assistant", content: text.length > 0 ? text : null };
-      if (calls.length > 0 && toolsMode === "text") {
-        out.content = [text, ...calls.map((c) => `<tool name="${c.name}">
-${JSON.stringify(c.arguments ?? {})}
-</tool>`)].filter(Boolean).join("\n\n");
-      } else if (calls.length > 0) {
-        out.tool_calls = calls.map((c) => ({
-          id: c.id,
-          type: "function",
-          function: { name: c.name, arguments: JSON.stringify(c.arguments ?? {}) }
-        }));
-      }
-      return out;
-    }
-    case "toolResult":
-      if (toolsMode === "text") return {
-        role: "user",
-        content: `Result of tool ${message.toolName} (${message.toolCallId}):
-${message.content.map((c) => c.text).join("\n")}`
-      };
-      return {
-        role: "tool",
-        tool_call_id: message.toolCallId,
-        content: message.content.map((c) => c.text).join("\n")
-      };
-  }
-}
-function parseTextToolCalls(text) {
-  const toolCalls = [];
-  const cleanText = text.replace(TOOL_BLOCK_RE, (block, name, rawArgs) => {
-    const args = parseArgsSalvaged(rawArgs.trim());
-    if (Object.keys(args).length === 0 && !/^\s*\{\s*\}\s*$/.test(rawArgs)) return block;
-    toolCalls.push({ type: "toolCall", id: `call_${Date.now()}_${toolCalls.length}`, name, arguments: args });
-    return "";
-  });
-  return { toolCalls, cleanText: toolCalls.length > 0 ? cleanText.replace(/\n{3,}/g, "\n\n").trim() : text };
-}
-function stream(model, context, options = {}) {
-  const out = new AssistantMessageEventStream();
-  void (async () => {
-    const message = {
-      role: "assistant",
-      content: [],
-      provider: model.provider,
-      model: model.id,
-      usage: { input: 0, output: 0, totalTokens: 0 },
-      stopReason: "pending",
-      timestamp: Date.now()
-    };
-    const emit = (event) => out.push(event);
-    try {
-      const toolsMode = options.toolsMode ?? "native";
-      const hasTools = (context.tools?.length ?? 0) > 0;
-      const messages = [];
-      const systemParts = [];
-      if (context.systemPrompt) systemParts.push(context.systemPrompt);
-      if (toolsMode === "text" && hasTools) {
-        systemParts.push(TEXT_TOOL_INSTRUCTIONS);
-        systemParts.push("Available tools:\n" + context.tools.map((t) => `${t.name}: ${t.description}
-Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
-      }
-      if (systemParts.length > 0) messages.push({ role: "system", content: systemParts.join("\n\n") });
-      for (const m of context.messages) {
-        const converted = toOpenAIMessage(m, toolsMode);
-        if (Array.isArray(converted)) messages.push(...converted);
-        else messages.push(converted);
-      }
-      const body = {
-        model: model.id,
-        messages,
-        stream: true
-      };
-      if (typeof options.temperature === "number") body.temperature = options.temperature;
-      if (typeof options.topP === "number") body.top_p = options.topP;
-      if (typeof options.maxTokens === "number") body.max_tokens = options.maxTokens;
-      else body.max_tokens = model.maxTokens || 4096;
-      if (options.includeUsage !== false) body.stream_options = { include_usage: true };
-      if (options.extra) Object.assign(body, options.extra);
-      if (toolsMode === "native" && hasTools) {
-        body.tools = (context.tools ?? []).map((t) => ({
-          type: "function",
-          function: { name: t.name, description: t.description, parameters: t.parameters }
-        }));
-      }
-      const headers = {
-        "Content-Type": "application/json",
-        ...options.headers
-      };
-      if (options.apiKey) headers["Authorization"] = `Bearer ${options.apiKey}`;
-      const request2 = () => fetch(`${model.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: options.signal
-      });
-      let response = await request2();
-      if ((response.status === 400 || response.status === 422) && body.stream_options) {
-        const detail = await response.clone().text();
-        if (/stream_options/i.test(detail)) {
-          await response.body?.cancel();
-          delete body.stream_options;
-          response = await request2();
-        }
-      }
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        message.stopReason = "error";
-        message.errorMessage = `HTTP ${response.status} from ${model.baseUrl}: ${text.slice(0, 800)}`;
-        emit({ type: "error", reason: "error", error: message });
-        return;
-      }
-      emit({ type: "start", partial: message });
-      const ct = (response.headers.get("content-type") ?? "").toLowerCase();
-      let dataLines;
-      if (ct.includes("json")) {
-        const doc = JSON.parse(await response.text());
-        if (doc?.choices?.[0]?.message) doc.choices[0].delta = doc.choices[0].message;
-        dataLines = [JSON.stringify(doc)];
-      } else {
-        dataLines = sseDataLines(response.body);
-      }
-      let textBlock = null;
-      let thinkingBlock = null;
-      let contentIndex = -1;
-      const nextIndex = () => ++contentIndex;
-      const textToolCalls = /* @__PURE__ */ new Map();
-      let finishReason = null;
-      const ensureTextBlock = () => {
-        if (!textBlock) {
-          textBlock = { type: "text", text: "" };
-          message.content.push(textBlock);
-          emit({ type: "text_start", contentIndex: nextIndex(), partial: message });
-        }
-        return textBlock;
-      };
-      const ensureThinkingBlock = () => {
-        if (!thinkingBlock) {
-          thinkingBlock = { type: "thinking", thinking: "" };
-          message.content.push(thinkingBlock);
-          emit({ type: "thinking_start", contentIndex: nextIndex(), partial: message });
-        }
-        return thinkingBlock;
-      };
-      for await (const data of dataLines) {
-        let chunk;
-        try {
-          chunk = JSON.parse(data);
-        } catch {
-          continue;
-        }
-        if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? JSON.stringify(chunk.error));
-        if (chunk.usage) {
-          const u = {
-            input: chunk.usage.prompt_tokens ?? 0,
-            output: chunk.usage.completion_tokens ?? 0,
-            totalTokens: chunk.usage.total_tokens ?? 0
-          };
-          if (typeof chunk.usage.completion_tokens_details?.reasoning_tokens === "number") {
-            u.reasoning = chunk.usage.completion_tokens_details.reasoning_tokens;
-          }
-          message.usage = u;
-        }
-        const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : void 0;
-        if (!choice) continue;
-        if (choice.finish_reason) finishReason = choice.finish_reason;
-        const delta = choice.delta ?? choice.message ?? {};
-        if (typeof delta.content === "string" && delta.content.length > 0) {
-          const block = ensureTextBlock();
-          block.text += delta.content;
-          emit({ type: "text_delta", contentIndex: message.content.indexOf(block), delta: delta.content, partial: message });
-        }
-        const reasoning = typeof delta.reasoning_content === "string" ? delta.reasoning_content : typeof delta.reasoning === "string" ? delta.reasoning : typeof delta.thinking === "string" ? delta.thinking : "";
-        if (reasoning) {
-          const block = ensureThinkingBlock();
-          block.thinking += reasoning;
-          emit({ type: "thinking_delta", contentIndex: message.content.indexOf(block), delta: reasoning, partial: message });
-        }
-        if (Array.isArray(delta.tool_calls)) {
-          for (const [position, tc] of delta.tool_calls.entries()) {
-            const idx = typeof tc.index === "number" ? tc.index : position;
-            let st = textToolCalls.get(idx);
-            if (!st) {
-              st = { id: "", name: "", args: "" };
-              textToolCalls.set(idx, st);
-            }
-            if (tc.id) st.id = tc.id;
-            if (tc.function?.name) st.name += tc.function.name;
-            if (typeof tc.function?.arguments === "string") st.args += tc.function.arguments;
-          }
-        }
-      }
-      if (textBlock) emit({ type: "text_end", contentIndex: message.content.indexOf(textBlock), content: textBlock.text, partial: message });
-      if (thinkingBlock) emit({ type: "thinking_end", contentIndex: message.content.indexOf(thinkingBlock), content: thinkingBlock.thinking, partial: message });
-      const toolCalls = [];
-      if (toolsMode === "text" && textBlock) {
-        const { toolCalls: parsed, cleanText } = parseTextToolCalls(textBlock.text);
-        if (parsed.length > 0) {
-          textBlock.text = cleanText;
-          for (const tc of parsed) toolCalls.push(tc);
-        }
-      } else {
-        const sorted = [...textToolCalls.entries()].sort((a, b) => a[0] - b[0]);
-        for (const [, st] of sorted) {
-          toolCalls.push({
-            type: "toolCall",
-            id: st.id || `call_${Math.random().toString(36).slice(2, 10)}`,
-            name: st.name,
-            arguments: parseArgsSalvaged(st.args)
-          });
-        }
-      }
-      for (const tc of toolCalls) {
-        message.content.push(tc);
-        emit({ type: "toolcall_end", contentIndex: message.content.indexOf(tc), toolCall: tc, partial: message });
-      }
-      if (message.usage.totalTokens === 0) {
-        const chars = message.content.reduce((n, c) => n + ("text" in c ? c.text.length : "thinking" in c ? c.thinking.length : 0), 0);
-        message.usage = { input: 0, output: Math.ceil(chars / 4), totalTokens: Math.ceil(chars / 4) };
-      }
-      if (finishReason === "tool_calls" || finishReason === "tool_use" || toolCalls.length > 0) {
-        message.stopReason = "toolUse";
-      } else if (finishReason === "length") {
-        message.stopReason = "length";
-      } else if (finishReason === "stop" || finishReason === null || finishReason === "content_filter") {
-        message.stopReason = "stop";
-      } else {
-        message.stopReason = finishReason === "aborted" ? "aborted" : "stop";
-      }
-      if (message.stopReason === "aborted") {
-        emit({ type: "error", reason: "aborted", error: message });
-      } else {
-        emit({ type: "done", reason: message.stopReason, message });
-      }
-    } catch (err) {
-      const aborted = options.signal?.aborted || err?.name === "AbortError";
-      message.stopReason = aborted ? "aborted" : "error";
-      message.errorMessage = err?.message ?? String(err);
-      emit({ type: "error", reason: aborted ? "aborted" : "error", error: message });
-    }
-  })();
-  return out;
-}
-var TEXT_TOOL_INSTRUCTIONS, TOOL_BLOCK_RE;
-var init_openai_completions = __esm({
-  "src/ai/openai-completions.ts"() {
-    init_event_stream();
-    init_sse();
-    init_json_salvage();
-    TEXT_TOOL_INSTRUCTIONS = `
-To use a tool, write a tool block exactly like this (one block per tool, valid JSON inside):
-
-<tool name="bash">
-{"command": "ls -la"}
-</tool>
-
-Rules for tool blocks:
-- The JSON inside must be a single complete JSON object.
-- Put each tool block on its own lines. No markdown fences around them.
-- After writing tool blocks, wait for the results before continuing.
-`;
-    TOOL_BLOCK_RE = /<tool\s+name="([^"]+)"\s*>([\s\S]*?)<\/tool>/g;
-  }
-});
-
 // src/ai/compat.ts
-import { readFileSync as readFileSync2, writeFileSync, mkdirSync, existsSync as existsSync3 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { join as join3 } from "node:path";
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync3, existsSync as existsSync4 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { join as join4 } from "node:path";
 function readStore() {
   try {
-    if (existsSync3(storePath())) return JSON.parse(readFileSync2(storePath(), "utf8"));
+    if (existsSync4(storePath())) return JSON.parse(readFileSync3(storePath(), "utf8"));
   } catch {
   }
   return {};
@@ -1843,9 +2467,9 @@ function decideToolMode(provider, modelId, forced = "auto") {
   if (forced !== "auto") {
     const mode = { mode: forced, source: "forced" };
     try {
-      mkdirSync(reinHome(), { recursive: true });
+      mkdirSync3(reinHome(), { recursive: true });
       store[key] = mode;
-      writeFileSync(storePath(), JSON.stringify(store, null, 2));
+      writeFileSync2(storePath(), JSON.stringify(store, null, 2));
     } catch {
     }
     return mode;
@@ -1859,10 +2483,10 @@ function decideToolMode(provider, modelId, forced = "auto") {
 }
 function recordDecision(provider, modelId, mode, source) {
   try {
-    mkdirSync(reinHome(), { recursive: true });
+    mkdirSync3(reinHome(), { recursive: true });
     const store = readStore();
     store[keyFor(provider, modelId)] = { mode, source };
-    writeFileSync(storePath(), JSON.stringify(store, null, 2));
+    writeFileSync2(storePath(), JSON.stringify(store, null, 2));
   } catch {
   }
 }
@@ -1916,20 +2540,20 @@ var init_compat = __esm({
       /openchat[-_]?3\.5/i,
       /starcoder[-_]?1b/i
     ];
-    reinHome = () => process.env.REIN_HOME || join3(homedir3(), ".rein");
-    storePath = () => join3(reinHome(), "capabilities.json");
+    reinHome = () => process.env.REIN_HOME || join4(homedir4(), ".rein");
+    storePath = () => join4(reinHome(), "capabilities.json");
   }
 });
 
 // src/harness/system-prompt.ts
-import { existsSync as existsSync4 } from "node:fs";
-import { readFileSync as readFileSync3 } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync5 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
+import { join as join5 } from "node:path";
 function readProjectInstructions(cwd) {
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const path2 = join4(cwd, name);
-    if (existsSync4(path2)) {
-      const text = readFileSync3(path2, "utf8").trim();
+    const path2 = join5(cwd, name);
+    if (existsSync5(path2)) {
+      const text = readFileSync4(path2, "utf8").trim();
       if (text) return `Project instructions:
 ${text}`;
     }
@@ -1937,9 +2561,9 @@ ${text}`;
   return void 0;
 }
 function readLessons(cwd) {
-  const path2 = join4(cwd, "LESSONS.md");
-  if (!existsSync4(path2)) return void 0;
-  const text = readFileSync3(path2, "utf8").trim();
+  const path2 = join5(cwd, "LESSONS.md");
+  if (!existsSync5(path2)) return void 0;
+  const text = readFileSync4(path2, "utf8").trim();
   if (!text) return void 0;
   return `Lessons from previous sessions (trust but verify):
 ${text.slice(0, 4e3)}`;
@@ -2023,7 +2647,7 @@ var init_system_prompt = __esm({
 });
 
 // src/harness/tools/read.ts
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 var readTool, read_default;
 var init_read = __esm({
   "src/harness/tools/read.ts"() {
@@ -2043,7 +2667,7 @@ var init_read = __esm({
         const path2 = args.path;
         let text;
         try {
-          text = readFileSync4(path2, "utf8");
+          text = readFileSync5(path2, "utf8");
         } catch (err) {
           return { content: `read failed: ${err.message}`, isError: true };
         }
@@ -2073,7 +2697,7 @@ var init_read = __esm({
 });
 
 // src/harness/tools/write.ts
-import { writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "node:fs";
+import { writeFileSync as writeFileSync3, mkdirSync as mkdirSync4 } from "node:fs";
 import { dirname as dirname2 } from "node:path";
 var writeTool, write_default;
 var init_write = __esm({
@@ -2093,8 +2717,8 @@ var init_write = __esm({
         const path2 = args.path;
         const content = args.content;
         try {
-          mkdirSync2(dirname2(path2), { recursive: true });
-          writeFileSync2(path2, content);
+          mkdirSync4(dirname2(path2), { recursive: true });
+          writeFileSync3(path2, content);
         } catch (err) {
           return { content: `write failed: ${err.message}`, isError: true };
         }
@@ -2107,7 +2731,7 @@ var init_write = __esm({
 });
 
 // src/harness/tools/edit.ts
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
 function countOccurrences(text, needle) {
   let count = 0;
   let i = text.indexOf(needle);
@@ -2147,7 +2771,7 @@ var init_edit = __esm({
         const edits = args.edits;
         let text;
         try {
-          text = readFileSync5(path2, "utf8");
+          text = readFileSync6(path2, "utf8");
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -2178,7 +2802,7 @@ var init_edit = __esm({
           text = text.slice(0, r.start) + edit.newText + text.slice(r.end);
         }
         try {
-          writeFileSync3(path2, text);
+          writeFileSync4(path2, text);
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -2210,7 +2834,7 @@ var init_truncate = __esm({
 });
 
 // src/harness/tools/bash.ts
-import { execFile as execFile2 } from "node:child_process";
+import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
 function createBashTool(cwd) {
   return {
@@ -2228,7 +2852,7 @@ function createBashTool(cwd) {
     execute: async (_id, args, signal) => {
       const command = args.command;
       const timeoutSec = typeof args.timeout === "number" ? args.timeout : 120;
-      let stdout2 = "";
+      let stdout = "";
       let stderr = "";
       let code = 0;
       let timedOut = false;
@@ -2239,17 +2863,17 @@ function createBashTool(cwd) {
           maxBuffer: 8 * 1024 * 1024,
           signal
         });
-        stdout2 = result.stdout;
+        stdout = result.stdout;
         stderr = result.stderr;
       } catch (err) {
         const e = err;
-        stdout2 = e.stdout ?? "";
+        stdout = e.stdout ?? "";
         stderr = e.stderr ?? e.message ?? "";
         code = typeof e.code === "number" ? e.code : 1;
         timedOut = e.killed === true;
       }
       let output = "";
-      if (stdout2) output += stdout2;
+      if (stdout) output += stdout;
       if (stderr) output += (output ? "\n" : "") + stderr;
       if (output.length === 0) output = "(no output)";
       const truncated = truncateLines(output, 500);
@@ -2267,18 +2891,18 @@ var execFileAsync, bash_default;
 var init_bash = __esm({
   "src/harness/tools/bash.ts"() {
     init_truncate();
-    execFileAsync = promisify2(execFile2);
+    execFileAsync = promisify2(execFile3);
     bash_default = createBashTool();
   }
 });
 
 // src/harness/tools/grep.ts
-import { execFile as execFile3 } from "node:child_process";
+import { execFile as execFile4 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
 var execFileAsync2, grepTool, grep_default;
 var init_grep = __esm({
   "src/harness/tools/grep.ts"() {
-    execFileAsync2 = promisify3(execFile3);
+    execFileAsync2 = promisify3(execFile4);
     grepTool = {
       name: "grep",
       description: "Search file contents for a pattern (regex or literal). Returns matching lines as path:line:text.",
@@ -2306,9 +2930,9 @@ var init_grep = __esm({
         if (args.glob) argsArr.push(`--include=${args.glob}`);
         argsArr.push("--", args.pattern, args.path ?? ".");
         try {
-          const { stdout: stdout2, stderr } = await execFileAsync2("grep", argsArr, { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
-          if (!stdout2 && !stderr) return { content: "No matches" };
-          const out = (stdout2 + stderr).trimEnd();
+          const { stdout, stderr } = await execFileAsync2("grep", argsArr, { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
+          if (!stdout && !stderr) return { content: "No matches" };
+          const out = (stdout + stderr).trimEnd();
           if (out.length > 15e3) return { content: out.slice(0, 15e3) + "\n\u2026 [output truncated \u2014 narrow the search]", isError: false };
           return { content: out };
         } catch (err) {
@@ -2323,7 +2947,7 @@ var init_grep = __esm({
 });
 
 // src/harness/tools/find.ts
-import { execFile as execFile4 } from "node:child_process";
+import { execFile as execFile5 } from "node:child_process";
 import { promisify as promisify4 } from "node:util";
 function shellQuote(s) {
   return `'${s.replace(/'/g, "'\\''")}'`;
@@ -2331,7 +2955,7 @@ function shellQuote(s) {
 var execFileAsync3, findTool, find_default;
 var init_find = __esm({
   "src/harness/tools/find.ts"() {
-    execFileAsync3 = promisify4(execFile4);
+    execFileAsync3 = promisify4(execFile5);
     findTool = {
       name: "find",
       description: "Find files by glob pattern. Returns matching paths under the search directory.",
@@ -2348,8 +2972,8 @@ var init_find = __esm({
         const limit = typeof args.limit === "number" ? args.limit : 200;
         const path2 = args.path ?? ".";
         try {
-          const { stdout: stdout2 } = await execFileAsync3("bash", ["-c", `command -v fd >/dev/null 2>&1 && fd -g ${shellQuote(args.pattern)} --max-results ${limit} ${shellQuote(path2)} || find ${shellQuote(path2)} -name ${shellQuote(args.pattern)} -print | head -n ${limit}`], { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
-          const out = stdout2.trimEnd();
+          const { stdout } = await execFileAsync3("bash", ["-c", `command -v fd >/dev/null 2>&1 && fd -g ${shellQuote(args.pattern)} --max-results ${limit} ${shellQuote(path2)} || find ${shellQuote(path2)} -name ${shellQuote(args.pattern)} -print | head -n ${limit}`], { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
+          const out = stdout.trimEnd();
           return { content: out || "No matches" };
         } catch (err) {
           return { content: `find failed: ${err.message}`, isError: true };
@@ -2362,7 +2986,7 @@ var init_find = __esm({
 
 // src/harness/tools/ls.ts
 import { readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 var lsTool, ls_default;
 var init_ls = __esm({
   "src/harness/tools/ls.ts"() {
@@ -2399,12 +3023,12 @@ var init_ls = __esm({
             }
             let isDir = false;
             try {
-              isDir = statSync2(join5(dir, name)).isDirectory();
+              isDir = statSync2(join6(dir, name)).isDirectory();
             } catch {
               isDir = false;
             }
             lines.push(`${prefix}${name}${isDir ? "/" : ""}`);
-            if (isDir && d > 1) walk(join5(dir, name), prefix + "  ", d - 1);
+            if (isDir && d > 1) walk(join6(dir, name), prefix + "  ", d - 1);
           }
         };
         walk(path2, "", depth);
@@ -2560,22 +3184,22 @@ var gates_exports = {};
 __export(gates_exports, {
   default: () => gates_default
 });
-import { execFile as execFile5 } from "node:child_process";
+import { execFile as execFile6 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
-import { existsSync as existsSync5 } from "node:fs";
-import { dirname as dirname3, isAbsolute, join as join6, resolve } from "node:path";
+import { existsSync as existsSync6 } from "node:fs";
+import { dirname as dirname3, isAbsolute, join as join7, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 var execFileAsync4, here, UNLAZY_CANDIDATES, UNLAZY_DIR, MODES, gatesTool, gates_default;
 var init_gates = __esm({
   "src/harness/tools/gates.ts"() {
     init_truncate();
-    execFileAsync4 = promisify5(execFile5);
+    execFileAsync4 = promisify5(execFile6);
     here = dirname3(fileURLToPath(import.meta.url));
     UNLAZY_CANDIDATES = [
       resolve(here, "..", "..", "..", "vendor", "unlazy"),
       resolve(here, "..", "vendor", "unlazy")
     ];
-    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync5(join6(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
+    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync6(join7(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
     MODES = /* @__PURE__ */ new Set(["status", "approve", "reverify", "lint"]);
     gatesTool = {
       name: "gates",
@@ -2594,13 +3218,13 @@ var init_gates = __esm({
         if (!MODES.has(mode)) return { content: `Unknown mode: ${mode}. Use one of: status, approve, reverify, lint.`, isError: true };
         const file = args.file ? String(args.file) : "GATES.md";
         const root = args.root ? resolve(String(args.root)) : process.cwd();
-        const ledgerPath = isAbsolute(file) ? file : join6(root, file);
-        if (!existsSync5(ledgerPath)) {
+        const ledgerPath = isAbsolute(file) ? file : join7(root, file);
+        if (!existsSync6(ledgerPath)) {
           return { content: `Ledger not found: ${ledgerPath}. Write it first (template: vendor/unlazy/templates/gates-leaf.md), then run gates with mode=lint.`, isError: true };
         }
-        const scriptPath = join6(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
+        const scriptPath = join7(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
         const cmdArgs = mode === "lint" ? [scriptPath, ledgerPath] : [scriptPath, `--${mode}`, ledgerPath];
-        let stdout2 = "";
+        let stdout = "";
         let stderr = "";
         let code = 0;
         try {
@@ -2610,15 +3234,15 @@ var init_gates = __esm({
             maxBuffer: 8 * 1024 * 1024,
             signal
           });
-          stdout2 = result.stdout;
+          stdout = result.stdout;
           stderr = result.stderr;
         } catch (err) {
           const e = err;
-          stdout2 = e.stdout ?? "";
+          stdout = e.stdout ?? "";
           stderr = e.stderr ?? e.message ?? "";
           code = typeof e.code === "number" ? e.code : 1;
         }
-        const output = [stdout2, stderr].filter(Boolean).join("\n") || "(no output)";
+        const output = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
         const truncated = truncateLines(output, 200);
         const tail = ` [gates:${mode} exit ${code}]`;
         const isError = code === 0 ? false : mode === "status" ? code >= 2 : true;
@@ -2799,27 +3423,27 @@ var init_nodeterm = __esm({
 });
 
 // src/agent/session.ts
-import { appendFileSync, existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync7, readdirSync as readdirSync3, statSync as statSync3, writeFileSync as writeFileSync5 } from "node:fs";
-import { homedir as homedir5 } from "node:os";
-import { join as join8 } from "node:path";
+import { appendFileSync, existsSync as existsSync7, mkdirSync as mkdirSync6, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync3, writeFileSync as writeFileSync6 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
+import { join as join9 } from "node:path";
 import { randomUUID as randomUUID2, createHash } from "node:crypto";
 function newSessionId() {
   return `session-${Date.now()}-${randomUUID2().slice(0, 8)}`;
 }
 function sessionPath(id) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(id)) throw new Error("Invalid session id. Use the full id from /sessions.");
-  return join8(sessionsDir(), `${id}.jsonl`);
+  return join9(sessionsDir(), `${id}.jsonl`);
 }
 function createSession(opts) {
-  mkdirSync4(sessionsDir(), { recursive: true });
+  mkdirSync6(sessionsDir(), { recursive: true });
   const id = opts.id ?? newSessionId();
   const header = { ...opts, type: "header", version: 1, id, created: (/* @__PURE__ */ new Date()).toISOString() };
-  writeFileSync5(sessionPath(id), JSON.stringify(header) + "\n", { flag: "wx", mode: 384 });
+  writeFileSync6(sessionPath(id), JSON.stringify(header) + "\n", { flag: "wx", mode: 384 });
   return id;
 }
 function appendSessionEntry(sessionId, entry) {
   const path2 = sessionPath(sessionId);
-  if (!existsSync6(path2)) throw new Error(`No such session: ${sessionId}`);
+  if (!existsSync7(path2)) throw new Error(`No such session: ${sessionId}`);
   appendFileSync(path2, "\n" + JSON.stringify(entry) + "\n");
 }
 function windowMessage(window) {
@@ -2865,12 +3489,12 @@ function validWindowStart(messages, start) {
 }
 function loadSession(sessionId) {
   const path2 = sessionPath(sessionId);
-  if (!existsSync6(path2)) throw new Error(`No such session: ${sessionId}`);
+  if (!existsSync7(path2)) throw new Error(`No such session: ${sessionId}`);
   let header = null;
   const messages = [];
   const entries = [];
   let window;
-  for (const [index, line] of readFileSync7(path2, "utf8").split("\n").entries()) {
+  for (const [index, line] of readFileSync8(path2, "utf8").split("\n").entries()) {
     if (!line.trim()) continue;
     try {
       const obj = JSON.parse(line);
@@ -2928,7 +3552,7 @@ function branchSession(sourceId, upToMessageIndex, newId) {
 var sessionsDir;
 var init_session = __esm({
   "src/agent/session.ts"() {
-    sessionsDir = () => join8(process.env.REIN_HOME || join8(homedir5(), ".rein"), "sessions");
+    sessionsDir = () => join9(process.env.REIN_HOME || join9(homedir6(), ".rein"), "sessions");
   }
 });
 
@@ -3108,8 +3732,8 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
 });
 
 // src/harness/tools/context.ts
-import { constants, closeSync, existsSync as existsSync7, fstatSync, lstatSync as lstatSync2, mkdirSync as mkdirSync5, openSync, readSync, readdirSync as readdirSync4, readFileSync as readFileSync8, realpathSync as realpathSync2, writeFileSync as writeFileSync6, renameSync, unlinkSync } from "node:fs";
-import { dirname as dirname4, isAbsolute as isAbsolute2, join as join9, relative, resolve as resolve3, sep } from "node:path";
+import { constants, closeSync, existsSync as existsSync8, fstatSync, lstatSync as lstatSync2, mkdirSync as mkdirSync7, openSync, readSync, readdirSync as readdirSync4, readFileSync as readFileSync9, realpathSync as realpathSync2, writeFileSync as writeFileSync7, renameSync, unlinkSync } from "node:fs";
+import { dirname as dirname4, isAbsolute as isAbsolute2, join as join10, relative, resolve as resolve3, sep } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { randomUUID as randomUUID4 } from "node:crypto";
 function notesRoot(cwd) {
@@ -3136,7 +3760,7 @@ function safePath(root, note, checkLeaf = true) {
   const path2 = resolve3(root, note);
   const rel = relative(root, path2);
   if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute2(rel)) throw new Error("Note path must stay inside .pi/notes.");
-  for (const part of [dirname4(root), root, ...rel.split(sep).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join9(root, ...parts.slice(0, i + 1)))]) {
+  for (const part of [dirname4(root), root, ...rel.split(sep).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join10(root, ...parts.slice(0, i + 1)))]) {
     try {
       const stat = lstatSync2(part);
       if (stat.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
@@ -3149,10 +3773,10 @@ function safePath(root, note, checkLeaf = true) {
 }
 function* noteFiles(root, dir = root) {
   safePath(root, ".path-check", false);
-  if (!existsSync7(dir)) return;
+  if (!existsSync8(dir)) return;
   for (const file of readdirSync4(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (file.isSymbolicLink()) continue;
-    const path2 = join9(dir, file.name);
+    const path2 = join10(dir, file.name);
     if (file.isDirectory()) yield* noteFiles(root, path2);
     else if (file.isFile()) {
       safePath(root, relative(root, path2));
@@ -3175,7 +3799,7 @@ function offsetOf(args) {
   return offset;
 }
 function contextTools(state, cwd) {
-  const root = join9(notesRoot(cwd), ".pi", "notes");
+  const root = join10(notesRoot(cwd), ".pi", "notes");
   const notes = {
     name: "notes",
     description: "Durable .pi/notes shared by repository worktrees (main checkout; common Git directory for separate-git-dir without core.worktree). list/read/search are paged with offset; write replaces (empty content clears); append adds a newline-terminated record. Notes are plaintext and may be tracked by Git.",
@@ -3189,11 +3813,11 @@ function contextTools(state, cwd) {
       if (op === "write" || op === "append") {
         const path2 = safePath(root, required(args.path, "path"));
         if (typeof args.content !== "string") throw new Error('"content" is required; use "" to clear a note.');
-        mkdirSync5(dirname4(path2), { recursive: true });
+        mkdirSync7(dirname4(path2), { recursive: true });
         if (op === "write") {
           const temp = `${path2}.${randomUUID4()}.tmp`;
           try {
-            writeFileSync6(temp, args.content, { flag: "wx", mode: 384 });
+            writeFileSync7(temp, args.content, { flag: "wx", mode: 384 });
             renameSync(temp, path2);
           } finally {
             try {
@@ -3208,7 +3832,7 @@ function contextTools(state, cwd) {
             if (!stat.isFile() || stat.nlink > 1) throw new Error("Notes require regular files without hard links.");
             const last = Buffer.alloc(1);
             if (stat.size) readSync(fd, last, 0, 1, stat.size - 1);
-            writeFileSync6(fd, `${stat.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
+            writeFileSync7(fd, `${stat.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
           } finally {
             closeSync(fd);
           }
@@ -3216,13 +3840,13 @@ function contextTools(state, cwd) {
         return { content: `${op === "write" ? "Wrote" : "Appended to"} .pi/notes/${args.path}` };
       }
       const limit = state.pageLimit(offset);
-      if (op === "read") return { content: page(readFileSync8(safePath(root, required(args.path, "path")), "utf8"), offset, limit) };
+      if (op === "read") return { content: page(readFileSync9(safePath(root, required(args.path, "path")), "utf8"), offset, limit) };
       if (op === "list") return { content: page([...noteFiles(root)].map((p) => relative(root, p)).join("\n") || "(no notes yet)", offset, limit) };
       const query = required(args.query, "query").toLowerCase();
       const hits = [];
       for (const file of noteFiles(root)) {
         if (signal?.aborted) throw new Error("Operation aborted");
-        for (const [index, line] of readFileSync8(file, "utf8").split("\n").entries()) {
+        for (const [index, line] of readFileSync9(file, "utf8").split("\n").entries()) {
           const match = line.toLowerCase().indexOf(query);
           if (match >= 0) hits.push(`${relative(root, file)}:${index + 1}: ${line.slice(Math.max(0, match - 60), match + 240)}`);
           if (hits.length >= 200) break;
@@ -3328,10 +3952,11 @@ async function createRunner(opts) {
   const model = await resolveModel({
     model: opts.modelOverride,
     baseUrl: opts.baseUrlOverride,
-    provider: opts.providerOverride
+    provider: opts.providerOverride,
+    sshHost: opts.sshHostOverride
   });
   if (opts.contextWindow !== void 0) model.contextWindow = opts.contextWindow;
-  const apiKey = apiKeyFor(model.provider);
+  const apiKey = apiKeyFor(model.provider, model.baseUrl, model.sshHost);
   const config = loadConfig();
   const reserveTokens = opts.reserveTokens ?? config.posthorse?.reserveTokens;
   if (config.maxTokens === void 0) {
@@ -3339,7 +3964,8 @@ async function createRunner(opts) {
     if (Number.isSafeInteger(reserveTokens) && reserveTokens > 0) model.maxTokens = Math.min(model.maxTokens, reserveTokens);
   }
   const forcedMode = opts.toolsMode ?? config.toolsMode ?? "auto";
-  const decision = decideToolMode(model.provider, model.id, forcedMode);
+  const cliProvider = model.baseUrl.startsWith("cli://");
+  const decision = cliProvider ? { mode: "text", source: "official CLI" } : decideToolMode(model.provider, model.id, forcedMode);
   const withContextTools = opts.tools === void 0;
   const autoContext = opts.autoContext ?? (withContextTools && config.posthorse?.enabled !== false);
   const contextGuidance = autoContext ? POSTHORSE_GUIDANCE : POSTHORSE_GUIDANCE.replace("Automatic rollover starts a fresh window without generating a summary.", "Automatic rollover is disabled. Use new_context to start a fresh window without generating a summary.");
@@ -3403,7 +4029,7 @@ async function createRunner(opts) {
             transformContext: async (messages) => posthorse.prepare(messages),
             afterToolBatch: (info) => posthorse.afterBatch(info),
             recoverFromError: ({ message, context: loopContext }) => posthorse.recover(message, loopContext.messages),
-            streamFn: (m, ctx, o) => stream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
+            streamFn: (m, ctx, o) => cliProvider ? streamCli(m, ctx, o) : stream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
             maxTurns: opts.maxTurns ?? 60,
             getSteeringMessages: () => steering.splice(0, steering.length),
             beforeToolCall: async (info) => {
@@ -3478,6 +4104,7 @@ var init_runner = __esm({
   "src/harness/runner.ts"() {
     init_agent_loop();
     init_openai_completions();
+    init_cli_provider();
     init_compat();
     init_models();
     init_system_prompt();
@@ -3500,8 +4127,8 @@ __export(loop_exports, {
   runExperimentLoop: () => runExperimentLoop
 });
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { existsSync as existsSync8, readFileSync as readFileSync9, appendFileSync as appendFileSync2, realpathSync as realpathSync3 } from "node:fs";
-import { join as join10, resolve as resolve4 } from "node:path";
+import { existsSync as existsSync9, readFileSync as readFileSync10, appendFileSync as appendFileSync2, realpathSync as realpathSync3 } from "node:fs";
+import { join as join11, resolve as resolve4 } from "node:path";
 import { randomUUID as randomUUID5 } from "node:crypto";
 function sh3(cmd, cwd) {
   return execFileSync3("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
@@ -3545,7 +4172,7 @@ function discardIteration(cwd, expectedHead) {
   execFileSync3("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
 }
 function recordLesson(cwd, text, commitMessage) {
-  appendFileSync2(join10(cwd, "LESSONS.md"), `
+  appendFileSync2(join11(cwd, "LESSONS.md"), `
 ${text}
 `);
   execFileSync3("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
@@ -3555,16 +4182,16 @@ async function runExperimentLoop(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join10(cwd, taskFile);
-  const metricPath = join10(cwd, metricFile);
-  if (!existsSync8(taskPath)) {
+  const taskPath = join11(cwd, taskFile);
+  const metricPath = join11(cwd, metricFile);
+  if (!existsSync9(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
-  if (!existsSync8(metricPath)) {
+  if (!existsSync9(metricPath)) {
     throw new Error(`No ${metricFile} in ${cwd} \u2014 put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
   }
-  const task = readFileSync9(taskPath, "utf8");
-  const metricDoc = readFileSync9(metricPath, "utf8");
+  const task = readFileSync10(taskPath, "utf8");
+  const metricDoc = readFileSync10(metricPath, "utf8");
   const metricCmd = readMetricCommand(metricDoc);
   if (!metricCmd) throw new Error("METRIC.md has no metric command");
   requireCleanGit(cwd);
@@ -3666,19 +4293,19 @@ __export(improve_exports, {
   runImproveLoop: () => runImproveLoop
 });
 import { execFileSync as execFileSync4 } from "node:child_process";
-import { cpSync, existsSync as existsSync9, mkdtempSync, readFileSync as readFileSync10, appendFileSync as appendFileSync3, rmSync as rmSync2 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join as join11, dirname as dirname5, resolve as resolve5 } from "node:path";
+import { cpSync, existsSync as existsSync10, mkdtempSync as mkdtempSync2, readFileSync as readFileSync11, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import { join as join12, dirname as dirname5, resolve as resolve5 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { randomUUID as randomUUID6 } from "node:crypto";
 function sh4(cmd, cwd) {
   return execFileSync4("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function runHarnessTests(repoDir) {
-  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync(join11(tmpdir(), "rein-validation-")) : repoDir;
+  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join12(tmpdir2(), "rein-validation-")) : repoDir;
   try {
     if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
-      if (existsSync9(join11(repoDir, name))) cpSync(join11(repoDir, name), join11(dir, name), { recursive: true });
+      if (existsSync10(join12(repoDir, name))) cpSync(join12(repoDir, name), join12(dir, name), { recursive: true });
     }
     const output = execFileSync4(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
       cwd: dir,
@@ -3690,13 +4317,13 @@ function runHarnessTests(repoDir) {
   } catch (err) {
     return { pass: false, output: `${err.stdout ?? ""}${err.stderr ?? ""}${err.message ?? ""}` };
   } finally {
-    if (dir !== repoDir) rmSync2(dir, { recursive: true, force: true });
+    if (dir !== repoDir) rmSync3(dir, { recursive: true, force: true });
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join11(repoDir, "LESSONS.md");
-  if (!existsSync9(path2)) return "";
-  const text = readFileSync10(path2, "utf8");
+  const path2 = join12(repoDir, "LESSONS.md");
+  if (!existsSync10(path2)) return "";
+  const text = readFileSync11(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
   return m?.[1]?.trim() ?? "";
 }
@@ -3758,7 +4385,7 @@ ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
         const test = runHarnessTests(repoDir);
         if (sh4("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
         if (test.pass) {
-          appendFileSync3(join11(repoDir, "LESSONS.md"), `
+          appendFileSync3(join12(repoDir, "LESSONS.md"), `
 - [improve ${tag}] fixed: ${firstLine(report)}
 `);
           if (useGit) sh4(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
@@ -3800,7 +4427,7 @@ var init_improve = __esm({
     init_runner();
     init_system_prompt();
     here2 = dirname5(fileURLToPath2(import.meta.url));
-    REIN_REPO = [here2, resolve5(here2, ".."), resolve5(here2, "..", "..")].find((dir) => existsSync9(join11(dir, "test", "smoke.ts"))) ?? resolve5(here2, "..", "..");
+    REIN_REPO = [here2, resolve5(here2, ".."), resolve5(here2, "..", "..")].find((dir) => existsSync10(join12(dir, "test", "smoke.ts"))) ?? resolve5(here2, "..", "..");
   }
 });
 
@@ -3811,9 +4438,9 @@ __export(heartbeat_exports, {
   parseHeartbeat: () => parseHeartbeat,
   runHeartbeat: () => runHeartbeat
 });
-import { appendFileSync as appendFileSync4, existsSync as existsSync10, mkdirSync as mkdirSync6, readFileSync as readFileSync11, writeFileSync as writeFileSync7 } from "node:fs";
-import { homedir as homedir6 } from "node:os";
-import { isAbsolute as isAbsolute3, join as join12, resolve as resolve6 } from "node:path";
+import { appendFileSync as appendFileSync4, existsSync as existsSync11, mkdirSync as mkdirSync8, readFileSync as readFileSync12, writeFileSync as writeFileSync8 } from "node:fs";
+import { homedir as homedir7 } from "node:os";
+import { isAbsolute as isAbsolute3, join as join13, resolve as resolve6 } from "node:path";
 function parseHeartbeat(text) {
   const tasks = [];
   let improveGoal;
@@ -3832,13 +4459,13 @@ function parseHeartbeat(text) {
 function resolveHeartbeatFile(explicit) {
   if (explicit) return isAbsolute3(explicit) ? explicit : resolve6(explicit);
   const local = resolve6(process.cwd(), "HEARTBEAT.md");
-  if (existsSync10(local)) return local;
-  return join12(homedir6(), ".rein", "HEARTBEAT.md");
+  if (existsSync11(local)) return local;
+  return join13(homedir7(), ".rein", "HEARTBEAT.md");
 }
 function logBeat(result) {
-  const dir = join12(homedir6(), ".rein");
-  mkdirSync6(dir, { recursive: true });
-  const path2 = join12(dir, "heartbeat.log");
+  const dir = join13(homedir7(), ".rein");
+  mkdirSync8(dir, { recursive: true });
+  const path2 = join13(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     file: result.file,
@@ -3856,17 +4483,17 @@ async function runHeartbeat(opts = {}) {
   };
   if (opts.init) {
     const path2 = opts.file ? isAbsolute3(opts.file) ? opts.file : resolve6(opts.file) : resolve6(process.cwd(), "HEARTBEAT.md");
-    writeFileSync7(path2, HEARTBEAT_TEMPLATE);
+    writeFileSync8(path2, HEARTBEAT_TEMPLATE);
     say(green(`wrote ${path2} \u2014 edit it, then run: rein heartbeat`));
     return 0;
   }
   const file = resolveHeartbeatFile(opts.file);
-  if (!existsSync10(file)) {
+  if (!existsSync11(file)) {
     say(red(`no HEARTBEAT.md (looked in cwd and ~/.rein)`));
     say(dim(`create one: rein heartbeat --init --file ${file}`));
     return 1;
   }
-  const { tasks, improveGoal } = parseHeartbeat(readFileSync11(file, "utf8"));
+  const { tasks, improveGoal } = parseHeartbeat(readFileSync12(file, "utf8"));
   say(bold(`heartbeat \xB7 ${file}`) + dim(` \xB7 ${(/* @__PURE__ */ new Date()).toISOString()}`));
   say(`
 ${bold("1/4 self-heal")}`);
@@ -3877,7 +4504,7 @@ ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.model && !process.env.REIN_BASE_URL && !existsSync10(join12(homedir6(), ".rein", "config.json"))) {
+  } else if (!opts.model && !process.env.REIN_BASE_URL && !existsSync11(join13(homedir7(), ".rein", "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -3954,298 +4581,335 @@ var init_heartbeat = __esm({
 // src/harness/setup.ts
 var setup_exports = {};
 __export(setup_exports, {
-  runSetup: () => runSetup
+  API_KEY_PAGES: () => API_KEY_PAGES,
+  createSetupPrompt: () => createSetupPrompt,
+  runSetup: () => runSetup,
+  testConnection: () => testConnection
 });
-import { existsSync as existsSync11, mkdirSync as mkdirSync7, readFileSync as readFileSync12, writeFileSync as writeFileSync8 } from "node:fs";
-import { homedir as homedir7 } from "node:os";
-import { join as join13 } from "node:path";
-import * as readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
-function configPath() {
-  return join13(homedir7(), ".rein", "config.json");
-}
-function saveConfig(patch) {
-  mkdirSync7(join13(homedir7(), ".rein"), { recursive: true });
-  let existing = {};
+import { mkdirSync as mkdirSync9, renameSync as renameSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync9 } from "node:fs";
+import { homedir as homedir8 } from "node:os";
+import { dirname as dirname6, join as join14 } from "node:path";
+import { randomUUID as randomUUID7 } from "node:crypto";
+import { execFile as execFile7 } from "node:child_process";
+import { promisify as promisify6 } from "node:util";
+import { createInterface } from "node:readline";
+import { Writable } from "node:stream";
+function saveConfig(config) {
+  const path2 = configPath();
+  mkdirSync9(dirname6(path2), { recursive: true, mode: 448 });
+  const temp = `${path2}.${randomUUID7()}.tmp`;
   try {
-    if (existsSync11(configPath())) existing = JSON.parse(readFileSync12(configPath(), "utf8"));
-  } catch {
-  }
-  writeFileSync8(configPath(), JSON.stringify({ ...existing, ...patch }, null, 2) + "\n", { mode: 384 });
-}
-function promptRl() {
-  if (rl) return rl;
-  const r = readline.createInterface({ input: stdin, output: stdout });
-  rl = r;
-  r.on("line", (line) => {
-    const text = line.trim();
-    if (lineWaiter) {
-      const w = lineWaiter;
-      lineWaiter = void 0;
-      w(text);
-    } else {
-      lineQueue.push(text);
-    }
-  });
-  r.on("close", () => {
-    if (!manualClose) inputClosed = true;
-    manualClose = false;
-    if (lineWaiter) {
-      const w = lineWaiter;
-      lineWaiter = void 0;
-      w("");
-    }
-  });
-  return r;
-}
-async function askLine(prompt, def = "") {
-  promptRl();
-  stdout.write(prompt);
-  if (lineQueue.length > 0) return lineQueue.shift() || def;
-  if (inputClosed) return def;
-  return new Promise((resolve7) => {
-    lineWaiter = (text) => resolve7(text || def);
-  });
-}
-async function askChoice(prompt, count, def = 1) {
-  for (; ; ) {
-    const answer = (await askLine(prompt)).trim();
-    if (answer === "") return def - 1;
-    const n = Number.parseInt(answer, 10);
-    if (!Number.isNaN(n) && n >= 1 && n <= count) return n - 1;
-    stdout.write(C.yellow("  pick a number from the list\n"));
-  }
-}
-async function askSecret(prompt) {
-  if (!stdin.isTTY) return void 0;
-  manualClose = true;
-  rl?.close();
-  rl = void 0;
-  const wasRaw = stdin.isRaw;
-  stdin.setRawMode(true);
-  stdin.resume();
-  stdout.write(prompt);
-  let value = "";
-  await new Promise((resolve7) => {
-    stdin.on("data", (chunk) => {
-      for (const ch of chunk.toString("utf8")) {
-        if (ch === "\r" || ch === "\n") {
-          stdin.pause();
-          resolve7();
-        } else if (ch === "" || ch === "") {
-          stdout.write("\n");
-          process.exit(ch === "" ? 130 : 143);
-        } else if (ch === "\x7F") {
-          if (value.length > 0) {
-            value = value.slice(0, -1);
-            stdout.write("\b \b");
-          }
-        } else if (ch >= " ") {
-          value += ch;
-          stdout.write("*");
-        }
-      }
-    });
-  });
-  stdout.write("\n");
-  if (wasRaw !== void 0) stdin.setRawMode(wasRaw);
-  return value;
-}
-async function fitMarks(ids) {
-  const out = /* @__PURE__ */ new Map();
-  try {
-    const { matchCatalog: matchCatalog2 } = await Promise.resolve().then(() => (init_catalog(), catalog_exports));
-    const { assessCatalog: assessCatalog2, verdictMark: verdictMark2 } = await Promise.resolve().then(() => (init_fit(), fit_exports));
-    const { all } = await assessCatalog2();
-    for (const id of ids) {
-      const cm = matchCatalog2(id);
-      if (!cm) continue;
-      const hit = all.find((x) => x.model.id === cm.id);
-      if (hit) out.set(id, verdictMark2(hit.a));
-    }
-  } catch {
-  }
-  return out;
-}
-async function testConnection(baseUrl, model, apiKey) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2e4);
-  const started = Date.now();
-  try {
-    const res = await fetch(baseUrl.replace(/\/$/, "") + "/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "content-type": "application/json", ...apiKey ? { authorization: `Bearer ${apiKey}` } : {} },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: "Reply with the single word: ok" }],
-        max_tokens: 8,
-        temperature: 0
-      })
-    });
-    if (!res.ok) {
-      const body = (await res.text().catch(() => "")).slice(0, 160);
-      return { ok: false, detail: `HTTP ${res.status}${body ? ` \u2014 ${body}` : ""}` };
-    }
-    const json = await res.json().catch(() => ({}));
-    const reply = json?.choices?.[0]?.message?.content?.trim() ?? "(empty)";
-    return { ok: true, detail: `model answered "${reply}" in ${Date.now() - started}ms` };
-  } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    writeFileSync9(temp, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 384 });
+    renameSync2(temp, path2);
   } finally {
-    clearTimeout(timer);
-  }
-}
-async function printStatus() {
-  const config = loadConfig();
-  const servers = await discoverLocalServers();
-  console.log(`config: ${configPath()}`);
-  if (config.baseUrl || config.model) {
-    console.log(`  model:   ${config.model ?? "(unset)"}`);
-    console.log(`  baseUrl: ${config.baseUrl ?? "(unset)"}`);
-    console.log(`  apiKey:  ${config.apiKey ? `${config.apiKey.slice(0, 7)}\u2026` : "(none)"}`);
-  } else {
-    console.log("  (no config yet \u2014 run `rein setup`)");
-  }
-  console.log("\nlocal servers:");
-  if (servers.length === 0) console.log("  (none running)");
-  for (const s of servers) console.log(`  ${s.provider.padEnd(10)} ${s.baseUrl}  ${s.models?.length ?? 0} model(s)`);
-  if (config.baseUrl && config.model) {
-    const r = await testConnection(config.baseUrl, config.model, config.apiKey);
-    console.log(`
-connection: ${r.ok ? C.green("\u2713 " + r.detail) : C.red("\u2717 " + r.detail)}`);
-  }
-}
-async function runSetup(opts) {
-  if (opts.status) {
-    await printStatus();
-    return 0;
-  }
-  console.log(C.bold("rein setup") + " \u2014 configure your model\n");
-  try {
-    const { profileHardware: profileHardware2, summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-    console.log(C.dim(`machine: ${summarizeHardware2(await profileHardware2())}`) + "\n");
-  } catch {
-  }
-  const servers = await discoverLocalServers();
-  if (servers.length > 0) {
-    console.log("local servers detected:");
-    servers.forEach((s, i) => {
-      const models = (s.models ?? []).slice(0, 4).join(", ") + ((s.models ?? []).length > 4 ? ", \u2026" : "");
-      console.log(`  ${C.green(String(i + 1))}. ${s.provider.padEnd(10)} ${C.dim(s.baseUrl)}  ${C.dim(models)}`);
-    });
-  } else {
-    console.log(C.yellow("no local AI servers detected") + C.dim(" (ollama / LM Studio / llama.cpp / vLLM)"));
-  }
-  console.log("");
-  const choices = [];
-  for (const s of servers) {
-    choices.push({ label: `${s.provider} (local)`, baseUrl: s.baseUrl, model: pickDefaultModelId(s.models ?? []), needsKey: false });
-  }
-  for (const [name, p] of Object.entries(PROVIDER_PRESETS).slice(4)) {
-    choices.push({ label: `${name} (cloud)`, baseUrl: p.baseUrl, needsKey: true, keyEnv: p.keyEnv });
-  }
-  choices.push({ label: "custom OpenAI-compatible endpoint", baseUrl: "", needsKey: true });
-  const customIndex = choices.length - 1;
-  let pick;
-  if (opts.yes) {
-    const config = loadConfig();
-    pick = servers.length > 0 ? choices[0] : config.baseUrl && config.model ? { label: "existing config", baseUrl: config.baseUrl, model: config.model, needsKey: false } : choices[customIndex];
-    console.log(C.dim(`  (--yes) picked: ${pick.label}`));
-  } else {
-    console.log(choices.map((c, i) => `  ${i + 1}. ${c.label}`).join("\n") + "\n");
-    const defIdx = servers.length > 0 ? 0 : customIndex;
-    const idx = await askChoice(`choose provider [${defIdx + 1}]: `, choices.length, defIdx + 1);
-    pick = choices[idx];
-  }
-  let baseUrl = pick.baseUrl ?? "";
-  let model = pick.model;
-  let apiKey;
-  if (baseUrl === "") {
-    baseUrl = (await askLine("base URL (OpenAI-compatible, e.g. http://localhost:11434/v1): ")).replace(/\/$/, "");
-  }
-  if (!baseUrl) {
-    console.log(C.red("no base URL \u2014 nothing to configure"));
-    return 1;
-  }
-  if (!model) {
     try {
-      const res = await fetch(baseUrl + "/models", { signal: AbortSignal.timeout(3e3) });
-      if (res.ok) {
-        const json = await res.json();
-        const ids = (json?.data ?? []).map((m) => m.id).filter(Boolean);
-        if (ids.length > 0) {
-          const marks = await fitMarks(ids);
-          console.log(`models on ${baseUrl}  ${C.dim("(fit marks from your hardware)")}:`);
-          ids.slice(0, 20).forEach((id, i) => console.log(`  ${i + 1}. ${id}${marks.get(id) ? C.dim(marks.get(id)) : ""}`));
-          const preferred = pickDefaultModelId(ids);
-          const defIdx = Math.max(0, ids.indexOf(preferred ?? ""));
-          if (!opts.yes) {
-            const n = await askChoice(`choose model [${defIdx + 1}]: `, ids.length, defIdx + 1);
-            model = ids[n];
-          } else {
-            model = ids[defIdx];
-          }
-        }
-      }
+      unlinkSync2(temp);
     } catch {
     }
-    if (!model && !opts.yes) model = await askLine("model id: ");
   }
-  if (!model) {
-    console.log(C.red("no model id available \u2014 start a server or pick one manually, then re-run `rein setup`"));
-    return 1;
+}
+function createSetupPrompt(input = process.stdin, output = process.stdout) {
+  let hidden = false;
+  const echo = new Writable({ write(chunk, _encoding, callback) {
+    if (!hidden) output.write(chunk);
+    callback();
+  } });
+  const terminal = Boolean(input.isTTY && output.isTTY);
+  const rl = createInterface({ input, output: echo, terminal });
+  const queue = [];
+  let closed = false;
+  let pending;
+  const eof = () => new Error("Setup input closed. Run setup again, or use --yes with --base-url/--provider and --model.");
+  rl.on("line", (line) => {
+    if (pending) {
+      const waiter = pending;
+      pending = void 0;
+      waiter.resolve(line);
+    } else queue.push(line);
+  });
+  rl.on("close", () => {
+    closed = true;
+    pending?.reject(eof());
+    pending = void 0;
+  });
+  const next = async (text, fallback = "") => {
+    output.write(text);
+    if (queue.length) return queue.shift().trim() || fallback;
+    if (closed) throw eof();
+    const answer = await new Promise((resolve7, reject) => {
+      pending = { resolve: resolve7, reject };
+    });
+    return answer.trim() || fallback;
+  };
+  return {
+    ask: next,
+    async secret(text) {
+      if (!terminal) return void 0;
+      hidden = true;
+      try {
+        return await next(text);
+      } finally {
+        hidden = false;
+        output.write("\n");
+      }
+    },
+    close() {
+      rl.close();
+      echo.end();
+    }
+  };
+}
+async function openBrowser(url) {
+  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+  try {
+    await promisify6(execFile7)(command, args, { timeout: 5e3 });
+    return true;
+  } catch {
+    return false;
   }
-  if (pick.needsKey) {
-    const envKey = pick.keyEnv ? process.env[pick.keyEnv] : void 0;
-    if (envKey) {
-      apiKey = envKey;
-      console.log(C.dim(`  using ${pick.keyEnv} from environment`));
-    } else if (!opts.yes) {
-      const secret = await askSecret("API key (Enter to skip): ");
-      if (secret) apiKey = secret;
+}
+function redactKey(text, key) {
+  return key ? text.split(key).join("[redacted]") : text;
+}
+async function testConnection(baseUrl, model, apiKey, options = {}) {
+  if (options.sshHost) {
+    try {
+      return await withSshTunnel(baseUrl, options.sshHost, (tunneledUrl) => testConnection(tunneledUrl, model, apiKey));
+    } catch (error) {
+      return { ok: false, detail: `SSH connection failed: ${redactKey(error instanceof Error ? error.message : String(error), apiKey)}` };
     }
   }
-  console.log(`
-model:   ${model}`);
-  console.log(`baseURL: ${baseUrl}`);
-  if (apiKey) console.log(`apiKey:  ${apiKey.slice(0, 7)}\u2026`);
-  const test = await testConnection(baseUrl, model, apiKey);
-  if (test.ok) {
-    console.log(C.green(`\u2713 connection test passed \u2014 ${test.detail}`));
-  } else {
-    console.log(C.yellow(`\u26A0 connection test failed \u2014 ${test.detail}`));
-    if (!opts.yes) {
-      const keep = await askLine("save the config anyway? [y/N]: ");
-      if (!/^y(es)?$/i.test(keep)) {
-        console.log("not saved. Fix the endpoint and run `rein setup` again.");
-        return 1;
+  const started = Date.now();
+  try {
+    const response = await postChatCompletion(`${baseUrl.replace(/\/$/, "")}/chat/completions`, { model, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 8 }, {
+      signal: AbortSignal.timeout(2e4),
+      redirect: "error",
+      headers: { "content-type": "application/json", ...apiKey ? { authorization: `Bearer ${apiKey}` } : {} }
+    });
+    if (!response.ok) {
+      const detail = redactKey(await response.text().catch(() => ""), apiKey).slice(0, 300);
+      return { ok: false, detail: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
+    }
+    const body = await response.json();
+    const message = body.choices?.[0]?.message;
+    if (!message || typeof message.content !== "string" && !Array.isArray(message.content) && !message.tool_calls?.length) {
+      return { ok: false, detail: "Endpoint returned no valid chat completion. Check the API server URL and selected model." };
+    }
+    return { ok: true, detail: `valid chat completion in ${Date.now() - started}ms` };
+  } catch (error) {
+    return { ok: false, detail: `${redactKey(error instanceof Error ? error.message : String(error), apiKey)}. For a remote server, check its listening port, bind to 0.0.0.0, and verify NetBird/firewall reachability.` };
+  }
+}
+async function choose(prompt, log, label, choices, defaultIndex = 0) {
+  choices.forEach((item, i) => log(`  ${i + 1}. ${item}`));
+  for (; ; ) {
+    const answer = await prompt.ask(`${label} [${defaultIndex + 1}]: `, String(defaultIndex + 1));
+    const value = Number(answer);
+    if (Number.isInteger(value) && value >= 1 && value <= choices.length) return value - 1;
+    log("Choose a number from the list.");
+  }
+}
+async function runSetup(opts = {}, dependencies = {}) {
+  let prompt = dependencies.prompt;
+  const getPrompt = () => prompt ??= createSetupPrompt();
+  const logRaw = dependencies.log ?? console.log;
+  const loaded = loadConfig();
+  const config = loaded && typeof loaded === "object" && !Array.isArray(loaded) ? loaded : {};
+  const secrets = /* @__PURE__ */ new Set();
+  if (config.apiKey) secrets.add(config.apiKey);
+  for (const name of ["REIN_API_KEY", ...Object.values(PROVIDER_PRESETS).map((p) => p.keyEnv)]) if (process.env[name]) secrets.add(process.env[name]);
+  const log = (text) => {
+    for (const secret of secrets) text = text.split(secret).join("[redacted]");
+    logRaw(text);
+  };
+  const keyFor2 = dependencies.keyFor ?? apiKeyFor;
+  const detect = dependencies.detect ?? detectEndpoint;
+  const connection = dependencies.connection ?? testConnection;
+  const cliStatus = dependencies.cliStatus ?? checkCliAuth;
+  try {
+    if (opts.status) {
+      log(`config: ${configPath()}`);
+      log(`provider: ${config.provider ?? "(unset)"}
+model: ${config.model ?? "(unset)"}
+auth: ${config.auth?.type ?? "api-key"}`);
+      if (config.auth?.type === "cli") {
+        if (!(config.auth.provider in CLI_PROVIDERS)) throw new Error("Unknown saved CLI provider. Run rein setup to repair the configuration.");
+        const status2 = await cliStatus(config.auth.provider);
+        log(status2.detail);
+        return status2.available && status2.authenticated !== false ? 0 : 1;
+      }
+      log(`base URL: ${config.baseUrl ?? "(unset)"}${config.sshHost ? `
+SSH host: ${config.sshHost}` : ""}
+API key: ${config.apiKey ? "saved (hidden)" : "not saved"}`);
+      if (!config.baseUrl || !config.model) {
+        log("Run rein setup to configure a connection.");
+        return 0;
+      }
+      const key2 = keyFor2(config.provider, config.baseUrl, config.sshHost);
+      if (key2) secrets.add(key2);
+      const result2 = await connection(normalizeBaseUrl(config.baseUrl), config.model, key2, { sshHost: config.sshHost });
+      log(`connection: ${result2.ok ? "passed" : "failed"} \u2014 ${result2.detail}`);
+      return result2.ok ? 0 : 1;
+    }
+    if (opts.auth !== void 0 && opts.auth !== "api-key" && opts.auth !== "cli") throw new Error("--auth must be api-key or cli.");
+    if (opts.cliProvider && !(opts.cliProvider in CLI_PROVIDERS)) throw new Error("--cli-provider must be codex or copilot.");
+    const envBase = process.env.REIN_BASE_URL?.trim() || void 0;
+    const envModel = process.env.REIN_MODEL?.trim() || void 0;
+    const selectedProvider = opts.provider?.trim().toLowerCase() || void 0;
+    const explicitSelection = Boolean(selectedProvider || opts.baseUrl || opts.auth || opts.cliProvider || opts.sshHost || envBase);
+    let selection = { label: "selected endpoint", provider: selectedProvider, baseUrl: opts.baseUrl?.trim() || (selectedProvider ? PROVIDER_PRESETS[selectedProvider]?.baseUrl : void 0) || envBase, model: opts.model?.trim() || envModel };
+    const cli = opts.cliProvider ?? (selection.provider === "codex" || selection.provider === "copilot" ? selection.provider : void 0);
+    if (opts.auth === "api-key" && cli) throw new Error("CLI providers use --auth cli; API-key setup requires an HTTP provider or --base-url.");
+    if ((opts.auth === "cli" || cli) && (opts.baseUrl || opts.sshHost || envBase)) throw new Error("CLI account setup does not accept --base-url, REIN_BASE_URL or --ssh; choose an HTTP API connection for those options.");
+    if (opts.auth === "cli" || cli) {
+      selection.cli = cli;
+      if (!selection.cli && opts.yes) throw new Error("CLI setup needs --cli-provider codex or --cli-provider copilot.");
+      if (!selection.cli) selection.cli = ["codex", "copilot"][await choose(getPrompt(), log, "Choose CLI account", [CLI_PROVIDERS.codex.label, CLI_PROVIDERS.copilot.label])];
+    } else if (!explicitSelection && opts.yes && config.auth?.type === "cli") {
+      selection.cli = config.auth.provider;
+    } else if (!explicitSelection && !opts.yes) {
+      log("rein setup \u2014 local server, remote host, cloud API, or CLI account");
+      const locals = await (dependencies.discover ?? discoverLocalServers)();
+      const choices = locals.map((server) => ({ ...server, label: `${server.provider} \u2014 ${server.baseUrl}` }));
+      choices.push({ label: "Custom / remote host (DGX, NetBird, LAN, or OpenAI-compatible API)", provider: "custom" });
+      choices.push(...["codex", "copilot"].map((provider2) => ({ label: CLI_PROVIDERS[provider2].label, cli: provider2 })));
+      for (const [provider2, preset] of Object.entries(PROVIDER_PRESETS)) if (!LOCAL.has(provider2) && provider2 !== "github") choices.push({ label: `${provider2} \u2014 cloud API key`, provider: provider2, baseUrl: preset.baseUrl });
+      selection = { ...choices[await choose(getPrompt(), log, "Choose connection", choices.map((c) => c.label))], model: selection.model };
+    }
+    if (selection.cli) {
+      const provider2 = selection.cli;
+      const info = CLI_PROVIDERS[provider2];
+      if (!info) throw new Error("Unknown saved CLI provider. Run rein setup to repair the configuration.");
+      const status2 = await cliStatus(provider2);
+      if (!status2.available) throw new Error(`${status2.detail}
+Install with: ${info.installCommand}`);
+      if (!opts.yes && status2.authenticated !== true) {
+        prompt?.close();
+        prompt = void 0;
+        log(`Sign in through ${info.label} in Rein's dedicated CLI profile. Browser fallback: ${info.loginUrl}`);
+        const result2 = await (dependencies.login ?? loginCli)(provider2, { deviceAuth: opts.deviceAuth !== false, interactive: true, openBrowser: !opts.noBrowser });
+        if (!result2.ok) throw new Error(result2.detail);
+        log(result2.detail);
+      } else {
+        log(status2.detail);
+        if (status2.authenticated === false) throw new Error(`Run rein login ${provider2}, then rerun rein setup. --yes never starts an interactive login.`);
+      }
+      const model2 = selection.model ?? (config.auth?.type === "cli" && config.auth.provider === provider2 ? config.model : void 0) ?? info.defaultModel;
+      const saved2 = { ...config, provider: provider2, baseUrl: info.baseUrl, model: model2, auth: { type: "cli", provider: provider2 } };
+      delete saved2.apiKey;
+      delete saved2.sshHost;
+      saveConfig(saved2);
+      log(`Saved ${info.label} configuration to ${configPath()}. Credentials remain with the official CLI.`);
+      return 0;
+    }
+    if (selection.provider === "github") throw new Error(GITHUB_MODELS_RETIRED);
+    if (selection.provider && selection.provider !== "custom" && !PROVIDER_PRESETS[selection.provider]) throw new Error(`Unknown API provider "${selection.provider}". Use --base-url for a custom host.`);
+    selection.baseUrl ??= selection.provider && PROVIDER_PRESETS[selection.provider]?.baseUrl;
+    if (!selection.baseUrl && opts.yes && !opts.provider) {
+      selection.baseUrl = config.auth?.type !== "cli" ? config.baseUrl : void 0;
+      selection.provider ??= config.provider;
+      if (!selection.baseUrl) {
+        const local = (await (dependencies.discover ?? discoverLocalServers)())[0];
+        if (local) {
+          selection.baseUrl = local.baseUrl;
+          selection.provider = local.provider;
+        }
       }
     }
+    if (!selection.baseUrl) {
+      if (opts.yes) throw new Error("No endpoint configured. Pass --base-url <NetBird-host-or-IP>:<port> or --provider <name>; add --model if discovery is unavailable.");
+      log("Enter the server host and listening port. For remote LM Studio, use its NetBird/LAN address and port (often 1234); localhost means this machine.");
+      selection.baseUrl = await getPrompt().ask("Server URL or host:port: ");
+    }
+    let baseUrl = normalizeBaseUrl(selection.baseUrl);
+    const inferredProvider = Object.entries(PROVIDER_PRESETS).find(([, preset]) => normalizeBaseUrl(preset.baseUrl) === baseUrl)?.[0];
+    let provider = (!selection.provider || selection.provider === "custom" ? inferredProvider : selection.provider) ?? "custom";
+    let sameEndpoint = false;
+    try {
+      sameEndpoint = Boolean(config.baseUrl && config.auth?.type !== "cli" && normalizeBaseUrl(config.baseUrl) === baseUrl && (!config.provider || config.provider === provider || provider === "custom"));
+    } catch {
+    }
+    let sshHost = opts.sshHost ?? (sameEndpoint ? config.sshHost : void 0);
+    if (!opts.yes && !sshHost && provider === "custom") {
+      log("If the remote API listens only on 127.0.0.1, Rein can reach it through an SSH host from your SSH config (for example, dgx).");
+      sshHost = await getPrompt().ask("SSH host (optional; Enter for direct NetBird/LAN access): ") || void 0;
+    }
+    const sameConnection = sameEndpoint && (config.sshHost ?? void 0) === sshHost;
+    let model = selection.model ?? (sameConnection ? config.model : void 0);
+    let key = keyFor2(provider, baseUrl, sshHost);
+    if (!sameConnection && key === config.apiKey && !process.env.REIN_API_KEY && !process.env[PROVIDER_PRESETS[provider]?.keyEnv ?? "REIN_API_KEY"]) key = void 0;
+    if (key) secrets.add(key);
+    let saveKey = sameConnection && key === config.apiKey ? config.apiKey : void 0;
+    const keyEnv = PROVIDER_PRESETS[provider]?.keyEnv ?? "REIN_API_KEY";
+    if (process.env.REIN_API_KEY || process.env[keyEnv]) saveKey = void 0;
+    const cloud = Boolean(PROVIDER_PRESETS[provider] && !LOCAL.has(provider));
+    if (!key && !opts.yes) {
+      const url = API_KEY_PAGES[provider];
+      if (url) {
+        log(`Create an API key: ${url}`);
+        if (!opts.noBrowser && !await (dependencies.openBrowser ?? openBrowser)(url)) log("Browser could not open. Use the URL above on this or another device.");
+      }
+      key = await getPrompt().secret(cloud ? "API key (hidden): " : "API key if required (hidden; Enter for none): ");
+      if (key) {
+        secrets.add(key);
+        saveKey = key;
+      }
+    }
+    if (cloud && !key) throw new Error(`No API key for ${provider}. Set ${keyEnv} and rerun setup; API keys are separate from CLI subscriptions.`);
+    const endpoint = await detect(baseUrl, { provider, apiKey: key, sshHost });
+    baseUrl = endpoint.baseUrl;
+    provider = endpoint.provider;
+    if (endpoint.error) log(`Model discovery: ${endpoint.error}`);
+    if (!model && endpoint.models.length) {
+      const preferred = pickDefaultModelId(endpoint.models);
+      if (opts.yes) model = preferred;
+      else model = endpoint.models[await choose(getPrompt(), log, "Choose model", endpoint.models, Math.max(0, endpoint.models.indexOf(preferred ?? "")))];
+    }
+    if (!model && !opts.yes) model = await getPrompt().ask("Model ID (if the server does not list models): ");
+    if (!model) throw new Error("No model available. Load a model on the remote server or pass --model <id>. Check the listening port, 0.0.0.0 binding and NetBird reachability if discovery failed.");
+    const result = await connection(baseUrl, model, key, { sshHost });
+    if (!result.ok) throw new Error(`Connection test failed: ${result.detail}
+Configuration was not saved. Correct the endpoint, credentials or model and rerun setup.`);
+    const saved = { ...config, provider, baseUrl, model, auth: { type: "api-key" } };
+    delete saved.apiKey;
+    delete saved.sshHost;
+    if (sshHost) saved.sshHost = sshHost;
+    if (saveKey) saved.apiKey = saveKey;
+    saveConfig(saved);
+    log(`Connection passed: ${result.detail}
+Saved ${provider}/${model} at ${baseUrl} to ${configPath()}.`);
+    if (key && !saveKey) log(`Using credentials from the environment; no API key was written to config.`);
+    return 0;
+  } catch (error) {
+    log(error instanceof Error ? error.message : String(error));
+    return 1;
+  } finally {
+    prompt?.close();
   }
-  saveConfig({ baseUrl, model, ...apiKey ? { apiKey } : {} });
-  console.log(`
-${C.green("\u2713 config saved to " + configPath())}`);
-  console.log(`
-try it:`);
-  console.log(`  rein -p "hello, what model are you?"`);
-  console.log(`  rein            # interactive session in this directory`);
-  return 0;
 }
-var C, lineQueue, lineWaiter, inputClosed, manualClose, rl;
+var LOCAL, API_KEY_PAGES, configPath;
 var init_setup = __esm({
   "src/harness/setup.ts"() {
     init_models();
-    C = {
-      dim: (s) => `\x1B[2m${s}\x1B[0m`,
-      green: (s) => `\x1B[32m${s}\x1B[0m`,
-      red: (s) => `\x1B[31m${s}\x1B[0m`,
-      yellow: (s) => `\x1B[33m${s}\x1B[0m`,
-      bold: (s) => `\x1B[1m${s}\x1B[0m`
+    init_auth();
+    init_ssh();
+    init_chat_request();
+    init_endpoints();
+    LOCAL = /* @__PURE__ */ new Set(["ollama", "lmstudio", "llamacpp", "vllm"]);
+    API_KEY_PAGES = {
+      openai: "https://platform.openai.com/api-keys",
+      deepseek: "https://platform.deepseek.com/api_keys",
+      groq: "https://console.groq.com/keys",
+      together: "https://api.together.ai/settings/api-keys",
+      openrouter: "https://openrouter.ai/settings/keys",
+      mistral: "https://console.mistral.ai/api-keys",
+      fireworks: "https://app.fireworks.ai/settings/users/api-keys",
+      cerebras: "https://cloud.cerebras.ai/platform/api-keys",
+      huggingface: "https://huggingface.co/settings/tokens",
+      gemini: "https://aistudio.google.com/apikey"
     };
-    lineQueue = [];
-    inputClosed = false;
-    manualClose = false;
+    configPath = () => join14(process.env.REIN_HOME || join14(homedir8(), ".rein"), "config.json");
   }
 });
 
@@ -4308,12 +4972,12 @@ var repl_exports = {};
 __export(repl_exports, {
   startRepl: () => startRepl
 });
-import * as readline2 from "node:readline";
+import * as readline from "node:readline";
 async function startRepl(opts) {
   const { runner } = opts;
   let sessionId = opts.resumeSessionId ?? createSession({ model: runner.model.id, provider: runner.model.provider, cwd: process.cwd() });
   runner.setSession(sessionId);
-  const rl2 = readline2.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY), prompt: dim("\u276F ") });
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY), prompt: dim("\u276F ") });
   console.log(
     gray(
       `rein \xB7 ${runner.model.provider}/${runner.model.id} \xB7 tools: ${runner.toolsMode} (${runner.toolsModeSource}) \xB7 session ${sessionId.slice(-8)}
@@ -4477,9 +5141,9 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     }
   };
   let resolveLine = null;
-  let inputClosed2 = false;
-  const lineQueue2 = [];
-  rl2.on("line", (line) => {
+  let inputClosed = false;
+  const lineQueue = [];
+  rl.on("line", (line) => {
     if (approvalAnswer) {
       const answer = approvalAnswer;
       approvalAnswer = void 0;
@@ -4497,11 +5161,11 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
       resolveLine = null;
       r(line);
     } else {
-      lineQueue2.push(line);
+      lineQueue.push(line);
     }
   });
-  rl2.on("close", () => {
-    inputClosed2 = true;
+  rl.on("close", () => {
+    inputClosed = true;
     approvalAnswer?.("");
     approvalAnswer = void 0;
     if (resolveLine) {
@@ -4510,17 +5174,17 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
       r("");
     }
   });
-  rl2.on("SIGINT", () => {
+  rl.on("SIGINT", () => {
     if (busy) {
       controller?.abort();
       approvalAnswer?.("");
       approvalAnswer = void 0;
-    } else rl2.close();
+    } else rl.close();
   });
   let approvalTail = Promise.resolve(false);
   runner.askFallback = (name, args) => {
     const pending = approvalTail.then(async () => {
-      if (!process.stdin.isTTY || inputClosed2 || controller?.signal.aborted) return false;
+      if (!process.stdin.isTTY || inputClosed || controller?.signal.aborted) return false;
       const s = JSON.stringify(args);
       process.stdout.write(`
 \u26A1 approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} \u2014 [y/N] `);
@@ -4533,11 +5197,11 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     return pending;
   };
   const ask = () => {
-    if (lineQueue2.length > 0) return Promise.resolve(lineQueue2.shift());
-    if (inputClosed2) return Promise.resolve(null);
+    if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift());
+    if (inputClosed) return Promise.resolve(null);
     return new Promise((resolve7) => {
       resolveLine = (line) => resolve7(line);
-      if (!rl2.closed && process.stdout.isTTY) rl2.prompt();
+      if (!rl.closed && process.stdout.isTTY) rl.prompt();
     });
   };
   if (runner.context.messages.length === 0) {
@@ -4575,7 +5239,7 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
       flushLine();
     }
   }
-  if (!rl2.closed) rl2.close();
+  if (!rl.closed) rl.close();
 }
 var init_repl = __esm({
   "src/harness/repl.ts"() {
@@ -4628,19 +5292,26 @@ Usage:
   rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal \u2192 HEARTBEAT.md tasks \u2192 self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
-  rein setup                    interactive onboarding: provider \u2192 model \u2192 key
-                                \u2192 connection test \u2192 saves ~/.rein/config.json
+  rein setup                    provider \u2192 login/key \u2192 model \u2192 connection test
+                                saves $REIN_HOME/config.json (default ~/.rein)
   rein setup --yes              non-interactive (first local server / existing config)
   rein setup --status           show config, detected servers, test the connection
+  rein login codex|copilot      open official subscription device sign-in
+  rein setup --provider codex   use a ChatGPT subscription through the official CLI
+  rein setup --ssh dgx --base-url 127.0.0.1:18083
+                                reach a remote loopback API through SSH
 
 Model selection (highest wins):
   --model <id> --base-url <url>    explicit endpoint
   --provider <name> --model <id>   preset (openai, deepseek, groq, together, openrouter, mistral, ...)
+  --ssh <host>                    SSH config alias for a remote HTTP API
   REIN_BASE_URL / REIN_MODEL       environment
   ~/.rein/config.json              {"model": "...", "baseUrl": "...", "apiKey": "..."}
   auto-detect                      Ollama, LM Studio, llama.cpp, vLLM (in that order)
 
 Options:
+  --auth <api-key|cli>            setup: API credentials or official subscription CLI
+  --device-auth=false             login/setup: browser callback instead of device code
   --tools <auto|native|text>       tool protocol (auto = capability table + runtime fallback)
   --max-turns <n>                  safety cap per prompt (default 60)
   --temperature <t>                sampling temperature
@@ -4657,7 +5328,7 @@ Options:
   -h, --help                       this help
   -v, --version                    print version`);
 }
-var BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init"]);
+var BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser"]);
 function parseArgs(argv) {
   const positional = [];
   const flags = {};
@@ -4698,6 +5369,12 @@ function numberFlag(flags, name, min, integer = true) {
   }
   return value;
 }
+function stringFlag(flags, name) {
+  const value = flags[name];
+  if (value === void 0) return void 0;
+  if (typeof value !== "string" || !value.trim()) throw new Error(`--${name} must have a value`);
+  return value.trim();
+}
 async function main(argv = process.argv.slice(2)) {
   const { _, flags } = parseArgs(argv);
   if (flags.help === true || flags.h === true || _[0] === "help") {
@@ -4712,9 +5389,10 @@ async function main(argv = process.argv.slice(2)) {
   const maxIterations = numberFlag(flags, "max-iterations", 1);
   const common = {
     cwd: process.cwd(),
-    modelOverride: typeof flags.model === "string" ? flags.model : void 0,
-    baseUrlOverride: typeof flags["base-url"] === "string" ? flags["base-url"] : void 0,
-    providerOverride: typeof flags.provider === "string" ? flags.provider : void 0,
+    modelOverride: stringFlag(flags, "model"),
+    baseUrlOverride: stringFlag(flags, "base-url"),
+    providerOverride: stringFlag(flags, "provider"),
+    sshHostOverride: stringFlag(flags, "ssh"),
     toolsMode: typeof flags.tools === "string" ? flags.tools : void 0,
     maxTurns: numberFlag(flags, "max-turns", 1),
     temperature: numberFlag(flags, "temperature", 0, false),
@@ -4736,9 +5414,10 @@ async function main(argv = process.argv.slice(2)) {
     for (const [name, p] of Object.entries(PROVIDER_PRESETS2)) {
       console.log(`  ${name.padEnd(12)} ${p.baseUrl}  (key: ${p.keyEnv})`);
     }
+    console.log("\nsubscription CLIs (official sign-in, separate from API billing):\n  codex        rein setup --provider codex\n  copilot      rein setup --provider copilot");
     const config = loadConfig();
     if (config.model || config.baseUrl) console.log(`
-config: ~/.rein/config.json \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl })}`);
+config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, sshHost: config.sshHost })}`);
     await printHardwareSection();
     return;
   }
@@ -4764,9 +5443,34 @@ config: ~/.rein/config.json \u2192 ${JSON.stringify({ model: config.model, baseU
     process.exitCode = code;
     return;
   }
+  if (_[0] === "login") {
+    const provider = (_[1] ?? common.providerOverride)?.toLowerCase();
+    if (provider !== "codex" && provider !== "copilot") throw new Error("Use rein login codex or rein login copilot. API-key providers are configured with rein setup.");
+    if (flags.yes === true) throw new Error("Login requires browser interaction. Run rein login without --yes.");
+    const { loginCli: loginCli2 } = await Promise.resolve().then(() => (init_auth(), auth_exports));
+    const result = await loginCli2(provider, { deviceAuth: flags["device-auth"] !== false, openBrowser: flags["no-browser"] !== true });
+    console.log(result.detail);
+    process.exitCode = result.ok ? 0 : 1;
+    return;
+  }
   if (_[0] === "setup") {
+    const auth = stringFlag(flags, "auth");
+    if (auth !== void 0 && auth !== "api-key" && auth !== "cli") throw new Error("--auth must be api-key or cli");
+    const cliProvider = stringFlag(flags, "cli-provider");
+    if (cliProvider !== void 0 && cliProvider !== "codex" && cliProvider !== "copilot") throw new Error("--cli-provider must be codex or copilot");
     const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
-    const code = await runSetup2({ yes: flags.yes === true, status: flags.status === true });
+    const code = await runSetup2({
+      yes: flags.yes === true,
+      status: flags.status === true,
+      provider: common.providerOverride,
+      baseUrl: common.baseUrlOverride,
+      model: common.modelOverride,
+      sshHost: common.sshHostOverride,
+      auth,
+      cliProvider,
+      deviceAuth: flags["device-auth"] !== false,
+      noBrowser: flags["no-browser"] === true
+    });
     process.exitCode = code;
     return;
   }
