@@ -94,6 +94,16 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 		console.log(yellow(`not a git repo (${repoDir}) — running without keep/discard; review changes manually`));
 	}
 
+	// A discard is `git checkout .` — it must never eat work that was already
+	// there. Refuse to self-advance on a dirty tree (heartbeat rule).
+	if (useGit) {
+		const pre = sh("git status --porcelain", repoDir).trim();
+		if (pre) {
+			console.log(yellow(`working tree is dirty (${pre.split("\n").length} file(s)) — commit or stash before self-advancing; refusing to risk your work`));
+			return;
+		}
+	}
+
 	const runner = await createRunner({
 		...opts,
 		cwd: repoDir,
