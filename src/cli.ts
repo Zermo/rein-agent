@@ -9,6 +9,8 @@
  *   rein gates <file> [--mode m] unlazy: lint / status / approve / reverify a ledger
  *   rein models                 list what rein can see (local servers, presets)
  *   rein hardware [--json]      profile this machine + what it can run (stolen from Magnitude)
+ *   rein doctor [--fix]         auto-detect + self-heal the whole stack (Magnitude doctor, extended)
+ *   rein heartbeat              self-sustaining loop: self-heal → HEARTBEAT.md tasks → self-advance
  *   rein setup [--yes|--status] interactive onboarding: pick model, test, save config
  *
  * Local AI is the default provider: Ollama → LM Studio → llama.cpp → vLLM.
@@ -62,6 +64,9 @@ Usage:
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
   rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
+  rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
+  rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
+                                (--improve adds one self-improvement iteration; idle if no tasks)
   rein setup                    interactive onboarding: provider → model → key
                                 → connection test → saves ~/.rein/config.json
   rein setup --yes              non-interactive (first local server / existing config)
@@ -170,6 +175,25 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	if (_[0] === "hardware") {
 		const { printHardwareReport } = await import("./hardware/report.ts");
 		return printHardwareReport({ json: flags.json === true });
+	}
+
+	if (_[0] === "doctor") {
+		const { runDoctor } = await import("./harness/doctor.ts");
+		const r = await runDoctor({ fix: flags.fix === true });
+		process.exitCode = r.healthy === r.total ? 0 : 1;
+		return;
+	}
+
+	if (_[0] === "heartbeat" || _[0] === "hb") {
+		const { runHeartbeat } = await import("./harness/heartbeat.ts");
+		const code = await runHeartbeat({
+			...common,
+			file: typeof flags.file === "string" ? flags.file : undefined,
+			improve: flags.improve === true,
+			init: flags.init === true,
+		});
+		process.exitCode = code;
+		return;
 	}
 
 	if (_[0] === "setup") {

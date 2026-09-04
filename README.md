@@ -90,6 +90,8 @@ rein-agent improve [goal]     self-improvement loop on this repo
 rein-agent gates [file] --mode m  unlazy gates: lint | status | approve | reverify
 rein-agent models             what rein can see: local servers + provider presets
 rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
+rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
+rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
 rein setup                    onboarding wizard (also: --yes, --status)
 rein --version                print version
 ```
@@ -179,6 +181,41 @@ every agent to append durable learnings to `LESSONS.md` (shared memory across
 sessions, loaded on next start), and `rein improve` reads exactly that file.
 The agent that bumps into a sharp edge writes it down; the improve loop cuts
 the edge.
+
+### Self-sustaining — `rein doctor` + `rein heartbeat`
+
+The baseline for agents that keep themselves alive and advancing. Two commands:
+
+```sh
+rein doctor [--fix]    auto-detect: node → bin → repo → bundle → config →
+                       server → model → hardware fit → perms → disk
+                       --fix repairs what it can (git pull, rebuild bundle,
+                       ollama pull, chmod) and re-checks. exit 1 if anything
+                       is still broken — scriptable in CI and cron.
+
+rein heartbeat         one beat, four phases, in order:
+                       1. SELF-HEAL    rein doctor --fix
+                       2. TASKS        each HEARTBEAT.md line → an agent run
+                       3. SELF-ADVANCE one `rein improve` iteration (goal from
+                                      `# improve: <goal>` in HEARTBEAT.md or --improve)
+                       4. MEMORY       JSONL entry → ~/.rein/heartbeat.log
+```
+
+`HEARTBEAT.md` (the openclaw/hermes pattern) is a file of periodic tasks —
+one per line, `#` lines are comments, empty = idle beat (self-heal only).
+Seed one with `rein heartbeat --init`. The beat repairs its own runtime
+before doing any work, so a stale checkout or stale bundle heals itself on
+the next tick instead of waiting for a human to notice:
+
+```sh
+rein heartbeat --init          # write a template, edit it
+*/30 * * * * rein heartbeat >> ~/.rein/heartbeat.cron.log 2>&1
+```
+
+That ordering is the point: *perception (doctor) → action (tasks) →
+egeneration (improve) → memory (log)*. An agent that can check itself,
+fix itself, do its periodic work, and improve itself from its own lessons
+is the baseline for fully self-sustaining agents.
 
 ### Autonomous experiment loop
 
@@ -317,7 +354,8 @@ npm test          # node --experimental-strip-types test/smoke.ts
 ```
 
 Covers: JSON salvage (7), edit semantics (6), capability table (5),
-hardware profile + fit assessment (5), and three end-to-end pipelines against
+hardware profile + fit assessment (5), the plain-JSON adapter path (issue #1),
+doctor + heartbeat parsing + an idle beat end-to-end, and three
 the mock server — native tools, text protocol, and broken-native → runtime
 fallback (the tool actually executes in each).
 
