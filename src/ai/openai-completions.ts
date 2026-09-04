@@ -201,6 +201,20 @@ export function stream(
 
 			emit({ type: "start", partial: message });
 
+			// Some servers (or their proxies) answer a stream:true request with a
+			// single non-stream JSON object — legal under the OpenAI contract.
+			// Normalize that shape (choice.message → choice.delta) so the one loop
+			// below handles both; real SSE servers keep true token-by-token streaming.
+			const ct = (response.headers.get("content-type") ?? "").toLowerCase();
+			let dataLines: AsyncIterable<string>;
+			if (ct.includes("json")) {
+				const doc: any = JSON.parse(await response.text());
+				if (doc?.choices?.[0]?.message) doc.choices[0].delta = doc.choices[0].message;
+				dataLines = [JSON.stringify(doc)];
+			} else {
+				dataLines = sseDataLines(response.body);
+			}
+
 			// Streaming state
 			let textBlock: { type: "text"; text: string } | null = null;
 			let thinkingBlock: { type: "thinking"; thinking: string } | null = null;
@@ -226,7 +240,7 @@ export function stream(
 				return thinkingBlock;
 			};
 
-			for await (const data of sseDataLines(response.body)) {
+			for await (const data of dataLines) {
 				let chunk: any;
 				try {
 					chunk = JSON.parse(data);

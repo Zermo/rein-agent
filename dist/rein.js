@@ -1676,6 +1676,15 @@ function stream(model, context, options = {}) {
         return;
       }
       emit({ type: "start", partial: message });
+      const ct = (response.headers.get("content-type") ?? "").toLowerCase();
+      let dataLines;
+      if (ct.includes("json")) {
+        const doc = JSON.parse(await response.text());
+        if (doc?.choices?.[0]?.message) doc.choices[0].delta = doc.choices[0].message;
+        dataLines = [JSON.stringify(doc)];
+      } else {
+        dataLines = sseDataLines(response.body);
+      }
       let textBlock = null;
       let thinkingBlock = null;
       let contentIndex = -1;
@@ -1698,7 +1707,7 @@ function stream(model, context, options = {}) {
         }
         return thinkingBlock;
       };
-      for await (const data of sseDataLines(response.body)) {
+      for await (const data of dataLines) {
         let chunk;
         try {
           chunk = JSON.parse(data);
