@@ -705,301 +705,263 @@ var init_report = __esm({
   }
 });
 
-// src/harness/setup.ts
-var setup_exports = {};
-__export(setup_exports, {
-  runSetup: () => runSetup
+// src/harness/doctor.ts
+var doctor_exports = {};
+__export(doctor_exports, {
+  runDoctor: () => runDoctor
 });
-import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync as existsSync2, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { join as join2 } from "node:path";
-import * as readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
-function configPath() {
-  return join2(homedir2(), ".rein", "config.json");
-}
-function saveConfig(patch) {
-  mkdirSync(join2(homedir2(), ".rein"), { recursive: true });
-  let existing = {};
+import { dirname, join as join2 } from "node:path";
+function sh2(cmd, opts = {}) {
   try {
-    if (existsSync2(configPath())) existing = JSON.parse(readFileSync2(configPath(), "utf8"));
-  } catch {
-  }
-  writeFileSync(configPath(), JSON.stringify({ ...existing, ...patch }, null, 2) + "\n", { mode: 384 });
-}
-function promptRl() {
-  if (rl) return rl;
-  const r = readline.createInterface({ input: stdin, output: stdout });
-  rl = r;
-  r.on("line", (line) => {
-    const text = line.trim();
-    if (lineWaiter) {
-      const w = lineWaiter;
-      lineWaiter = void 0;
-      w(text);
-    } else {
-      lineQueue.push(text);
-    }
-  });
-  r.on("close", () => {
-    if (!manualClose) inputClosed = true;
-    manualClose = false;
-    if (lineWaiter) {
-      const w = lineWaiter;
-      lineWaiter = void 0;
-      w("");
-    }
-  });
-  return r;
-}
-async function askLine(prompt, def = "") {
-  promptRl();
-  stdout.write(prompt);
-  if (lineQueue.length > 0) return lineQueue.shift() || def;
-  if (inputClosed) return def;
-  return new Promise((resolve3) => {
-    lineWaiter = (text) => resolve3(text || def);
-  });
-}
-async function askChoice(prompt, count, def = 1) {
-  for (; ; ) {
-    const answer = (await askLine(prompt)).trim();
-    if (answer === "") return def - 1;
-    const n = Number.parseInt(answer, 10);
-    if (!Number.isNaN(n) && n >= 1 && n <= count) return n - 1;
-    stdout.write(C.yellow("  pick a number from the list\n"));
-  }
-}
-async function askSecret(prompt) {
-  if (!stdin.isTTY) return void 0;
-  manualClose = true;
-  rl?.close();
-  rl = void 0;
-  const wasRaw = stdin.isRaw;
-  stdin.setRawMode(true);
-  stdin.resume();
-  stdout.write(prompt);
-  let value = "";
-  await new Promise((resolve3) => {
-    stdin.on("data", (chunk) => {
-      for (const ch of chunk.toString("utf8")) {
-        if (ch === "\r" || ch === "\n") {
-          stdin.pause();
-          resolve3();
-        } else if (ch === "" || ch === "") {
-          stdout.write("\n");
-          process.exit(ch === "" ? 130 : 143);
-        } else if (ch === "\x7F") {
-          if (value.length > 0) {
-            value = value.slice(0, -1);
-            stdout.write("\b \b");
-          }
-        } else if (ch >= " ") {
-          value += ch;
-          stdout.write("*");
-        }
-      }
+    const out = execFileSync("sh", ["-c", cmd], {
+      encoding: "utf8",
+      timeout: opts.timeout ?? 15e3,
+      stdio: ["pipe", "pipe", "pipe"]
     });
-  });
-  stdout.write("\n");
-  if (wasRaw !== void 0) stdin.setRawMode(wasRaw);
-  return value;
-}
-async function fitMarks(ids) {
-  const out = /* @__PURE__ */ new Map();
-  try {
-    const { matchCatalog: matchCatalog2 } = await Promise.resolve().then(() => (init_catalog(), catalog_exports));
-    const { assessCatalog: assessCatalog2, verdictMark: verdictMark2 } = await Promise.resolve().then(() => (init_fit(), fit_exports));
-    const { all } = await assessCatalog2();
-    for (const id of ids) {
-      const cm = matchCatalog2(id);
-      if (!cm) continue;
-      const hit = all.find((x) => x.model.id === cm.id);
-      if (hit) out.set(id, verdictMark2(hit.a));
-    }
-  } catch {
-  }
-  return out;
-}
-async function testConnection(baseUrl, model, apiKey) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2e4);
-  const started = Date.now();
-  try {
-    const res = await fetch(baseUrl.replace(/\/$/, "") + "/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "content-type": "application/json", ...apiKey ? { authorization: `Bearer ${apiKey}` } : {} },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: "Reply with the single word: ok" }],
-        max_tokens: 8,
-        temperature: 0
-      })
-    });
-    if (!res.ok) {
-      const body = (await res.text().catch(() => "")).slice(0, 160);
-      return { ok: false, detail: `HTTP ${res.status}${body ? ` \u2014 ${body}` : ""}` };
-    }
-    const json = await res.json().catch(() => ({}));
-    const reply = json?.choices?.[0]?.message?.content?.trim() ?? "(empty)";
-    return { ok: true, detail: `model answered "${reply}" in ${Date.now() - started}ms` };
+    return { out, err: "" };
   } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    return { out: e.stdout?.toString() ?? "", err: (e.stderr?.toString() || e.message).slice(0, 200) };
+  }
+}
+function gitRootOf(file, maxDepth = 4) {
+  let dir = existsSync2(file) && statSync(file).isFile() ? dirname(file) : file;
+  for (let i = 0; i < maxDepth; i++) {
+    if (existsSync2(join2(dir, ".git"))) return dir;
+    const up = dirname(dir);
+    if (up === dir) return void 0;
+    dir = up;
+  }
+  return void 0;
+}
+function newestMtime(dir) {
+  let newest = 0;
+  const walk = (d) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const p = join2(d, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else newest = Math.max(newest, statSync(p).mtimeMs);
+    }
+  };
+  walk(dir);
+  return newest;
+}
+async function checkServerModels(baseUrl, model) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5e3);
+  try {
+    const res = await fetch(baseUrl.replace(/\/$/, "") + "/models", { signal: controller.signal });
+    if (!res.ok) return { reachable: false, models: [] };
+    const json = await res.json().catch(() => ({}));
+    const models = (json?.data ?? []).map((m) => m?.id).filter(Boolean);
+    return { reachable: true, models };
+  } catch {
+    return { reachable: false, models: [] };
   } finally {
     clearTimeout(timer);
   }
 }
-async function printStatus() {
+async function runDoctor(opts = {}) {
+  const checks = [];
+  const say = (s) => {
+    if (!opts.quiet) console.log(s);
+  };
   const config = loadConfig();
-  const servers = await discoverLocalServers();
-  console.log(`config: ${configPath()}`);
-  if (config.baseUrl || config.model) {
-    console.log(`  model:   ${config.model ?? "(unset)"}`);
-    console.log(`  baseUrl: ${config.baseUrl ?? "(unset)"}`);
-    console.log(`  apiKey:  ${config.apiKey ? `${config.apiKey.slice(0, 7)}\u2026` : "(none)"}`);
-  } else {
-    console.log("  (no config yet \u2014 run `rein setup`)");
-  }
-  console.log("\nlocal servers:");
-  if (servers.length === 0) console.log("  (none running)");
-  for (const s of servers) console.log(`  ${s.provider.padEnd(10)} ${s.baseUrl}  ${s.models?.length ?? 0} model(s)`);
-  if (config.baseUrl && config.model) {
-    const r = await testConnection(config.baseUrl, config.model, config.apiKey);
-    console.log(`
-connection: ${r.ok ? C.green("\u2713 " + r.detail) : C.red("\u2717 " + r.detail)}`);
-  }
-}
-async function runSetup(opts) {
-  if (opts.status) {
-    await printStatus();
-    return 0;
-  }
-  console.log(C.bold("rein setup") + " \u2014 configure your model\n");
-  try {
-    const { profileHardware: profileHardware2, summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-    console.log(C.dim(`machine: ${summarizeHardware2(await profileHardware2())}`) + "\n");
-  } catch {
-  }
-  const servers = await discoverLocalServers();
-  if (servers.length > 0) {
-    console.log("local servers detected:");
-    servers.forEach((s, i) => {
-      const models = (s.models ?? []).slice(0, 4).join(", ") + ((s.models ?? []).length > 4 ? ", \u2026" : "");
-      console.log(`  ${C.green(String(i + 1))}. ${s.provider.padEnd(10)} ${C.dim(s.baseUrl)}  ${C.dim(models)}`);
+  {
+    const major = parseInt(process.versions.node.split(".")[0], 10);
+    checks.push({
+      name: "node",
+      status: major >= 18 ? "ok" : "fail",
+      detail: `v${process.versions.node}`,
+      fix: major >= 18 ? void 0 : "node \u226518 required (brew install node)"
     });
-  } else {
-    console.log(C.yellow("no local AI servers detected") + C.dim(" (ollama / LM Studio / llama.cpp / vLLM)"));
   }
-  console.log("");
-  const choices = [];
-  for (const s of servers) {
-    choices.push({ label: `${s.provider} (local)`, baseUrl: s.baseUrl, model: pickDefaultModelId(s.models ?? []), needsKey: false });
+  let binPath;
+  let repo;
+  {
+    const { out } = sh2("command -v rein");
+    binPath = out.trim() || void 0;
+    if (!binPath) {
+      checks.push({ name: "bin", status: "fail", detail: "rein not on PATH", fix: "curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash" });
+    } else {
+      let real = binPath;
+      try {
+        real = realpathSync(binPath);
+      } catch {
+      }
+      repo = gitRootOf(real);
+      const distOk = repo && existsSync2(join2(repo, "dist", "rein.js"));
+      checks.push({
+        name: "bin",
+        status: distOk ? "ok" : "fail",
+        detail: binPath + (repo ? ` \u2192 ${repo}` : ""),
+        fix: distOk ? void 0 : "install is missing dist/rein.js \u2014 reinstall (curl one-liner above)"
+      });
+    }
   }
-  for (const [name, p] of Object.entries(PROVIDER_PRESETS).slice(4)) {
-    choices.push({ label: `${name} (cloud)`, baseUrl: p.baseUrl, needsKey: true, keyEnv: p.keyEnv });
-  }
-  choices.push({ label: "custom OpenAI-compatible endpoint", baseUrl: "", needsKey: true });
-  const customIndex = choices.length - 1;
-  let pick;
-  if (opts.yes) {
-    const config = loadConfig();
-    pick = servers.length > 0 ? choices[0] : config.baseUrl && config.model ? { label: "existing config", baseUrl: config.baseUrl, model: config.model, needsKey: false } : choices[customIndex];
-    console.log(C.dim(`  (--yes) picked: ${pick.label}`));
-  } else {
-    console.log(choices.map((c, i) => `  ${i + 1}. ${c.label}`).join("\n") + "\n");
-    const defIdx = servers.length > 0 ? 0 : customIndex;
-    const idx = await askChoice(`choose provider [${defIdx + 1}]: `, choices.length, defIdx + 1);
-    pick = choices[idx];
-  }
-  let baseUrl = pick.baseUrl ?? "";
-  let model = pick.model;
-  let apiKey;
-  if (baseUrl === "") {
-    baseUrl = (await askLine("base URL (OpenAI-compatible, e.g. http://localhost:11434/v1): ")).replace(/\/$/, "");
-  }
-  if (!baseUrl) {
-    console.log(C.red("no base URL \u2014 nothing to configure"));
-    return 1;
-  }
-  if (!model) {
-    try {
-      const res = await fetch(baseUrl + "/models", { signal: AbortSignal.timeout(3e3) });
-      if (res.ok) {
-        const json = await res.json();
-        const ids = (json?.data ?? []).map((m) => m.id).filter(Boolean);
-        if (ids.length > 0) {
-          const marks = await fitMarks(ids);
-          console.log(`models on ${baseUrl}  ${C.dim("(fit marks from your hardware)")}:`);
-          ids.slice(0, 20).forEach((id, i) => console.log(`  ${i + 1}. ${id}${marks.get(id) ? C.dim(marks.get(id)) : ""}`));
-          const preferred = pickDefaultModelId(ids);
-          const defIdx = Math.max(0, ids.indexOf(preferred ?? ""));
-          if (!opts.yes) {
-            const n = await askChoice(`choose model [${defIdx + 1}]: `, ids.length, defIdx + 1);
-            model = ids[n];
-          } else {
-            model = ids[defIdx];
-          }
+  if (repo) {
+    const local = sh2("git -C " + JSON.stringify(repo) + " rev-parse HEAD").out.trim();
+    const remote = sh2("git -C " + JSON.stringify(repo) + " ls-remote origin main", { timeout: 1e4 });
+    if (remote.err) {
+      checks.push({ name: "repo", status: "warn", detail: `@ ${local.slice(0, 7)} (offline \u2014 could not compare to origin)` });
+    } else {
+      const remoteSha = remote.out.trim().split(/\s+/)[0];
+      checks.push({
+        name: "repo",
+        status: remoteSha && remoteSha === local ? "ok" : "fail",
+        detail: `local ${local.slice(0, 7)} / origin ${remoteSha?.slice(0, 7) ?? "?"}`,
+        fix: remoteSha && remoteSha !== local ? "git -C " + repo + " pull --ff-only" : void 0,
+        autoFix: async () => {
+          const r = sh2("git -C " + JSON.stringify(repo) + " pull --ff-only", { timeout: 3e4 });
+          if (r.err) throw new Error(r.err);
+          return "git pull --ff-only";
         }
+      });
+    }
+  }
+  if (repo) {
+    const bundle = join2(repo, "dist", "rein.js");
+    if (!existsSync2(bundle)) {
+      checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => {
+        const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
+        if (r.err) throw new Error(r.err);
+        return "npm run bundle";
+      } });
+    } else {
+      const bundleMtime = statSync(bundle).mtimeMs;
+      const srcMtime = newestMtime(join2(repo, "src"));
+      const fresh = bundleMtime >= srcMtime;
+      checks.push({
+        name: "bundle",
+        status: fresh ? "ok" : "fail",
+        detail: fresh ? "dist is current" : "dist is older than src",
+        fix: fresh ? void 0 : "npm run bundle",
+        autoFix: fresh ? void 0 : async () => {
+          const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
+          if (r.err) throw new Error(r.err);
+          return "npm run bundle";
+        }
+      });
+    }
+  }
+  const hasConfig = Boolean(config.model && config.baseUrl);
+  checks.push({
+    name: "config",
+    status: hasConfig ? "ok" : "fail",
+    detail: hasConfig ? `model=${config.model} base=${config.baseUrl}` : "~/.rein/config.json missing or incomplete",
+    fix: hasConfig ? void 0 : "rein setup"
+  });
+  let models = [];
+  let reachable = false;
+  if (hasConfig) {
+    ({ reachable, models } = await checkServerModels(config.baseUrl, config.model));
+    if (!reachable) {
+      checks.push({ name: "server", status: "fail", detail: `${config.baseUrl} not answering /models (5s)`, fix: "start the model server (ollama serve) or fix baseUrl" });
+    } else {
+      const listed = models.some((m) => m === config.model || m.startsWith(config.model));
+      checks.push({
+        name: "server",
+        status: listed ? "ok" : "fail",
+        detail: `${models.length} model(s) listed` + (listed ? ", configured model present" : `, "${config.model}" NOT listed`),
+        fix: listed ? void 0 : `ollama pull ${config.model}`,
+        autoFix: listed ? void 0 : async () => {
+          const r = sh2(`ollama pull ${JSON.stringify(config.model)}`, { timeout: 3e5 });
+          if (r.err) throw new Error(r.err);
+          return `ollama pull ${config.model}`;
+        }
+      });
+    }
+  }
+  const localish = /localhost|127\.0\.0\.1|192\.168\.|10\./.test(config.baseUrl ?? "");
+  if (hasConfig && localish) {
+    try {
+      const profile = await profileHardware();
+      const entry = matchCatalog(config.model);
+      if (!entry) {
+        checks.push({ name: "hardware", status: "ok", detail: `machine: ${profile.cpu} \xB7 ${Math.round(profile.totalMemoryBytes / 2 ** 30)} GB (model not in catalog \u2014 fit unchecked)` });
+      } else {
+        const fit = bestAssessment(profile, entry);
+        let bestPick = "";
+        if (fit.verdict === "no") {
+          const fitting = CATALOG.map((m) => ({ m, a: bestAssessment(profile, m) })).filter(({ a }) => a.verdict === "fits").sort((x, y) => (y.a.estTokS ?? 0) - (x.a.estTokS ?? 0));
+          bestPick = fitting.length ? fitting[0].m.name : "none fits on this machine";
+        }
+        checks.push({
+          name: "hardware",
+          status: fit.verdict === "no" ? "warn" : "ok",
+          detail: `${entry.name} \u2192 ${fit.verdict} (${(fit.totalBytes / 2 ** 30).toFixed(1)} GiB footprint, est. ${fit.estTokS?.toFixed(0) ?? "?"} tok/s)`,
+          fix: fit.verdict === "no" ? `best pick here: ${bestPick} (see rein hardware)` : void 0
+        });
       }
     } catch {
-    }
-    if (!model && !opts.yes) model = await askLine("model id: ");
-  }
-  if (!model) {
-    console.log(C.red("no model id available \u2014 start a server or pick one manually, then re-run `rein setup`"));
-    return 1;
-  }
-  if (pick.needsKey) {
-    const envKey = pick.keyEnv ? process.env[pick.keyEnv] : void 0;
-    if (envKey) {
-      apiKey = envKey;
-      console.log(C.dim(`  using ${pick.keyEnv} from environment`));
-    } else if (!opts.yes) {
-      const secret = await askSecret("API key (Enter to skip): ");
-      if (secret) apiKey = secret;
+      checks.push({ name: "hardware", status: "warn", detail: "hardware profile failed (continuing)" });
     }
   }
-  console.log(`
-model:   ${model}`);
-  console.log(`baseURL: ${baseUrl}`);
-  if (apiKey) console.log(`apiKey:  ${apiKey.slice(0, 7)}\u2026`);
-  const test = await testConnection(baseUrl, model, apiKey);
-  if (test.ok) {
-    console.log(C.green(`\u2713 connection test passed \u2014 ${test.detail}`));
-  } else {
-    console.log(C.yellow(`\u26A0 connection test failed \u2014 ${test.detail}`));
-    if (!opts.yes) {
-      const keep = await askLine("save the config anyway? [y/N]: ");
-      if (!/^y(es)?$/i.test(keep)) {
-        console.log("not saved. Fix the endpoint and run `rein setup` again.");
-        return 1;
+  const cfgPath = join2(homedir2(), ".rein", "config.json");
+  if (existsSync2(cfgPath) && (config.apiKey || apiKeyFor(config.provider))) {
+    const mode = lstatSync(cfgPath).mode & 511;
+    checks.push({
+      name: "perms",
+      status: (mode & 63) === 0 ? "ok" : "warn",
+      detail: `config mode ${mode.toString(8)} (apiKey present)`,
+      fix: (mode & 63) === 0 ? void 0 : "chmod 600 " + cfgPath,
+      autoFix: (mode & 63) === 0 ? void 0 : async () => {
+        const r = sh2(`chmod 600 ${JSON.stringify(cfgPath)}`);
+        if (r.err) throw new Error(r.err);
+        return "chmod 600 " + cfgPath;
+      }
+    });
+  }
+  try {
+    const { statfsSync } = await import("node:fs");
+    const free = statfsSync(homedir2()).bavail * statfsSync(homedir2()).bsize;
+    const GiB3 = free / 2 ** 30;
+    checks.push({ name: "disk", status: GiB3 >= 1 ? "ok" : "warn", detail: `${GiB3.toFixed(1)} GiB free in $HOME` });
+  } catch {
+    checks.push({ name: "disk", status: "warn", detail: "could not statfs $HOME" });
+  }
+  const fixed = [];
+  if (opts.fix) {
+    for (const c of checks) {
+      if (c.status === "fail" && c.autoFix) {
+        say(dim(`fixing ${c.name}: ${c.fix ?? ""} \u2026`));
+        try {
+          const what = await c.autoFix();
+          c.status = "ok";
+          c.detail += ` (fixed: ${what})`;
+          fixed.push(c.name);
+          say(green(`  \u2713 ${c.name} repaired`));
+        } catch (e) {
+          c.detail += ` (fix failed: ${e.message?.slice(0, 80)})`;
+          say(red(`  \u2717 ${c.name}: ${e.message?.slice(0, 80)}`));
+        }
       }
     }
   }
-  saveConfig({ baseUrl, model, ...apiKey ? { apiKey } : {} });
-  console.log(`
-${C.green("\u2713 config saved to " + configPath())}`);
-  console.log(`
-try it:`);
-  console.log(`  rein -p "hello, what model are you?"`);
-  console.log(`  rein            # interactive session in this directory`);
-  return 0;
+  const healthy = checks.filter((c) => c.status === "ok").length;
+  const result = { healthy, total: checks.length, fixed, checks };
+  if (!opts.quiet) {
+    for (const c of checks) {
+      const mark = c.status === "ok" ? green("\u2713") : c.status === "warn" ? yellow("\u25B3") : red("\u2717");
+      const fix = c.fix && c.status !== "ok" ? dim(`  \u2192 ${c.fix}`) : "";
+      console.log(`  ${mark} ${c.name.padEnd(10)} ${c.detail}${fix}`);
+    }
+    const bad = checks.length - healthy;
+    const line = bad === 0 ? green(`${healthy}/${checks.length} healthy`) + (fixed.length ? dim(` (${fixed.length} self-healed)`) : "") : red(`${healthy}/${checks.length} healthy, ${bad} problem${bad > 1 ? "s" : ""}`) + yellow(bad > 0 ? " \u2014 run `rein doctor --fix` to auto-repair" : "");
+    console.log(line);
+  }
+  return result;
 }
-var C, lineQueue, lineWaiter, inputClosed, manualClose, rl;
-var init_setup = __esm({
-  "src/harness/setup.ts"() {
+var init_doctor = __esm({
+  "src/harness/doctor.ts"() {
+    init_ansi();
     init_models();
-    C = {
-      dim: (s) => `\x1B[2m${s}\x1B[0m`,
-      green: (s) => `\x1B[32m${s}\x1B[0m`,
-      red: (s) => `\x1B[31m${s}\x1B[0m`,
-      yellow: (s) => `\x1B[33m${s}\x1B[0m`,
-      bold: (s) => `\x1B[1m${s}\x1B[0m`
-    };
-    lineQueue = [];
-    inputClosed = false;
-    manualClose = false;
+    init_catalog();
+    init_fit();
+    init_profile();
   }
 });
 
@@ -1316,8 +1278,8 @@ var init_event_stream = __esm({
       constructor(isComplete, extractResult) {
         this.isComplete = isComplete ?? (() => false);
         this.extractResult = extractResult ?? ((event) => event);
-        this.finalResultPromise = new Promise((resolve3) => {
-          this.resolveFinalResult = resolve3;
+        this.finalResultPromise = new Promise((resolve4) => {
+          this.resolveFinalResult = resolve4;
         });
       }
       push(event) {
@@ -1346,7 +1308,7 @@ var init_event_stream = __esm({
           if (this.queue.length > 0) yield this.queue.shift();
           else if (this.done) return;
           else {
-            const result = await new Promise((resolve3) => this.waiting.push(resolve3));
+            const result = await new Promise((resolve4) => this.waiting.push(resolve4));
             if (result.done) return;
             yield result.value;
           }
@@ -1827,12 +1789,12 @@ Rules for tool blocks:
 });
 
 // src/ai/compat.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, existsSync as existsSync3 } from "node:fs";
+import { readFileSync as readFileSync2, writeFileSync, mkdirSync, existsSync as existsSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join3 } from "node:path";
 function readStore() {
   try {
-    if (existsSync3(storePath())) return JSON.parse(readFileSync3(storePath(), "utf8"));
+    if (existsSync3(storePath())) return JSON.parse(readFileSync2(storePath(), "utf8"));
   } catch {
   }
   return {};
@@ -1846,9 +1808,9 @@ function decideToolMode(provider, modelId, forced = "auto") {
   if (forced !== "auto") {
     const mode = { mode: forced, source: "forced" };
     try {
-      mkdirSync2(join3(homedir3(), ".rein"), { recursive: true });
+      mkdirSync(join3(homedir3(), ".rein"), { recursive: true });
       store[key] = mode;
-      writeFileSync2(storePath(), JSON.stringify(store, null, 2));
+      writeFileSync(storePath(), JSON.stringify(store, null, 2));
     } catch {
     }
     return mode;
@@ -1862,10 +1824,10 @@ function decideToolMode(provider, modelId, forced = "auto") {
 }
 function recordDecision(provider, modelId, mode, source) {
   try {
-    mkdirSync2(join3(homedir3(), ".rein"), { recursive: true });
+    mkdirSync(join3(homedir3(), ".rein"), { recursive: true });
     const store = readStore();
     store[keyFor(provider, modelId)] = { mode, source };
-    writeFileSync2(storePath(), JSON.stringify(store, null, 2));
+    writeFileSync(storePath(), JSON.stringify(store, null, 2));
   } catch {
   }
 }
@@ -1922,13 +1884,13 @@ var init_compat = __esm({
 
 // src/harness/system-prompt.ts
 import { existsSync as existsSync4 } from "node:fs";
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import { join as join4 } from "node:path";
 function readProjectInstructions(cwd) {
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
     const path2 = join4(cwd, name);
     if (existsSync4(path2)) {
-      const text = readFileSync4(path2, "utf8").trim();
+      const text = readFileSync3(path2, "utf8").trim();
       if (text) return `Project instructions:
 ${text}`;
     }
@@ -1938,7 +1900,7 @@ ${text}`;
 function readLessons(cwd) {
   const path2 = join4(cwd, "LESSONS.md");
   if (!existsSync4(path2)) return void 0;
-  const text = readFileSync4(path2, "utf8").trim();
+  const text = readFileSync3(path2, "utf8").trim();
   if (!text) return void 0;
   return `Lessons from previous sessions (trust but verify):
 ${text.slice(0, 4e3)}`;
@@ -2022,7 +1984,7 @@ var init_system_prompt = __esm({
 });
 
 // src/harness/tools/read.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
 var readTool, read_default;
 var init_read = __esm({
   "src/harness/tools/read.ts"() {
@@ -2042,7 +2004,7 @@ var init_read = __esm({
         const path2 = args.path;
         let text;
         try {
-          text = readFileSync5(path2, "utf8");
+          text = readFileSync4(path2, "utf8");
         } catch (err) {
           return { content: `read failed: ${err.message}`, isError: true };
         }
@@ -2072,8 +2034,8 @@ var init_read = __esm({
 });
 
 // src/harness/tools/write.ts
-import { writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "node:fs";
-import { dirname } from "node:path";
+import { writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "node:fs";
+import { dirname as dirname2 } from "node:path";
 var writeTool, write_default;
 var init_write = __esm({
   "src/harness/tools/write.ts"() {
@@ -2092,8 +2054,8 @@ var init_write = __esm({
         const path2 = args.path;
         const content = args.content;
         try {
-          mkdirSync3(dirname(path2), { recursive: true });
-          writeFileSync3(path2, content);
+          mkdirSync2(dirname2(path2), { recursive: true });
+          writeFileSync2(path2, content);
         } catch (err) {
           return { content: `write failed: ${err.message}`, isError: true };
         }
@@ -2106,7 +2068,7 @@ var init_write = __esm({
 });
 
 // src/harness/tools/edit.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
 function countOccurrences(text, needle) {
   let count = 0;
   let i = text.indexOf(needle);
@@ -2146,7 +2108,7 @@ var init_edit = __esm({
         const edits = args.edits;
         let text;
         try {
-          text = readFileSync6(path2, "utf8");
+          text = readFileSync5(path2, "utf8");
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -2177,7 +2139,7 @@ var init_edit = __esm({
           text = text.slice(0, r.start) + edit.newText + text.slice(r.end);
         }
         try {
-          writeFileSync4(path2, text);
+          writeFileSync3(path2, text);
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -2357,7 +2319,7 @@ var init_find = __esm({
 });
 
 // src/harness/tools/ls.ts
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { join as join5 } from "node:path";
 var lsTool, ls_default;
 var init_ls = __esm({
@@ -2383,7 +2345,7 @@ var init_ls = __esm({
           if (lines.length >= limit) return;
           let names;
           try {
-            names = readdirSync(dir, { withFileTypes: true }).map((e) => e.name).sort();
+            names = readdirSync2(dir, { withFileTypes: true }).map((e) => e.name).sort();
           } catch (err) {
             lines.push(`${prefix}${dir}: ${err.message}`);
             return;
@@ -2395,7 +2357,7 @@ var init_ls = __esm({
             }
             let isDir = false;
             try {
-              isDir = statSync(join5(dir, name)).isDirectory();
+              isDir = statSync2(join5(dir, name)).isDirectory();
             } catch {
               isDir = false;
             }
@@ -2559,14 +2521,14 @@ __export(gates_exports, {
 import { execFile as execFile5 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
 import { existsSync as existsSync5 } from "node:fs";
-import { dirname as dirname2, isAbsolute, join as join6, resolve } from "node:path";
+import { dirname as dirname3, isAbsolute, join as join6, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 var execFileAsync4, here, UNLAZY_CANDIDATES, UNLAZY_DIR, MODES, gatesTool, gates_default;
 var init_gates = __esm({
   "src/harness/tools/gates.ts"() {
     init_truncate();
     execFileAsync4 = promisify5(execFile5);
-    here = dirname2(fileURLToPath(import.meta.url));
+    here = dirname3(fileURLToPath(import.meta.url));
     UNLAZY_CANDIDATES = [
       resolve(here, "..", "..", "..", "vendor", "unlazy"),
       resolve(here, "..", "vendor", "unlazy")
@@ -2724,7 +2686,7 @@ function requestApproval(toolName, toolInput, timeoutSec) {
   }
   postEvent(request2, { nodeterm_pending_id: pendingId });
   const deadline = Date.now() + wait * 1e3;
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     const tick = () => {
       let answer = "";
       try {
@@ -2743,7 +2705,7 @@ function requestApproval(toolName, toolInput, timeoutSec) {
           { hook_event_name: "PostToolUse", tool_name: toolName, hookSpecificOutput: { hookEventName: "PostToolUse" } },
           { nodeterm_answered: answer }
         );
-        resolve3(answer);
+        resolve4(answer);
         return;
       }
       if (Date.now() >= deadline) {
@@ -2751,7 +2713,7 @@ function requestApproval(toolName, toolInput, timeoutSec) {
           fs.rmSync(requestFile, { force: true });
         } catch {
         }
-        resolve3("timeout");
+        resolve4("timeout");
         return;
       }
       setTimeout(tick, 500);
@@ -2902,22 +2864,617 @@ var init_runner = __esm({
   }
 });
 
-// src/harness/loop.ts
-var loop_exports = {};
-__export(loop_exports, {
-  gitAvailable: () => gitAvailable,
-  runExperimentLoop: () => runExperimentLoop
+// src/harness/improve.ts
+var improve_exports = {};
+__export(improve_exports, {
+  runImproveLoop: () => runImproveLoop
 });
-import { execFileSync } from "node:child_process";
-import { existsSync as existsSync6, readFileSync as readFileSync8, appendFileSync } from "node:fs";
-import { join as join8 } from "node:path";
+import { execFileSync as execFileSync2 } from "node:child_process";
+import { cpSync, existsSync as existsSync6, mkdtempSync, readFileSync as readFileSync7, appendFileSync, rmSync as rmSync2 } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as join8, dirname as dirname4, resolve as resolve2 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { randomUUID as randomUUID2 } from "node:crypto";
-function sh2(cmd, cwd) {
-  return execFileSync("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
+function sh3(cmd, cwd) {
+  return execFileSync2("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function gitAvailable(cwd) {
   try {
-    sh2("git rev-parse --is-inside-work-tree", cwd);
+    sh3("git rev-parse --is-inside-work-tree", cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function runSmokeTest(repoDir) {
+  const run = (dir2) => execFileSync2("node", ["--experimental-strip-types", "test/smoke.ts"], {
+    cwd: dir2,
+    encoding: "utf8",
+    timeout: 12e4,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const underNodeModules = repoDir.split(/[\\/]/).includes("node_modules");
+  const dir = underNodeModules ? mkdtempSync(join8(tmpdir(), "rein-smoke-")) : repoDir;
+  if (dir !== repoDir) for (const name of ["src", "test", "vendor"]) cpSync(join8(repoDir, name), join8(dir, name), { recursive: true });
+  try {
+    const out = run(dir);
+    if (dir !== repoDir) rmSync2(dir, { recursive: true, force: true });
+    return { pass: true, output: out };
+  } catch (err) {
+    if (dir !== repoDir) rmSync2(dir, { recursive: true, force: true });
+    return { pass: false, output: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+  }
+}
+function harnessLessons(repoDir) {
+  const path2 = join8(repoDir, "LESSONS.md");
+  if (!existsSync6(path2)) return "";
+  const text = readFileSync7(path2, "utf8");
+  const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
+  return m?.[1]?.trim() ?? "";
+}
+async function runImproveLoop(opts) {
+  const repoDir = REIN_REPO;
+  const maxIters = opts.maxIterations ?? 5;
+  const goal = opts.goal ?? "";
+  const useGit = gitAvailable(repoDir);
+  if (!useGit) {
+    console.log(yellow(`not a git repo (${repoDir}) \u2014 running without keep/discard; review changes manually`));
+  }
+  const runner = await createRunner({
+    ...opts,
+    cwd: repoDir,
+    systemPrompt: buildImprovePrompt(repoDir),
+    maxTurns: 40
+  });
+  console.log(
+    gray(
+      `rein improve \xB7 target: ${repoDir}
+model: ${runner.model.provider}/${runner.model.id} \xB7 max ${maxIters} iterations \xB7 ${useGit ? "git keep/discard" : "no git"}
+`
+    )
+  );
+  const lessons = harnessLessons(repoDir);
+  const queueText = [
+    goal ? `The user's goal this run: ${goal}` : "No explicit goal. Work through the harness weaknesses below.",
+    "",
+    lessons ? `Known harness weaknesses (from LESSONS.md):
+${lessons}` : "(no harness lessons recorded yet \u2014 look for the weakest part of the harness by reading the code)"
+  ].join("\n");
+  let iterations = 0;
+  let improved = 0;
+  while (iterations < maxIters) {
+    iterations++;
+    const tag = randomUUID2().slice(0, 8);
+    console.log(`
+${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
+    const prompt = iterations === 1 ? queueText + "\n\nPick the single most concrete weakness and fix it with the smallest change that works. Then run the smoke test and report the result as: RESULT: improved | no-change | failed" : "Continue: pick the next concrete weakness (not the one you just fixed). Same rules. Report as: RESULT: improved | no-change | failed";
+    let outcome = "failed";
+    let report = "";
+    try {
+      const messages = await runner.run({ role: "user", content: prompt, timestamp: Date.now() });
+      const lastText = messages.filter((m) => m.role === "assistant").at(-1)?.content.filter((c) => c.type === "text").map((c) => c.text).join("");
+      report = lastText ?? "";
+      if (/RESULT:\s*improved/i.test(report)) outcome = "improved";
+      else if (/RESULT:\s*no-change/i.test(report)) outcome = "no-change";
+    } catch (err) {
+      console.log(red(`run failed: ${err.message}`));
+      outcome = "failed";
+    }
+    const dirty = useGit ? sh3("git status --porcelain", repoDir) : "unknown";
+    if (outcome === "improved") {
+      if (!useGit || dirty && dirty.length > 0) {
+        const test = runSmokeTest(repoDir);
+        if (test.pass) {
+          if (useGit) {
+            sh3(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
+          }
+          appendFileSync(join8(repoDir, "LESSONS.md"), `
+- [improve ${tag}] fixed: ${firstLine(report)}
+`);
+          improved++;
+          console.log(green(`kept ${dim(tag)} \u2014 smoke test passed${useGit ? " \xB7 committed" : ""}`));
+        } else {
+          if (useGit) sh3("git checkout . && git clean -fd", repoDir);
+          console.log(red(`discarded ${dim(tag)} \u2014 smoke test failed`));
+          console.log(dim(test.output.slice(-600)));
+          appendFileSync(join8(repoDir, "LESSONS.md"), `
+- [improve ${tag}] tried and failed: ${firstLine(report)}
+`);
+        }
+      } else {
+        console.log(yellow(`${dim(tag)} claimed improved but the tree is clean \u2014 counting as no-change`));
+        outcome = "no-change";
+      }
+    } else if (outcome === "no-change") {
+      if (useGit && dirty) sh3("git checkout . && git clean -fd", repoDir);
+      console.log(gray(`${dim(tag)}: no change worth making \u2014 ${firstLine(report) || "no report"}`));
+    } else {
+      if (useGit) sh3("git checkout . && git clean -fd", repoDir);
+      console.log(red(`${dim(tag)}: failed \u2014 ${firstLine(report) || (report ? report.slice(0, 120) : "no report")}`));
+    }
+    if (outcome === "no-change") {
+      console.log(gray("agent found nothing more to improve \u2014 stopping"));
+      break;
+    }
+  }
+  console.log(`
+${bold("done")}: ${improved} improvement(s) kept out of ${iterations} iteration(s)`);
+}
+function firstLine(text) {
+  return (text.split("\n").find((l) => l.trim().length > 0) ?? "").trim().slice(0, 160);
+}
+var here2, REIN_REPO;
+var init_improve = __esm({
+  "src/harness/improve.ts"() {
+    init_ansi();
+    init_runner();
+    init_system_prompt();
+    here2 = dirname4(fileURLToPath2(import.meta.url));
+    REIN_REPO = [here2, resolve2(here2, ".."), resolve2(here2, "..", "..")].find((dir) => existsSync6(join8(dir, "test", "smoke.ts"))) ?? resolve2(here2, "..", "..");
+  }
+});
+
+// src/harness/heartbeat.ts
+var heartbeat_exports = {};
+__export(heartbeat_exports, {
+  HEARTBEAT_TEMPLATE: () => HEARTBEAT_TEMPLATE,
+  parseHeartbeat: () => parseHeartbeat,
+  runHeartbeat: () => runHeartbeat
+});
+import { appendFileSync as appendFileSync2, existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync8, writeFileSync as writeFileSync5 } from "node:fs";
+import { homedir as homedir5 } from "node:os";
+import { isAbsolute as isAbsolute2, join as join9, resolve as resolve3 } from "node:path";
+function parseHeartbeat(text) {
+  const tasks = [];
+  let improveGoal;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("#")) {
+      const m = line.match(/^#\s*improve\s*:\s*(.+)$/i);
+      if (m) improveGoal = m[1].trim();
+      continue;
+    }
+    tasks.push(line.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, ""));
+  }
+  return { tasks, improveGoal };
+}
+function resolveHeartbeatFile(explicit) {
+  if (explicit) return isAbsolute2(explicit) ? explicit : resolve3(explicit);
+  const local = resolve3(process.cwd(), "HEARTBEAT.md");
+  if (existsSync7(local)) return local;
+  return join9(homedir5(), ".rein", "HEARTBEAT.md");
+}
+function logBeat(result) {
+  const dir = join9(homedir5(), ".rein");
+  mkdirSync4(dir, { recursive: true });
+  const path2 = join9(dir, "heartbeat.log");
+  appendFileSync2(path2, JSON.stringify({
+    ts: (/* @__PURE__ */ new Date()).toISOString(),
+    file: result.file,
+    doctor: result.doctor,
+    tasks: result.tasks.map((t) => ({ ok: t.ok, line: t.line.slice(0, 120), text: t.text.slice(0, 400), error: t.error })),
+    improve: result.improve,
+    durationMs: result.durationMs
+  }) + "\n");
+  return path2;
+}
+async function runHeartbeat(opts = {}) {
+  const started = Date.now();
+  const say = (s) => {
+    if (!opts.quiet) console.log(s);
+  };
+  if (opts.init) {
+    const path2 = opts.file ? isAbsolute2(opts.file) ? opts.file : resolve3(opts.file) : resolve3(process.cwd(), "HEARTBEAT.md");
+    writeFileSync5(path2, HEARTBEAT_TEMPLATE);
+    say(green(`wrote ${path2} \u2014 edit it, then run: rein heartbeat`));
+    return 0;
+  }
+  const file = resolveHeartbeatFile(opts.file);
+  if (!existsSync7(file)) {
+    say(red(`no HEARTBEAT.md (looked in cwd and ~/.rein)`));
+    say(dim(`create one: rein heartbeat --init --file ${file}`));
+    return 1;
+  }
+  const { tasks, improveGoal } = parseHeartbeat(readFileSync8(file, "utf8"));
+  say(bold(`heartbeat \xB7 ${file}`) + dim(` \xB7 ${(/* @__PURE__ */ new Date()).toISOString()}`));
+  say(`
+${bold("1/4 self-heal")}`);
+  const doctor = await runDoctor({ fix: true, quiet: opts.quiet });
+  say(dim(`   doctor: ${doctor.healthy}/${doctor.total} healthy${doctor.fixed.length ? ` (${doctor.fixed.length} repaired)` : ""}`));
+  say(`
+${bold("2/4 tasks")}`);
+  const results = [];
+  if (tasks.length === 0) {
+    say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
+  } else if (!opts.model && !process.env.REIN_BASE_URL && !existsSync7(join9(homedir5(), ".rein", "config.json"))) {
+    say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
+    for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
+  } else {
+    const runner = await createRunner({ ...opts, cwd: process.cwd() });
+    for (let i = 0; i < tasks.length; i++) {
+      const line = tasks[i];
+      say(`   ${i + 1}/${tasks.length} ${dim(line.slice(0, 80))}`);
+      try {
+        const messages = await runner.run({ role: "user", content: line, timestamp: Date.now() });
+        const last = messages.filter((m) => m.role === "assistant").at(-1);
+        const text = (last?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("").trim();
+        const ok = !last || last.stopReason !== "error";
+        results.push({ line, ok, text: text.slice(0, 500), error: last?.stopReason === "error" ? last.errorMessage : void 0 });
+        say(ok ? green(`   \u2713 ${text.slice(0, 100)}`) : red(`   \u2717 ${last?.errorMessage ?? "error"}`));
+      } catch (e) {
+        results.push({ line, ok: false, text: "", error: e.message?.slice(0, 200) });
+        say(red(`   \u2717 ${e.message?.slice(0, 100)}`));
+      }
+    }
+  }
+  say(`
+${bold("3/4 self-advance")}`);
+  const goal = opts.improveGoal ?? (opts.improve ? "pick the weakest part of the harness and improve it" : improveGoal);
+  let improveNote = null;
+  if (goal) {
+    say(dim(`   goal: ${goal}`));
+    try {
+      await runImproveLoop({ ...opts, cwd: process.cwd(), goal, maxIterations: 1, dryRun: false });
+      improveNote = goal;
+    } catch (e) {
+      improveNote = `${goal} (failed: ${e.message?.slice(0, 80)})`;
+      say(red(`   self-advance failed: ${e.message?.slice(0, 100)}`));
+    }
+  } else {
+    say(yellow("   skipped \u2014 set a goal with `# improve: <goal>` in HEARTBEAT.md or --improve"));
+  }
+  const logPath = logBeat({
+    file,
+    tasks: results,
+    doctor: { healthy: doctor.healthy, total: doctor.total, fixed: doctor.fixed },
+    improve: improveNote,
+    durationMs: Date.now() - started
+  });
+  say(`
+${bold("4/4 memory")}` + dim(`   beat logged \u2192 ${logPath}`));
+  const failed = results.filter((t) => !t.ok).length;
+  say(`
+${failed === 0 ? green("beat complete") : red(`beat complete \u2014 ${failed} task(s) failed`)} ${dim(`(${((Date.now() - started) / 1e3).toFixed(1)}s)`)}`);
+  return failed === 0 ? 0 : 1;
+}
+var HEARTBEAT_TEMPLATE;
+var init_heartbeat = __esm({
+  "src/harness/heartbeat.ts"() {
+    init_ansi();
+    init_doctor();
+    init_runner();
+    init_improve();
+    HEARTBEAT_TEMPLATE = `# HEARTBEAT.md \u2014 what the agent does on every \`rein heartbeat\`.
+#
+# Rules:
+#   - one task per line (leading -, * or a number is fine)
+#   - lines starting with # are comments \u2014 the agent never sees them
+#   - empty or comments only \u2192 idle beat: self-heal + log, no work
+#   - "# improve: <goal>" \u2192 after the tasks, run ONE self-improvement iteration with that goal
+#
+# Examples:
+# - confirm the model server still answers (run: rein doctor)
+# - scan ~/.rein/heartbeat.log for failed beats and summarize any pattern
+# # improve: keep the harness local-first and fast
+`;
+  }
+});
+
+// src/harness/setup.ts
+var setup_exports = {};
+__export(setup_exports, {
+  runSetup: () => runSetup
+});
+import { existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync9, writeFileSync as writeFileSync6 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
+import { join as join10 } from "node:path";
+import * as readline from "node:readline/promises";
+import { stdin, stdout } from "node:process";
+function configPath() {
+  return join10(homedir6(), ".rein", "config.json");
+}
+function saveConfig(patch) {
+  mkdirSync5(join10(homedir6(), ".rein"), { recursive: true });
+  let existing = {};
+  try {
+    if (existsSync8(configPath())) existing = JSON.parse(readFileSync9(configPath(), "utf8"));
+  } catch {
+  }
+  writeFileSync6(configPath(), JSON.stringify({ ...existing, ...patch }, null, 2) + "\n", { mode: 384 });
+}
+function promptRl() {
+  if (rl) return rl;
+  const r = readline.createInterface({ input: stdin, output: stdout });
+  rl = r;
+  r.on("line", (line) => {
+    const text = line.trim();
+    if (lineWaiter) {
+      const w = lineWaiter;
+      lineWaiter = void 0;
+      w(text);
+    } else {
+      lineQueue.push(text);
+    }
+  });
+  r.on("close", () => {
+    if (!manualClose) inputClosed = true;
+    manualClose = false;
+    if (lineWaiter) {
+      const w = lineWaiter;
+      lineWaiter = void 0;
+      w("");
+    }
+  });
+  return r;
+}
+async function askLine(prompt, def = "") {
+  promptRl();
+  stdout.write(prompt);
+  if (lineQueue.length > 0) return lineQueue.shift() || def;
+  if (inputClosed) return def;
+  return new Promise((resolve4) => {
+    lineWaiter = (text) => resolve4(text || def);
+  });
+}
+async function askChoice(prompt, count, def = 1) {
+  for (; ; ) {
+    const answer = (await askLine(prompt)).trim();
+    if (answer === "") return def - 1;
+    const n = Number.parseInt(answer, 10);
+    if (!Number.isNaN(n) && n >= 1 && n <= count) return n - 1;
+    stdout.write(C.yellow("  pick a number from the list\n"));
+  }
+}
+async function askSecret(prompt) {
+  if (!stdin.isTTY) return void 0;
+  manualClose = true;
+  rl?.close();
+  rl = void 0;
+  const wasRaw = stdin.isRaw;
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdout.write(prompt);
+  let value = "";
+  await new Promise((resolve4) => {
+    stdin.on("data", (chunk) => {
+      for (const ch of chunk.toString("utf8")) {
+        if (ch === "\r" || ch === "\n") {
+          stdin.pause();
+          resolve4();
+        } else if (ch === "" || ch === "") {
+          stdout.write("\n");
+          process.exit(ch === "" ? 130 : 143);
+        } else if (ch === "\x7F") {
+          if (value.length > 0) {
+            value = value.slice(0, -1);
+            stdout.write("\b \b");
+          }
+        } else if (ch >= " ") {
+          value += ch;
+          stdout.write("*");
+        }
+      }
+    });
+  });
+  stdout.write("\n");
+  if (wasRaw !== void 0) stdin.setRawMode(wasRaw);
+  return value;
+}
+async function fitMarks(ids) {
+  const out = /* @__PURE__ */ new Map();
+  try {
+    const { matchCatalog: matchCatalog2 } = await Promise.resolve().then(() => (init_catalog(), catalog_exports));
+    const { assessCatalog: assessCatalog2, verdictMark: verdictMark2 } = await Promise.resolve().then(() => (init_fit(), fit_exports));
+    const { all } = await assessCatalog2();
+    for (const id of ids) {
+      const cm = matchCatalog2(id);
+      if (!cm) continue;
+      const hit = all.find((x) => x.model.id === cm.id);
+      if (hit) out.set(id, verdictMark2(hit.a));
+    }
+  } catch {
+  }
+  return out;
+}
+async function testConnection(baseUrl, model, apiKey) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2e4);
+  const started = Date.now();
+  try {
+    const res = await fetch(baseUrl.replace(/\/$/, "") + "/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json", ...apiKey ? { authorization: `Bearer ${apiKey}` } : {} },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "Reply with the single word: ok" }],
+        max_tokens: 8,
+        temperature: 0
+      })
+    });
+    if (!res.ok) {
+      const body = (await res.text().catch(() => "")).slice(0, 160);
+      return { ok: false, detail: `HTTP ${res.status}${body ? ` \u2014 ${body}` : ""}` };
+    }
+    const json = await res.json().catch(() => ({}));
+    const reply = json?.choices?.[0]?.message?.content?.trim() ?? "(empty)";
+    return { ok: true, detail: `model answered "${reply}" in ${Date.now() - started}ms` };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function printStatus() {
+  const config = loadConfig();
+  const servers = await discoverLocalServers();
+  console.log(`config: ${configPath()}`);
+  if (config.baseUrl || config.model) {
+    console.log(`  model:   ${config.model ?? "(unset)"}`);
+    console.log(`  baseUrl: ${config.baseUrl ?? "(unset)"}`);
+    console.log(`  apiKey:  ${config.apiKey ? `${config.apiKey.slice(0, 7)}\u2026` : "(none)"}`);
+  } else {
+    console.log("  (no config yet \u2014 run `rein setup`)");
+  }
+  console.log("\nlocal servers:");
+  if (servers.length === 0) console.log("  (none running)");
+  for (const s of servers) console.log(`  ${s.provider.padEnd(10)} ${s.baseUrl}  ${s.models?.length ?? 0} model(s)`);
+  if (config.baseUrl && config.model) {
+    const r = await testConnection(config.baseUrl, config.model, config.apiKey);
+    console.log(`
+connection: ${r.ok ? C.green("\u2713 " + r.detail) : C.red("\u2717 " + r.detail)}`);
+  }
+}
+async function runSetup(opts) {
+  if (opts.status) {
+    await printStatus();
+    return 0;
+  }
+  console.log(C.bold("rein setup") + " \u2014 configure your model\n");
+  try {
+    const { profileHardware: profileHardware2, summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    console.log(C.dim(`machine: ${summarizeHardware2(await profileHardware2())}`) + "\n");
+  } catch {
+  }
+  const servers = await discoverLocalServers();
+  if (servers.length > 0) {
+    console.log("local servers detected:");
+    servers.forEach((s, i) => {
+      const models = (s.models ?? []).slice(0, 4).join(", ") + ((s.models ?? []).length > 4 ? ", \u2026" : "");
+      console.log(`  ${C.green(String(i + 1))}. ${s.provider.padEnd(10)} ${C.dim(s.baseUrl)}  ${C.dim(models)}`);
+    });
+  } else {
+    console.log(C.yellow("no local AI servers detected") + C.dim(" (ollama / LM Studio / llama.cpp / vLLM)"));
+  }
+  console.log("");
+  const choices = [];
+  for (const s of servers) {
+    choices.push({ label: `${s.provider} (local)`, baseUrl: s.baseUrl, model: pickDefaultModelId(s.models ?? []), needsKey: false });
+  }
+  for (const [name, p] of Object.entries(PROVIDER_PRESETS).slice(4)) {
+    choices.push({ label: `${name} (cloud)`, baseUrl: p.baseUrl, needsKey: true, keyEnv: p.keyEnv });
+  }
+  choices.push({ label: "custom OpenAI-compatible endpoint", baseUrl: "", needsKey: true });
+  const customIndex = choices.length - 1;
+  let pick;
+  if (opts.yes) {
+    const config = loadConfig();
+    pick = servers.length > 0 ? choices[0] : config.baseUrl && config.model ? { label: "existing config", baseUrl: config.baseUrl, model: config.model, needsKey: false } : choices[customIndex];
+    console.log(C.dim(`  (--yes) picked: ${pick.label}`));
+  } else {
+    console.log(choices.map((c, i) => `  ${i + 1}. ${c.label}`).join("\n") + "\n");
+    const defIdx = servers.length > 0 ? 0 : customIndex;
+    const idx = await askChoice(`choose provider [${defIdx + 1}]: `, choices.length, defIdx + 1);
+    pick = choices[idx];
+  }
+  let baseUrl = pick.baseUrl ?? "";
+  let model = pick.model;
+  let apiKey;
+  if (baseUrl === "") {
+    baseUrl = (await askLine("base URL (OpenAI-compatible, e.g. http://localhost:11434/v1): ")).replace(/\/$/, "");
+  }
+  if (!baseUrl) {
+    console.log(C.red("no base URL \u2014 nothing to configure"));
+    return 1;
+  }
+  if (!model) {
+    try {
+      const res = await fetch(baseUrl + "/models", { signal: AbortSignal.timeout(3e3) });
+      if (res.ok) {
+        const json = await res.json();
+        const ids = (json?.data ?? []).map((m) => m.id).filter(Boolean);
+        if (ids.length > 0) {
+          const marks = await fitMarks(ids);
+          console.log(`models on ${baseUrl}  ${C.dim("(fit marks from your hardware)")}:`);
+          ids.slice(0, 20).forEach((id, i) => console.log(`  ${i + 1}. ${id}${marks.get(id) ? C.dim(marks.get(id)) : ""}`));
+          const preferred = pickDefaultModelId(ids);
+          const defIdx = Math.max(0, ids.indexOf(preferred ?? ""));
+          if (!opts.yes) {
+            const n = await askChoice(`choose model [${defIdx + 1}]: `, ids.length, defIdx + 1);
+            model = ids[n];
+          } else {
+            model = ids[defIdx];
+          }
+        }
+      }
+    } catch {
+    }
+    if (!model && !opts.yes) model = await askLine("model id: ");
+  }
+  if (!model) {
+    console.log(C.red("no model id available \u2014 start a server or pick one manually, then re-run `rein setup`"));
+    return 1;
+  }
+  if (pick.needsKey) {
+    const envKey = pick.keyEnv ? process.env[pick.keyEnv] : void 0;
+    if (envKey) {
+      apiKey = envKey;
+      console.log(C.dim(`  using ${pick.keyEnv} from environment`));
+    } else if (!opts.yes) {
+      const secret = await askSecret("API key (Enter to skip): ");
+      if (secret) apiKey = secret;
+    }
+  }
+  console.log(`
+model:   ${model}`);
+  console.log(`baseURL: ${baseUrl}`);
+  if (apiKey) console.log(`apiKey:  ${apiKey.slice(0, 7)}\u2026`);
+  const test = await testConnection(baseUrl, model, apiKey);
+  if (test.ok) {
+    console.log(C.green(`\u2713 connection test passed \u2014 ${test.detail}`));
+  } else {
+    console.log(C.yellow(`\u26A0 connection test failed \u2014 ${test.detail}`));
+    if (!opts.yes) {
+      const keep = await askLine("save the config anyway? [y/N]: ");
+      if (!/^y(es)?$/i.test(keep)) {
+        console.log("not saved. Fix the endpoint and run `rein setup` again.");
+        return 1;
+      }
+    }
+  }
+  saveConfig({ baseUrl, model, ...apiKey ? { apiKey } : {} });
+  console.log(`
+${C.green("\u2713 config saved to " + configPath())}`);
+  console.log(`
+try it:`);
+  console.log(`  rein -p "hello, what model are you?"`);
+  console.log(`  rein            # interactive session in this directory`);
+  return 0;
+}
+var C, lineQueue, lineWaiter, inputClosed, manualClose, rl;
+var init_setup = __esm({
+  "src/harness/setup.ts"() {
+    init_models();
+    C = {
+      dim: (s) => `\x1B[2m${s}\x1B[0m`,
+      green: (s) => `\x1B[32m${s}\x1B[0m`,
+      red: (s) => `\x1B[31m${s}\x1B[0m`,
+      yellow: (s) => `\x1B[33m${s}\x1B[0m`,
+      bold: (s) => `\x1B[1m${s}\x1B[0m`
+    };
+    lineQueue = [];
+    inputClosed = false;
+    manualClose = false;
+  }
+});
+
+// src/harness/loop.ts
+var loop_exports = {};
+__export(loop_exports, {
+  gitAvailable: () => gitAvailable2,
+  runExperimentLoop: () => runExperimentLoop
+});
+import { execFileSync as execFileSync3 } from "node:child_process";
+import { existsSync as existsSync9, readFileSync as readFileSync10, appendFileSync as appendFileSync3 } from "node:fs";
+import { join as join11 } from "node:path";
+import { randomUUID as randomUUID3 } from "node:crypto";
+function sh4(cmd, cwd) {
+  return execFileSync3("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
+}
+function gitAvailable2(cwd) {
+  try {
+    sh4("git rev-parse --is-inside-work-tree", cwd);
     return true;
   } catch {
     return false;
@@ -2928,7 +3485,7 @@ function readMetric(output) {
   return m ? parseFloat(m[1]) : void 0;
 }
 function readMetricCommand(metricFile) {
-  const text = readFileSync8(metricFile, "utf8");
+  const text = readFileSync10(metricFile, "utf8");
   const m = text.match(/```\n([^\n`]+)\n```/);
   if (m) return m[1].trim();
   return text.trim().split("\n").filter((l) => l.trim() && !l.startsWith("#"))[0] ?? "";
@@ -2937,22 +3494,22 @@ async function runExperimentLoop(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join8(cwd, taskFile);
-  const metricPath = join8(cwd, metricFile);
-  if (!existsSync6(taskPath)) {
+  const taskPath = join11(cwd, taskFile);
+  const metricPath = join11(cwd, metricFile);
+  if (!existsSync9(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
-  if (!existsSync6(metricPath)) {
+  if (!existsSync9(metricPath)) {
     throw new Error(`No ${metricFile} in ${cwd} \u2014 put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
   }
-  const task = readFileSync8(taskPath, "utf8");
-  const metricDoc = readFileSync8(metricPath, "utf8");
+  const task = readFileSync10(taskPath, "utf8");
+  const metricDoc = readFileSync10(metricPath, "utf8");
   const metricCmd = readMetricCommand(metricDoc);
-  const useGit = gitAvailable(cwd);
+  const useGit = gitAvailable2(cwd);
   const maxIters = opts.maxIterations ?? 10;
   const runMetric = () => {
     try {
-      const out = execFileSync("bash", ["-c", metricCmd], { cwd, encoding: "utf8", timeout: 3e5 });
+      const out = execFileSync3("bash", ["-c", metricCmd], { cwd, encoding: "utf8", timeout: 3e5 });
       return readMetric(out);
     } catch (err) {
       console.log(dim(`metric run failed: ${err.stderr ?? err.message}`.slice(0, 300)));
@@ -2987,7 +3544,7 @@ Rules:
   let discarded = 0;
   let stale = 0;
   for (let i = 0; i < maxIters; i++) {
-    const tag = randomUUID2().slice(0, 8);
+    const tag = randomUUID3().slice(0, 8);
     console.log(`
 ${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
     try {
@@ -2995,7 +3552,7 @@ ${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
     } catch (err) {
       console.log(red(`run failed: ${err.message}`));
     }
-    const dirty = useGit ? sh2("git status --porcelain", cwd) : "";
+    const dirty = useGit ? sh4("git status --porcelain", cwd) : "";
     if (!dirty) {
       console.log(gray(`${dim(tag)}: no changes made`));
       if (++stale >= 3) {
@@ -3007,17 +3564,17 @@ ${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
     const metric = runMetric();
     if (metric === void 0) {
       console.log(yellow(`${dim(tag)}: metric could not be parsed \u2014 discarding`));
-      if (useGit) sh2("git checkout . && git clean -fd", cwd);
+      if (useGit) sh4("git checkout . && git clean -fd", cwd);
       discarded++;
       continue;
     }
     if (best === void 0 || metric > best) {
       best = metric;
-      if (useGit) sh2(`git add -A && git commit -m "loop: ${tag} METRIC=${metric}"`, cwd);
+      if (useGit) sh4(`git add -A && git commit -m "loop: ${tag} METRIC=${metric}"`, cwd);
       kept++;
       console.log(green(`${dim(tag)}: METRIC ${metric} (new best) \u2014 kept${useGit ? " \xB7 committed" : ""}`));
     } else {
-      if (useGit) sh2("git checkout . && git clean -fd", cwd);
+      if (useGit) sh4("git checkout . && git clean -fd", cwd);
       discarded++;
       console.log(gray(`${dim(tag)}: METRIC ${metric} (best was ${best}) \u2014 discarded`));
     }
@@ -3025,7 +3582,7 @@ ${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
   const summary = `
 loop complete: best METRIC=${best ?? "n/a"} \xB7 ${kept} kept \xB7 ${discarded} discarded`;
   console.log(bold(summary));
-  appendFileSync(join8(cwd, "LESSONS.md"), `
+  appendFileSync3(join11(cwd, "LESSONS.md"), `
 - [loop ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}] ${summary}
 `);
 }
@@ -3036,162 +3593,12 @@ var init_loop = __esm({
   }
 });
 
-// src/harness/improve.ts
-var improve_exports = {};
-__export(improve_exports, {
-  runImproveLoop: () => runImproveLoop
-});
-import { execFileSync as execFileSync2 } from "node:child_process";
-import { cpSync, existsSync as existsSync7, mkdtempSync, readFileSync as readFileSync9, appendFileSync as appendFileSync2, rmSync as rmSync2 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join as join9, dirname as dirname3, resolve as resolve2 } from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { randomUUID as randomUUID3 } from "node:crypto";
-function sh3(cmd, cwd) {
-  return execFileSync2("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
-}
-function gitAvailable2(cwd) {
-  try {
-    sh3("git rev-parse --is-inside-work-tree", cwd);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function runSmokeTest(repoDir) {
-  const run = (dir2) => execFileSync2("node", ["--experimental-strip-types", "test/smoke.ts"], {
-    cwd: dir2,
-    encoding: "utf8",
-    timeout: 12e4,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  const underNodeModules = repoDir.split(/[\\/]/).includes("node_modules");
-  const dir = underNodeModules ? mkdtempSync(join9(tmpdir(), "rein-smoke-")) : repoDir;
-  if (dir !== repoDir) for (const name of ["src", "test", "vendor"]) cpSync(join9(repoDir, name), join9(dir, name), { recursive: true });
-  try {
-    const out = run(dir);
-    if (dir !== repoDir) rmSync2(dir, { recursive: true, force: true });
-    return { pass: true, output: out };
-  } catch (err) {
-    if (dir !== repoDir) rmSync2(dir, { recursive: true, force: true });
-    return { pass: false, output: `${err.stdout ?? ""}${err.stderr ?? ""}` };
-  }
-}
-function harnessLessons(repoDir) {
-  const path2 = join9(repoDir, "LESSONS.md");
-  if (!existsSync7(path2)) return "";
-  const text = readFileSync9(path2, "utf8");
-  const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
-  return m?.[1]?.trim() ?? "";
-}
-async function runImproveLoop(opts) {
-  const repoDir = REIN_REPO;
-  const maxIters = opts.maxIterations ?? 5;
-  const goal = opts.goal ?? "";
-  const useGit = gitAvailable2(repoDir);
-  if (!useGit) {
-    console.log(yellow(`not a git repo (${repoDir}) \u2014 running without keep/discard; review changes manually`));
-  }
-  const runner = await createRunner({
-    ...opts,
-    cwd: repoDir,
-    systemPrompt: buildImprovePrompt(repoDir),
-    maxTurns: 40
-  });
-  console.log(
-    gray(
-      `rein improve \xB7 target: ${repoDir}
-model: ${runner.model.provider}/${runner.model.id} \xB7 max ${maxIters} iterations \xB7 ${useGit ? "git keep/discard" : "no git"}
-`
-    )
-  );
-  const lessons = harnessLessons(repoDir);
-  const queueText = [
-    goal ? `The user's goal this run: ${goal}` : "No explicit goal. Work through the harness weaknesses below.",
-    "",
-    lessons ? `Known harness weaknesses (from LESSONS.md):
-${lessons}` : "(no harness lessons recorded yet \u2014 look for the weakest part of the harness by reading the code)"
-  ].join("\n");
-  let iterations = 0;
-  let improved = 0;
-  while (iterations < maxIters) {
-    iterations++;
-    const tag = randomUUID3().slice(0, 8);
-    console.log(`
-${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
-    const prompt = iterations === 1 ? queueText + "\n\nPick the single most concrete weakness and fix it with the smallest change that works. Then run the smoke test and report the result as: RESULT: improved | no-change | failed" : "Continue: pick the next concrete weakness (not the one you just fixed). Same rules. Report as: RESULT: improved | no-change | failed";
-    let outcome = "failed";
-    let report = "";
-    try {
-      const messages = await runner.run({ role: "user", content: prompt, timestamp: Date.now() });
-      const lastText = messages.filter((m) => m.role === "assistant").at(-1)?.content.filter((c) => c.type === "text").map((c) => c.text).join("");
-      report = lastText ?? "";
-      if (/RESULT:\s*improved/i.test(report)) outcome = "improved";
-      else if (/RESULT:\s*no-change/i.test(report)) outcome = "no-change";
-    } catch (err) {
-      console.log(red(`run failed: ${err.message}`));
-      outcome = "failed";
-    }
-    const dirty = useGit ? sh3("git status --porcelain", repoDir) : "unknown";
-    if (outcome === "improved") {
-      if (!useGit || dirty && dirty.length > 0) {
-        const test = runSmokeTest(repoDir);
-        if (test.pass) {
-          if (useGit) {
-            sh3(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
-          }
-          appendFileSync2(join9(repoDir, "LESSONS.md"), `
-- [improve ${tag}] fixed: ${firstLine(report)}
-`);
-          improved++;
-          console.log(green(`kept ${dim(tag)} \u2014 smoke test passed${useGit ? " \xB7 committed" : ""}`));
-        } else {
-          if (useGit) sh3("git checkout . && git clean -fd", repoDir);
-          console.log(red(`discarded ${dim(tag)} \u2014 smoke test failed`));
-          console.log(dim(test.output.slice(-600)));
-          appendFileSync2(join9(repoDir, "LESSONS.md"), `
-- [improve ${tag}] tried and failed: ${firstLine(report)}
-`);
-        }
-      } else {
-        console.log(yellow(`${dim(tag)} claimed improved but the tree is clean \u2014 counting as no-change`));
-        outcome = "no-change";
-      }
-    } else if (outcome === "no-change") {
-      if (useGit && dirty) sh3("git checkout . && git clean -fd", repoDir);
-      console.log(gray(`${dim(tag)}: no change worth making \u2014 ${firstLine(report) || "no report"}`));
-    } else {
-      if (useGit) sh3("git checkout . && git clean -fd", repoDir);
-      console.log(red(`${dim(tag)}: failed \u2014 ${firstLine(report) || (report ? report.slice(0, 120) : "no report")}`));
-    }
-    if (outcome === "no-change") {
-      console.log(gray("agent found nothing more to improve \u2014 stopping"));
-      break;
-    }
-  }
-  console.log(`
-${bold("done")}: ${improved} improvement(s) kept out of ${iterations} iteration(s)`);
-}
-function firstLine(text) {
-  return (text.split("\n").find((l) => l.trim().length > 0) ?? "").trim().slice(0, 160);
-}
-var here2, REIN_REPO;
-var init_improve = __esm({
-  "src/harness/improve.ts"() {
-    init_ansi();
-    init_runner();
-    init_system_prompt();
-    here2 = dirname3(fileURLToPath2(import.meta.url));
-    REIN_REPO = [here2, resolve2(here2, ".."), resolve2(here2, "..", "..")].find((dir) => existsSync7(join9(dir, "test", "smoke.ts"))) ?? resolve2(here2, "..", "..");
-  }
-});
-
 // src/agent/session.ts
-import { appendFileSync as appendFileSync3, existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync10, readdirSync as readdirSync2 } from "node:fs";
-import { homedir as homedir5 } from "node:os";
-import { join as join10 } from "node:path";
+import { appendFileSync as appendFileSync4, existsSync as existsSync10, mkdirSync as mkdirSync6, readFileSync as readFileSync11, readdirSync as readdirSync3 } from "node:fs";
+import { homedir as homedir7 } from "node:os";
+import { join as join12 } from "node:path";
 function ensureDir() {
-  mkdirSync5(DIR, { recursive: true });
+  mkdirSync6(DIR, { recursive: true });
 }
 function newSessionId() {
   const d = /* @__PURE__ */ new Date();
@@ -3200,7 +3607,7 @@ function newSessionId() {
   return `session-${d.getTime()}-${rand}`;
 }
 function sessionPath(id) {
-  return join10(DIR, `${id}.jsonl`);
+  return join12(DIR, `${id}.jsonl`);
 }
 function createSession(opts) {
   ensureDir();
@@ -3215,24 +3622,24 @@ function createSession(opts) {
     cwd: opts.cwd
   };
   const path2 = sessionPath(id);
-  if (existsSync8(path2)) {
-    appendFileSync3(path2, JSON.stringify(header) + "\n");
+  if (existsSync10(path2)) {
+    appendFileSync4(path2, JSON.stringify(header) + "\n");
     return id;
   }
-  appendFileSync3(path2, JSON.stringify(header) + "\n");
+  appendFileSync4(path2, JSON.stringify(header) + "\n");
   return id;
 }
 function appendMessage(sessionId, message) {
   ensureDir();
-  appendFileSync3(sessionPath(sessionId), JSON.stringify(message) + "\n");
+  appendFileSync4(sessionPath(sessionId), JSON.stringify(message) + "\n");
 }
 function appendEntries(sessionId, messages) {
   for (const m of messages) appendMessage(sessionId, m);
 }
 function loadSession(sessionId) {
   const path2 = sessionPath(sessionId);
-  if (!existsSync8(path2)) throw new Error(`No such session: ${sessionId}`);
-  const lines = readFileSync10(path2, "utf8").split("\n").filter((l) => l.trim().length > 0);
+  if (!existsSync10(path2)) throw new Error(`No such session: ${sessionId}`);
+  const lines = readFileSync11(path2, "utf8").split("\n").filter((l) => l.trim().length > 0);
   let header = null;
   const messages = [];
   for (const line of lines) {
@@ -3250,7 +3657,7 @@ function loadSession(sessionId) {
 }
 function listSessions(limit = 20) {
   try {
-    const files2 = readdirSync2(DIR).filter((f) => f.endsWith(".jsonl"));
+    const files2 = readdirSync3(DIR).filter((f) => f.endsWith(".jsonl"));
   } catch {
     return [];
   }
@@ -3285,8 +3692,8 @@ function branchSession(sourceId, upToMessageIndex, newId) {
   const id = newId ?? newSessionId();
   ensureDir();
   const path2 = sessionPath(id);
-  const header = JSON.parse(readFileSync10(sessionPath(sourceId), "utf8").split("\n")[0] ?? "{}");
-  appendFileSync3(
+  const header = JSON.parse(readFileSync11(sessionPath(sourceId), "utf8").split("\n")[0] ?? "{}");
+  appendFileSync4(
     path2,
     JSON.stringify({ ...header, id, created: (/* @__PURE__ */ new Date()).toISOString() }) + "\n"
   );
@@ -3296,7 +3703,7 @@ function branchSession(sourceId, upToMessageIndex, newId) {
 var DIR;
 var init_session = __esm({
   "src/agent/session.ts"() {
-    DIR = join10(homedir5(), ".rein", "sessions");
+    DIR = join12(homedir7(), ".rein", "sessions");
   }
 });
 
@@ -3553,8 +3960,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
   const ask = () => {
     if (lineQueue2.length > 0) return Promise.resolve(lineQueue2.shift());
     if (inputClosed2) return Promise.resolve(null);
-    return new Promise((resolve3) => {
-      resolveLine = (line) => resolve3(line);
+    return new Promise((resolve4) => {
+      resolveLine = (line) => resolve4(line);
       if (!rl2.closed) rl2.prompt();
     });
   };
@@ -3602,7 +4009,7 @@ var init_repl = __esm({
 
 // src/cli.ts
 init_models();
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 async function printHardwareSection() {
   try {
     const { summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
@@ -3622,7 +4029,7 @@ async function printHardwareSection() {
 }
 function cliVersion() {
   try {
-    return JSON.parse(readFileSync11(new URL("../package.json", import.meta.url), "utf8")).version;
+    return JSON.parse(readFileSync12(new URL("../package.json", import.meta.url), "utf8")).version;
   } catch {
     return "0.0.0";
   }
@@ -3640,6 +4047,9 @@ Usage:
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
   rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
+  rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
+  rein heartbeat [--init]       self-sustaining beat: self-heal \u2192 HEARTBEAT.md tasks \u2192 self-advance
+                                (--improve adds one self-improvement iteration; idle if no tasks)
   rein setup                    interactive onboarding: provider \u2192 model \u2192 key
                                 \u2192 connection test \u2192 saves ~/.rein/config.json
   rein setup --yes              non-interactive (first local server / existing config)
@@ -3737,6 +4147,23 @@ config: ~/.rein/config.json \u2192 ${JSON.stringify({ model: config.model, baseU
   if (_[0] === "hardware") {
     const { printHardwareReport: printHardwareReport2 } = await Promise.resolve().then(() => (init_report(), report_exports));
     return printHardwareReport2({ json: flags.json === true });
+  }
+  if (_[0] === "doctor") {
+    const { runDoctor: runDoctor2 } = await Promise.resolve().then(() => (init_doctor(), doctor_exports));
+    const r = await runDoctor2({ fix: flags.fix === true });
+    process.exitCode = r.healthy === r.total ? 0 : 1;
+    return;
+  }
+  if (_[0] === "heartbeat" || _[0] === "hb") {
+    const { runHeartbeat: runHeartbeat2 } = await Promise.resolve().then(() => (init_heartbeat(), heartbeat_exports));
+    const code = await runHeartbeat2({
+      ...common,
+      file: typeof flags.file === "string" ? flags.file : void 0,
+      improve: flags.improve === true,
+      init: flags.init === true
+    });
+    process.exitCode = code;
+    return;
   }
   if (_[0] === "setup") {
     const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));

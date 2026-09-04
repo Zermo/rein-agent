@@ -422,6 +422,59 @@ console.log("11. adapter: plain-JSON response");
 	plainServer.close();
 }
 
+// 12. doctor + heartbeat — the self-sustaining loop
+console.log("12. doctor + heartbeat");
+{
+	const { runDoctor } = await import("../src/harness/doctor.ts");
+	const { parseHeartbeat, HEARTBEAT_TEMPLATE } = await import("../src/harness/heartbeat.ts");
+	const { mkdirSync, writeFileSync, readFileSync, existsSync: hbExists } = await import("node:fs");
+	const { tmpdir: hbTmp } = await import("node:os");
+	const { join: hbJoin } = await import("node:path");
+
+	// doctor runs, returns a structured result, node check passes
+	const d = await runDoctor({ quiet: true });
+	check("doctor: returns structured checks", Array.isArray(d.checks) && d.checks.length >= 6, `${d.checks?.length} checks`);
+	const nodeCheck = d.checks.find((c: any) => c.name === "node");
+	check("doctor: node check ok", nodeCheck?.status === "ok", nodeCheck?.detail);
+
+	// heartbeat parsing: template is idle; tasks + improve goal are extracted
+	const idle = parseHeartbeat(HEARTBEAT_TEMPLATE);
+	check("heartbeat: template parses to zero tasks (idle)", idle.tasks.length === 0 && idle.improveGoal === undefined, JSON.stringify(idle));
+	const parsed = parseHeartbeat("# comment\n- first task\n2) numbered task\n# improve: stay local\n* starred\n");
+	check("heartbeat: tasks + improve goal extracted", parsed.tasks.length === 3 && parsed.tasks[0] === "first task" && parsed.improveGoal === "stay local", JSON.stringify(parsed));
+
+	// idle beat against a plain-JSON mock: self-heal runs, no tasks, exit 0
+	const { createServer: idleServer } = await import("node:http");
+	const iSrv = idleServer((_req, res) => { res.setHeader("content-type", "application/json"); if (_req.url === "/models") { res.end(JSON.stringify({ data: [{ id: "mock-model" }] })); return; } res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "beat ok" } }] })); });
+	await new Promise<void>((r) => iSrv.listen(0, "127.0.0.1", () => r()));
+	const iPort = (iSrv.address() as any).port;
+	const hbHome = hbJoin(hbTmp(), "hb-smoke-" + process.pid);
+	mkdirSync(hbJoin(hbHome, ".rein"), { recursive: true });
+	writeFileSync(hbJoin(hbHome, ".rein", "config.json"), JSON.stringify({ baseUrl: `http://127.0.0.1:${iPort}/v1`, model: "mock-model" }));
+	const hbDir = hbJoin(hbTmp(), "hb-smoke-dir-" + process.pid);
+	mkdirSync(hbDir, { recursive: true });
+	writeFileSync(hbJoin(hbDir, "HEARTBEAT.md"), HEARTBEAT_TEMPLATE);
+	const prevHome = process.env.HOME;
+	process.env.HOME = hbHome;
+	const prevCwd = process.cwd();
+	process.chdir(hbDir);
+	let hbCode = -1;
+	try {
+		const { runHeartbeat } = await import("../src/harness/heartbeat.ts");
+		hbCode = await runHeartbeat({ quiet: true });
+	} finally {
+		process.chdir(prevCwd);
+		process.env.HOME = prevHome;
+		iSrv.close();
+	}
+	check("heartbeat: idle beat exits 0", hbCode === 0, `exit ${hbCode}`);
+	check("heartbeat: beat logged to ~/.rein/heartbeat.log", hbExists(hbJoin(hbHome, ".rein", "heartbeat.log")), "log missing");
+	if (hbExists(hbJoin(hbHome, ".rein", "heartbeat.log"))) {
+		const entry = JSON.parse(readFileSync(hbJoin(hbHome, ".rein", "heartbeat.log"), "utf8").trim().split("\n").pop()!);
+		check("heartbeat: log entry has doctor + tasks + duration", entry.doctor && Array.isArray(entry.tasks) && entry.durationMs >= 0, JSON.stringify(entry).slice(0, 120));
+	}
+}
+
 server.close();
 rmSync(testHome, { recursive: true, force: true });
 
