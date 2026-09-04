@@ -45,6 +45,9 @@ and covered by offline regressions.
 - Autonomous keep/discard requires a clean repository and preserves recorded
   lessons across iterations. Self-improvement validates the full test suite.
 
+- Linux hardware profiling no longer references an undeclared bandwidth variable;
+  unknown bandwidth remains absent from the report.
+
 ## Validation
 
 `npm test` runs the original offline smoke suite and the new node:test regressions.
