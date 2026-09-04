@@ -387,6 +387,41 @@ console.log("9. unlazy gates (vendored checker)");
 	check("hardware: GPU tight + RAM fits → fits/ram (tight must not mask)", f14.verdict === "fits" && f14.placement === "ram", `${f14.verdict}/${f14.placement}`);
 }
 
+// 11. openai adapter: plain-JSON (non-SSE) response to a stream:true request — issue #1
+console.log("11. adapter: plain-JSON response");
+{
+	const { createServer: createPlainServer } = await import("node:http");
+	const plainServer = createPlainServer((req, res) => {
+		if (req.url === "/v1/chat/completions") {
+			// answer stream:true with a single non-stream JSON object (legal per OpenAI contract)
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify({
+				id: "plain-1", object: "chat.completion", model: "mock",
+				choices: [{ index: 0, message: { role: "assistant", content: "plain-json answer" }, finish_reason: "stop" }],
+				usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
+			}));
+			return;
+		}
+		res.statusCode = 404; res.end("{}");
+	});
+	await new Promise<void>((r) => plainServer.listen(0, "127.0.0.1", () => r()));
+	const plainPort = (plainServer.address() as any).port;
+
+	const { stream } = await import("../src/ai/openai-completions.ts");
+	const s = stream({ id: "mock", provider: "mock", baseUrl: `http://127.0.0.1:${plainPort}/v1` }, { messages: [{ role: "user", content: "hi" }] }, {});
+	let gotText = "";
+	let sawDone = false;
+	for await (const ev of s) {
+		if (ev.type === "text_delta") gotText += ev.delta;
+		if (ev.type === "done") sawDone = true;
+	}
+	const finalMsg = await s.result();
+	check("adapter: plain-JSON body yields text (not an empty reply)", gotText === "plain-json answer", JSON.stringify(gotText));
+	check("adapter: plain-JSON body emits done with stop", sawDone && finalMsg.stopReason === "stop", `stop=${finalMsg.stopReason}`);
+	check("adapter: plain-JSON usage is parsed", finalMsg.usage.totalTokens === 7, `total=${finalMsg.usage.totalTokens}`);
+	plainServer.close();
+}
+
 server.close();
 rmSync(testHome, { recursive: true, force: true });
 
