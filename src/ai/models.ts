@@ -90,7 +90,7 @@ export interface ReinConfig {
 	toolsMode?: "native" | "text" | "auto";
 	contextWindow?: number;
 	posthorse?: { enabled?: boolean; reserveTokens?: number };
-	tinyfish?: { apiKey?: string };
+	obscura?: { bin?: string; timeoutSeconds?: number; allowPrivateNetwork?: boolean };
 }
 
 /** Config files are untrusted JSON; only the implemented HTTP protocol is accepted. */

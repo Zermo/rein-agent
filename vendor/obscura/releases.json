@@ -1,0 +1,59 @@
+{
+  "repository": "https://github.com/h4ckf0r0day/obscura",
+  "version": "0.2.2",
+  "tag": "v0.2.2",
+  "commit": "a1e09de68c7617b8079fbb1661b0548c501971c1",
+  "variant": "no-render",
+  "assets": {
+    "darwin-arm64": {
+      "filename": "obscura-aarch64-macos-no-render.tar.gz",
+      "bytes": 43712950,
+      "sha256": "f8428b957a8bda15be2ac4e289d06576e0cef049eb11b54cfffd91acbcfffbee",
+      "format": "tar.gz",
+      "members": [
+        "obscura",
+        "obscura-worker"
+      ]
+    },
+    "darwin-x64": {
+      "filename": "obscura-x86_64-macos-no-render.tar.gz",
+      "bytes": 45545709,
+      "sha256": "6f4e0d2658f02ddddc7953698eb56b8c7aca03de034db9ad4fe0e1ff42488d41",
+      "format": "tar.gz",
+      "members": [
+        "obscura",
+        "obscura-worker"
+      ]
+    },
+    "linux-arm64": {
+      "filename": "obscura-aarch64-linux-no-render.tar.gz",
+      "bytes": 49600923,
+      "sha256": "6cc7ffd6bb4719c4276fd213b3c77d899d6a0defad4a8f14b15dc79ded16cdcb",
+      "format": "tar.gz",
+      "members": [
+        "obscura",
+        "obscura-worker"
+      ]
+    },
+    "linux-x64": {
+      "filename": "obscura-x86_64-linux-no-render.tar.gz",
+      "bytes": 47869877,
+      "sha256": "a45b15b22b585faa219c201b81ee24382d764c17493f781678e4b2e2036e9ce2",
+      "format": "tar.gz",
+      "members": [
+        "obscura",
+        "obscura-worker"
+      ]
+    },
+    "win32-x64": {
+      "filename": "obscura-x86_64-windows-no-render.zip",
+      "bytes": 40680801,
+      "sha256": "a59ef3267c5343031a235a30bca3ba92ec90badaedc5e8a9047a78bee59da507",
+      "format": "zip",
+      "members": [
+        "obscura.exe",
+        "obscura-worker.exe"
+      ]
+    }
+  }
+}

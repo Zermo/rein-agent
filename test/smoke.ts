@@ -7,7 +7,7 @@
  *   5. text tool protocol end-to-end (mock-text)
  *   6. runtime fallback: broken native → text protocol (mock-broken)
  *   7. nodeterm: hook POSTs, pending-file approvals (allow/deny/timeout), e2e deny
- *   8. TinyFish web_search / web_fetch against a local mock (key, shape, errors)
+ *   8. Native Obscura web tool registration and input validation
  *   9. unlazy gates tool driving the vendored gate-check.mjs (lint/status/approve/reverify)
  *
  * Run: node --experimental-strip-types test/smoke.ts
@@ -225,80 +225,13 @@ console.log("7. nodeterm integration");
 	delete process.env.NODETERM_PENDING_DIR;
 }
 
-// ---------------------------------------------------------------- 8. tinyfish web
-console.log("8. TinyFish web tools");
+// ---------------------------------------------------------------- 8. native web registration
+console.log("8. Obscura web tools");
 {
-	const { createServer: createHttpServer } = await import("node:http");
-	const webHits: { method: string; url: string; key: string | null; body: any }[] = [];
-	const webServer = createHttpServer((req, res) => {
-		let raw = "";
-		req.on("data", (c) => (raw += c));
-		req.on("end", () => {
-			let body: any = null;
-			try { body = raw ? JSON.parse(raw) : null; } catch { body = raw; }
-			webHits.push({ method: req.method ?? "", url: req.url ?? "", key: req.headers["x-api-key"] ?? null, body });
-			res.setHeader("Content-Type", "application/json");
-			if (req.method === "GET" && (req.url ?? "").startsWith("/search")) {
-				res.end(JSON.stringify({
-					query: "tinyfish probe",
-					results: [
-						{ position: 1, site_name: "tinyfish.ai", title: "TinyFish Home", url: "https://www.tinyfish.ai/", snippet: "Web infrastructure for AI agents." },
-						{ position: 2, site_name: "docs", title: "Search API Reference", url: "https://docs.tinyfish.ai/search-api/reference", snippet: "GET api.search.tinyfish.ai", date: "2026-02-11" },
-					],
-					total_results: 2, page: 0,
-				}));
-				return;
-			}
-			if (req.method === "POST" && (req.url ?? "").startsWith("/fetch")) {
-				if (body?.urls?.[0] === "https://broken.example/404") {
-					res.end(JSON.stringify({ results: [], errors: [{ url: "https://broken.example/404", error: "page_not_found", status: 404 }] }));
-					return;
-				}
-				res.end(JSON.stringify({
-					results: [{ url: body?.urls?.[0], final_url: body?.urls?.[0], title: "Fetched Page", description: "d", published_date: "2026-01-02", text: "# Clean Content\n\nExtracted by browser. " + "Body paragraph. ".repeat(20), format: "markdown" }],
-					errors: [],
-				}));
-				return;
-			}
-			res.statusCode = 404;
-			res.end("{} ");
-		});
-	});
-	await new Promise<void>((r) => webServer.listen(0, "127.0.0.1", () => r()));
-	const webPort = (webServer.address() as any).port;
-	process.env.TINYFISH_API_KEY = "tf-test-key";
-	process.env.TINYFISH_SEARCH_URL = `http://127.0.0.1:${webPort}/search`;
-	process.env.TINYFISH_FETCH_URL = `http://127.0.0.1:${webPort}/fetch`;
-
-	const webTools = (await import("../src/harness/tools/web.ts")).default;
-	const searchTool = webTools[0];
-	const fetchTool = webTools[1];
-
-	// no key
-	delete process.env.TINYFISH_API_KEY;
-	let r: any = await searchTool.execute("t1", { query: "x" });
-	check("web: no key → clear error", r.isError === true && /TINYFISH_API_KEY/.test(r.content), r.content);
-	process.env.TINYFISH_API_KEY = "tf-test-key";
-
-	// search
-	r = await searchTool.execute("t2", { query: "tinyfish probe", purpose: "testing rein" });
-	check("web: search returns ranked results", !r.isError && /1\. TinyFish Home/.test(r.content) && /docs\.tinyfish\.ai/.test(r.content), r.content.slice(0, 200));
-	check("web: search sends X-API-Key", webHits.length > 0 && webHits[0].key === "tf-test-key", JSON.stringify(webHits[0]?.key));
-	check("web: search passes query+purpose", webHits[0].url.includes("query=tinyfish") && webHits[0].url.includes("purpose="), webHits[0].url);
-
-	// fetch
-	r = await fetchTool.execute("t3", { url: "https://example.com/page" });
-	check("web: fetch returns title + markdown", !r.isError && /Title: Fetched Page/.test(r.content) && /Clean Content/.test(r.content), r.content.slice(0, 150));
-	check("web: fetch is POST with urls[]", webHits.some((h) => h.method === "POST" && h.body?.urls?.[0] === "https://example.com/page"), JSON.stringify(webHits.map((h) => h.method + h.url)));
-
-	// fetch per-URL error
-	r = await fetchTool.execute("t4", { url: "https://broken.example/404" });
-	check("web: fetch surfaces per-URL error", r.isError === true && /page_not_found/.test(r.content), r.content);
-
-	webServer.close();
-	delete process.env.TINYFISH_API_KEY;
-	delete process.env.TINYFISH_SEARCH_URL;
-	delete process.env.TINYFISH_FETCH_URL;
+ const webTools = (await import("../src/harness/tools/web.ts")).default;
+ check("web: tools registered", webTools.map(t => t.name).join(",") === "web_search,web_fetch");
+ const invalid = await webTools[1].execute("invalid", { url: "file:///private/example" });
+ check("web: rejects non-HTTP input before browser startup", invalid.isError === true && /HTTP/.test(invalid.content));
 }
 
 // ---------------------------------------------------------------- 9. unlazy gates

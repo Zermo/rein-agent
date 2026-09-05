@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/h4ckf0r0day/obscura",
+  "commit": "a1e09de68c7617b8079fbb1661b0548c501971c1",
+  "version": "0.2.2",
+  "files": {
+    "LICENSE": "50e6751797c50dedd75ef1b8a0d9e42f5f8472e9fbce91f34718e9f97b0c780a",
+    "markdown.rs": "1b10a0fadad34e7c6b5acb1b0e3dd2697ae877e966173a89a4cae85d1d80d371",
+    "markdown.ts": "1e433b8f658cfd404b73c9fcb135edf8b76647aca758ba3a1124233a8667a05e",
+    "releases.json": "7f696388e4a8a8dd237efd5b77bef62c10d6cd782aa19a1d876beb2780d4898f"
+  }
+}

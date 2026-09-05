@@ -1,29 +1,28 @@
-# Gates: chat completions, tmux, visual activity, and embedded Meat
+# Gates: Obscura web replacement
 
-Scope: explicit Chat Completions connections, owned persistent tmux shells,
-interactive terminal activity and diff review, and the pinned Meat engine.
+Scope: replace TinyFish search and scraping with native Obscura.
 
 - [x] G1: source smoke and regression suites pass on Node 22.19
   CHECK: npm exec --yes --package=node@22.19.0 -- npm test
   EXPECT: smoke test OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=13a70c3ecb3e536394c0a8904ba1550e7bc7884a9908016221a0488ea53a4555; output-bytes=57919
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=cb638a4eaf9d3f2f631938a5ccfb6094d979133a9b415c268299cb62cdebb2c6; output-bytes=65013
 
-- [x] G2: built CLI and embedded native assets work on Node 18
+- [x] G2: built CLI and embedded assets work on Node 18
   CHECK: bash -c 'npm run bundle && npm exec --yes --package=node@18.20.8 -- node test/bundle-smoke.mjs'
   EXPECT: bundle smoke OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=e44292be5ff61baeaa052a87e72140a7f21043fbac8c328f8199818f528ec082; output-bytes=123
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=ccb6b7765e900dfff690ba75f356242597723affb44ed233454affec95d9909b; output-bytes=123
 
-- [x] G3: upstream source provenance remains intact
+- [x] G3: upstream source and release provenance remain intact
   CHECK: bash -c 'npm run check:posthorse && npm run check:natives'
-  EXPECT: embedded Meat provenance OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=63a3b0ca6d76d549c4d084b6c16af9a2c94baaa84df14027d4c41ead6207fabc; output-bytes=221
+  EXPECT: Obscura provenance OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=64f91f73e5061877b3c12f9d6554ac5a38b7182a4d4c892d4b3934723f744a38; output-bytes=243
 
-- [x] G4: release package includes runtime assets
+- [x] G4: real Obscura extracts a JavaScript page through the packaged CLI
+  CHECK: node test/obscura-live-smoke.mjs
+  EXPECT: Obscura live smoke OK
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=5c7cfbdb9690fa08d256e21bb0beec73272eff5e0349d61a0820486e641ce3ca; output-bytes=46
+
+- [x] G5: release package includes native integration assets
   CHECK: npm pack --dry-run
-  EXPECT: rein-agent-0.8.0.tgz
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=77c8862adde5fdb900cfb3e91006238af3c99c196f4adf505d696c2256e01224; output-bytes=10599
-
-- [x] G5: upstream Meat tests and reproducible WASM build pass
-  CHECK: bash -c 'npm run test:meat-upstream && npm run check:meat'
-  EXPECT: Embedded Meat engine OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=4c479c70bcf1c6d9e6c8bd5d8b41659a0dd45f4badae42fee9795115c8447426; output-bytes=278
+  EXPECT: rein-agent-0.9.0.tgz
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=77aa62cfd9b43f226eb72f2a929635a1561c74f8ca59858ccaae0aa6dcc1a5d6; output-bytes=11222

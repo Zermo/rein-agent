@@ -1,159 +1,120 @@
-/**
- * TinyFish web tools — our web-search and web-use layer (https://tinyfish.ai).
- *
- * Two tools, one API key:
- *   web_search  GET  https://api.search.tinyfish.ai  — fresh, structured results
- *   web_fetch   POST https://api.fetch.tinyfish.ai   — any URL → clean markdown
- *
- * Both are free at any wallet balance and never draw from it.
- *
- * Key resolution: TINYFISH_API_KEY env, then ~/.rein/config.json → tinyfish.apiKey.
- * Base URLs are overridable via TINYFISH_SEARCH_URL / TINYFISH_FETCH_URL (tests point
- * these at the local mock server). No dependencies — just fetch().
- */
-import type { AgentTool } from "../../agent/agent-loop.ts";
-import { loadConfig } from "../../ai/models.ts";
-import { truncateLines } from "../../util/truncate.ts";
+/** Native web tools use the local Obscura engine, with no hosted API key. */
+import type { AgentTool, AgentToolResult } from "../../agent/agent-loop.ts";
+import { cleanWebText, evaluatePage, httpUrl } from "../obscura/runtime.ts";
+import { pageExpression, SEARCH_EXPRESSION } from "../obscura/extract.ts";
 
-function tinyfishKey(): string {
-	return process.env.TINYFISH_API_KEY ?? loadConfig().tinyfish?.apiKey ?? "";
+function integer(value: unknown, fallback: number, min: number, max: number, name: string): number {
+	if (value === undefined) return fallback;
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}.`);
+	return value;
 }
 
-function searchUrl(): string {
-	return (process.env.TINYFISH_SEARCH_URL ?? "https://api.search.tinyfish.ai").replace(/\/$/, "");
+function domains(value: unknown, name: string): string[] {
+	if (value === undefined || value === "") return [];
+	if (typeof value !== "string" || value.length > 2000) throw new Error(`${name} must be comma-separated hostnames.`);
+	const hosts = value.split(",").map(item => item.trim().toLowerCase());
+	if (hosts.length > 10 || hosts.some(host => !host || /[\s/:@?#*\\]/.test(host))) throw new Error(`${name} accepts up to 10 hostnames, without URLs or wildcards.`);
+	return [...new Set(hosts.map(host => {
+		const url = httpUrl(`https://${host}`);
+		if (url.hostname.length > 253 || !url.hostname.split(".").every(label => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label) && label.length <= 63)) throw new Error(`${name} contains an invalid hostname.`);
+		return url.hostname;
+	}))];
 }
 
-function fetchUrl(): string {
-	return (process.env.TINYFISH_FETCH_URL ?? "https://api.fetch.tinyfish.ai").replace(/\/$/, "");
+function legacySearchOptions(args: Record<string, unknown>): void {
+	if (args.domain_type !== undefined && args.domain_type !== "web") throw new Error("Obscura search supports the web results page. TinyFish news/research_paper modes are unavailable; use query terms and include_domains.");
+	if (args.page !== undefined && args.page !== 0) throw new Error("Obscura search reads the first results page. Omit page or use page=0.");
+	for (const name of ["recency_minutes", "location", "language"]) {
+		if (args[name] !== undefined && args[name] !== "") throw new Error(`Obscura search does not support TinyFish's ${name} filter. Remove it and refine the query.`);
+	}
 }
 
-function noKeyError(what: string): string {
-	return `No TinyFish API key for ${what}. Set TINYFISH_API_KEY (free at tinyfish.ai → Get API key), or put it in ~/.rein/config.json under {"tinyfish": {"apiKey": "..."}}.`;
+function record(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Obscura returned an invalid extraction result.");
+	return value as Record<string, unknown>;
 }
 
-async function call(opts: { method: "GET" | "POST"; url: string; body?: unknown; timeoutMs: number; signal?: AbortSignal }): Promise<{ status: number; json: any; raw: string }> {
-	const res = await fetch(opts.url, {
-		method: opts.method,
-		headers: { "X-API-Key": tinyfishKey(), Accept: "application/json", ...(opts.body ? { "Content-Type": "application/json" } : {}) },
-		body: opts.body ? JSON.stringify(opts.body) : undefined,
-		signal: opts.signal,
-	});
-	const raw = await res.text();
-	let json: any = null;
-	try { json = JSON.parse(raw); } catch { /* non-JSON body (HTML error page, etc.) */ }
-	return { status: res.status, json, raw };
+function searchTarget(value: unknown, base: URL): URL | undefined {
+	if (typeof value !== "string" || value.length > 8192) return;
+	try {
+		let url = new URL(value, base);
+		if (url.hostname === "duckduckgo.com" && url.pathname === "/l/") {
+			const destination = url.searchParams.get("uddg");
+			if (!destination) return;
+			url = httpUrl(destination, "search result URL");
+		} else url = httpUrl(url.href, "search result URL");
+		if (url.hostname === "duckduckgo.com" || url.hostname.endsWith(".duckduckgo.com")) return;
+		url.hash = "";
+		return url;
+	} catch { return; }
 }
 
-// ------------------------------------------------------------------- search
+const matchesHost = (hostname: string, domain: string) => hostname === domain || hostname.endsWith(`.${domain}`);
+const toolError = (name: string, error: unknown): AgentToolResult => ({ content: `${name}: ${cleanWebText(error instanceof Error ? error.message : String(error))}`, isError: true });
+
 const webSearchTool: AgentTool = {
 	name: "web_search",
-	description:
-		"Search the live web (TinyFish). Fresh, structured results — not cached. Returns a ranked list of {title, url, site, snippet, date?}. Use for finding pages, current events, docs, prices. Then web_fetch a promising URL to read it. Supports site: filtering, recency, news, and research-paper modes.",
-	parameters: {
-		type: "object",
-		properties: {
-			query: { type: "string", description: "Search query. site:domain.com and -site:domain.com work inline." },
-			purpose: { type: "string", description: "Why you are searching (the goal the results serve). Improves quality." },
-			domain_type: { type: "string", enum: ["web", "news", "research_paper"], description: "web (default), news, or research_paper" },
-			recency_minutes: { type: "integer", description: "Only results newer than N minutes (1..5256000). Omit for no freshness window." },
-			include_domains: { type: "string", description: "Comma-separated domains to restrict to (e.g. github.com,arxiv.org)" },
-			exclude_domains: { type: "string", description: "Comma-separated domains to exclude" },
-			location: { type: "string", description: "Country code for geo-targeted results (e.g. US)" },
-			language: { type: "string", description: "Result language code (e.g. en)" },
-			page: { type: "integer", minimum: 0, maximum: 10, description: "Result page, 0-based (default 0)" },
-		},
-		required: ["query"],
-	},
-	execute: async (_id, args, signal) => {
-		if (!tinyfishKey()) return { content: noKeyError("web_search"), isError: true };
-		const qs = new URLSearchParams();
-		qs.set("query", String(args.query));
-		const pass = (k: string, cast?: (v: unknown) => unknown) => {
-			const v = args[k];
-			if (v !== undefined && v !== null && v !== "") qs.set(k, String(cast ? cast(v) : v));
-		};
-		pass("purpose");
-		pass("domain_type");
-		pass("recency_minutes", (v) => Number(v));
-		pass("include_domains");
-		pass("exclude_domains");
-		pass("location");
-		pass("language");
-		pass("page", (v) => Number(v));
-
-		let r: Awaited<ReturnType<typeof call>>;
+	description: "Search DuckDuckGo's first HTML results page with the local Obscura browser. Returns source URLs, titles and snippets. No API key. Supports site: query terms and strict include/exclude hostname filters. Then web_fetch promising pages. Does not provide minute recency, news/research verticals, localization, or later result pages.",
+	parameters: { type: "object", properties: {
+		query: { type: "string", description: "Web query, up to 2000 characters. site:domain and -site:domain work inline." },
+		max_results: { type: "integer", minimum: 1, maximum: 20, description: "Maximum results from the first page, default 10. The engine may return fewer." },
+		include_domains: { type: "string", description: "Comma-separated hostnames; accepts their subdomains too. Up to 10." },
+		exclude_domains: { type: "string", description: "Comma-separated hostnames to exclude, including subdomains. Up to 10." },
+	}, required: ["query"] },
+	async execute(_id, args, signal, onUpdate) {
 		try {
-			r = await call({ method: "GET", url: `${searchUrl()}/?${qs.toString()}`, timeoutMs: 30000, signal });
-		} catch (err) {
-			return { content: `web_search request failed: ${(err as Error).message}`, isError: true };
-		}
-		if (r.status === 401 || r.status === 403) return { content: `TinyFish rejected the key (HTTP ${r.status}): ${r.raw.slice(0, 200)}`, isError: true };
-		if (r.status === 429) return { content: `web_search rate-limited (HTTP 429) — wait a moment and retry.`, isError: true };
-		if (r.status >= 400 || !r.json) return { content: `web_search HTTP ${r.status}: ${r.raw.slice(0, 300)}`, isError: true };
-
-		const results: any[] = r.json.results ?? [];
-		if (results.length === 0) return { content: `No results for: ${args.query}`, isError: false, details: { count: 0 } };
-		const lines: string[] = [];
-		for (const [i, it] of results.entries()) {
-			const date = it.date ? ` (${it.date})` : "";
-			lines.push(`${i + 1}. ${it.title ?? "(untitled)"}${date}`);
-			lines.push(`   ${it.url}`);
-			if (it.snippet) lines.push(`   ${it.snippet}`);
-		}
-		const truncated = truncateLines(lines.join("\n"), 80);
-		return { content: (r.json.total_results ?? results.length) + " results for: " + args.query + "\n" + truncated.text, isError: false, details: { count: results.length, truncated: truncated.truncated } };
+			if (typeof args.query !== "string" || !args.query.trim() || args.query.length > 2000 || /[\x00-\x1f\x7f]/.test(args.query)) throw new Error("query must be nonempty text up to 2000 characters, without control characters.");
+			legacySearchOptions(args);
+			const max = integer(args.max_results, 10, 1, 20, "max_results"), include = domains(args.include_domains, "include_domains"), exclude = domains(args.exclude_domains, "exclude_domains");
+			const query = args.query.trim();
+			const hints = [query, ...(include.length ? [`(${include.map(host => `site:${host}`).join(" OR ")})`] : []), ...exclude.map(host => `-site:${host}`)].join(" ");
+			const url = new URL("https://html.duckduckgo.com/html/"); url.searchParams.set("q", hints);
+			const page = record(await evaluatePage(url, SEARCH_EXPRESSION, signal, onUpdate));
+			if (page.kind !== "search" || !Array.isArray(page.results) || typeof page.noResults !== "boolean" || typeof page.blocked !== "boolean") throw new Error("Obscura returned invalid search data.");
+			const finalUrl = httpUrl(page.url, "search page URL");
+			if (!["duckduckgo.com", "html.duckduckgo.com"].includes(finalUrl.hostname)) throw new Error("Search navigation left DuckDuckGo; results were not accepted.");
+			if (page.blocked) throw new Error("DuckDuckGo blocked this request or requires a CAPTCHA. Try later or web_fetch a known source URL.");
+			const seen = new Set<string>(), results: { title: string; url: string; snippet: string }[] = [];
+			let validCount = 0;
+			for (const item of page.results.slice(0, 100)) {
+				if (!item || typeof item !== "object" || typeof item.title !== "string" || !item.title.trim()) continue;
+				const target = searchTarget(item.url, finalUrl);
+				if (!target || seen.has(target.href)) continue;
+				seen.add(target.href); validCount++;
+				if (include.length && !include.some(host => matchesHost(target.hostname, host)) || exclude.some(host => matchesHost(target.hostname, host))) continue;
+				results.push({ title: cleanWebText(item.title).slice(0, 1000), url: target.href, snippet: typeof item.snippet === "string" ? cleanWebText(item.snippet).slice(0, 2000) : "" });
+			}
+			if (!validCount && !page.noResults) throw new Error("DuckDuckGo returned no recognizable results. The page may be blocked or its markup changed; this is not a verified empty search.");
+			const selected: typeof results = [], lines: string[] = []; let chars = query.length;
+			for (const item of results.slice(0, max)) {
+				const line = `${selected.length + 1}. ${item.title}\n   ${item.url}\n   ${item.snippet}`;
+				if (chars + line.length > 25000) break;
+				chars += line.length; selected.push(item); lines.push(line);
+			}
+			const content = selected.length ? `${selected.length} results from DuckDuckGo's first page for: ${query}\n` + lines.join("\n")
+				: validCount ? `No matching domains among ${validCount} results on the first search page for: ${query}` : `No results found for: ${query}`;
+			return { content, details: { backend: "obscura", engine: "duckduckgo", searchUrl: finalUrl.href, count: selected.length, results: selected, truncated: results.length > selected.length } };
+		} catch (error) { return toolError("web_search", error); }
 	},
 };
 
-// -------------------------------------------------------------------- fetch
 const webFetchTool: AgentTool = {
 	name: "web_fetch",
-	description:
-		"Fetch any URL and get clean, LLM-ready markdown (TinyFetch). Runs a real browser behind the scenes, so it handles JS-heavy pages. Returns the page title, final URL, and extracted text (truncated). Use after web_search to read a specific page. One URL per call for the cleanest result.",
-	parameters: {
-		type: "object",
-		properties: {
-			url: { type: "string", description: "The http(s) URL to fetch" },
-			purpose: { type: "string", description: "Why you are fetching this page (improves extraction)" },
-			max_chars: { type: "integer", minimum: 500, maximum: 200000, description: "Max characters of page text to return (default 20000)" },
-		},
-		required: ["url"],
-	},
-	execute: async (_id, args, signal) => {
-		if (!tinyfishKey()) return { content: noKeyError("web_fetch"), isError: true };
-		const url = String(args.url);
-		const maxChars = typeof args.max_chars === "number" ? args.max_chars : 20000;
-		const body: Record<string, unknown> = { urls: [url], format: "markdown" };
-		if (typeof args.purpose === "string" && args.purpose.trim()) body.purpose = args.purpose.trim();
-
-		let r: Awaited<ReturnType<typeof call>>;
+	description: "Render an HTTP(S) page with the local Obscura browser and return its title, final URL and markdown, including JavaScript content. No API key; fresh temporary browser storage for each call. This browser CLI does not expose an HTTP status code. max_chars bounds page text, default 20000.",
+	parameters: { type: "object", properties: {
+		url: { type: "string", description: "HTTP(S) URL without embedded credentials." },
+		max_chars: { type: "integer", minimum: 500, maximum: 200000, description: "Maximum characters of markdown to return, default 20000." },
+	}, required: ["url"] },
+	async execute(_id, args, signal, onUpdate) {
 		try {
-			r = await call({ method: "POST", url: fetchUrl(), body, timeoutMs: 150000, signal });
-		} catch (err) {
-			return { content: `web_fetch request failed: ${(err as Error).message}`, isError: true };
-		}
-		if (r.status === 401 || r.status === 403) return { content: `TinyFish rejected the key (HTTP ${r.status}): ${r.raw.slice(0, 200)}`, isError: true };
-		if (r.status === 429) return { content: `web_fetch rate-limited (HTTP 429) — wait a moment and retry.`, isError: true };
-		if (r.status >= 400 || !r.json) return { content: `web_fetch HTTP ${r.status}: ${r.raw.slice(0, 300)}`, isError: true };
-
-		const results: any[] = r.json.results ?? [];
-		const errors: any[] = r.json.errors ?? [];
-		const page = results.find((x) => x.url === url) ?? results[0];
-		if (!page) {
-			const e = errors[0];
-			return { content: `web_fetch failed for ${url}: ${e ? `${e.error}${e.status ? " (HTTP " + e.status + ")" : ""}` : "no result"}`, isError: true };
-		}
-		const head: string[] = [];
-		head.push(`Title: ${page.title ?? "(untitled)"}`);
-		if (page.final_url && page.final_url !== url) head.push(`Final URL: ${page.final_url}`);
-		if (page.published_date) head.push(`Published: ${page.published_date}`);
-		const text: string = typeof page.text === "string" ? page.text : JSON.stringify(page.text ?? "");
-		const bodyOut = truncateLines(text, Math.floor(maxChars / 20));
-		return {
-			content: head.join("\n") + "\n\n" + (bodyOut.text || "(no extractable text)"),
-			isError: false,
-			details: { finalUrl: page.final_url, chars: text.length, truncated: bodyOut.truncated },
-		};
+			const url = httpUrl(args.url), max = integer(args.max_chars, 20000, 500, 200000, "max_chars");
+			const page = record(await evaluatePage(url, pageExpression(max), signal, onUpdate));
+			if (page.kind !== "page" || typeof page.title !== "string" || typeof page.text !== "string" || typeof page.chars !== "number" || !Number.isSafeInteger(page.chars) || page.chars < page.text.length || typeof page.truncated !== "boolean") throw new Error("Obscura returned invalid page data.");
+			const finalUrl = httpUrl(page.url, "final page URL");
+			const title = cleanWebText(page.title).slice(0, 1000), text = cleanWebText(page.text).slice(0, max), truncated = page.truncated || page.text.length > max;
+			return { content: `Title: ${title || "(untitled)"}\nURL: ${finalUrl.href}\n\n${text || "(no extractable text)"}${truncated ? "\n[page text truncated]" : ""}`,
+				details: { backend: "obscura", finalUrl: finalUrl.href, title, chars: page.chars, truncated } };
+		} catch (error) { return toolError("web_fetch", error); }
 	},
 };
 

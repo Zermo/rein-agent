@@ -11,7 +11,7 @@ function filesUnder(base, prefix = "") {
     return entry.isDirectory() ? filesUnder(base, `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`];
   }).sort();
 }
-for (const name of ["fold", "mattpocock", "meat"]) {
+for (const name of ["fold", "mattpocock", "meat", "obscura"]) {
   const base = new URL(`../vendor/${name}/`, import.meta.url);
   const manifest = JSON.parse(readFileSync(new URL("manifest.json", base), "utf8"));
   assert.match(manifest.commit, /^[a-f0-9]{40}$/);
@@ -40,3 +40,16 @@ assert.deepEqual(readFileSync(new URL("LICENSE", meat)), readFileSync(new URL("u
 const apache = readFileSync(new URL("APACHE-2.0", meat), "utf8");
 assert.ok(apache.length > 10000 && apache.includes("END OF TERMS AND CONDITIONS"), "The complete Apache 2.0 license must accompany Meat.");
 console.log("Native Fold, Matt Pocock and embedded Meat provenance OK");
+const obscura = new URL("vendor/obscura/", root);
+const release = JSON.parse(readFileSync(new URL("releases.json", obscura), "utf8"));
+const obscuraSource = JSON.parse(readFileSync(new URL("manifest.json", obscura), "utf8"));
+assert.equal(release.repository, "https://github.com/h4ckf0r0day/obscura");
+assert.equal(release.version, "0.2.2"); assert.equal(release.tag, "v0.2.2");
+assert.equal(release.commit, obscuraSource.commit); assert.equal(release.variant, "no-render");
+assert.deepEqual(Object.keys(release.assets).sort(), ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"]);
+for (const asset of Object.values(release.assets)) {
+  assert.match(asset.sha256, /^[a-f0-9]{64}$/); assert.ok(asset.bytes > 0 && asset.bytes < 64 * 1024 * 1024);
+}
+const markdown = readFileSync(new URL("markdown.rs", obscura), "utf8").split('r#"')[1].split('"#;')[0];
+assert.equal(readFileSync(new URL("markdown.ts", obscura), "utf8"), "// Exact markdown expression from Obscura v0.2.2; see markdown.rs and manifest.json.\nexport const HTML_TO_MARKDOWN_JS = " + JSON.stringify(markdown) + ";\n");
+console.log("Obscura provenance OK");

@@ -391,21 +391,52 @@ opportunistic: a stopped server, evicted slot, or a week-old archived request
 cannot restore its transformer state. The durable resume overlay provides the
 cross-session continuity in that case.
 
-### Web: TinyFish is the web layer
+### Web search and scraping with Obscura
 
-Two tools, one free API key (tinyfish.ai — Search and Fetch never draw from
-the wallet):
+`web_search` reads DuckDuckGo's first HTML results page through the local
+[Obscura browser](https://github.com/h4ckf0r0day/obscura). It returns source URLs,
+titles, and snippets. `web_fetch` renders one page, executes its JavaScript, and
+returns the title, final URL, and markdown. Neither tool needs an API key.
 
+```sh
+rein web install
+rein web status
+rein web search 'site:github.com obscura browser' --max-results 5
+rein web fetch https://example.com --max-chars 20000
 ```
-web_search  fresh, never-cached, structured results (site:, recency, news,
-            research-paper modes) — find the page
-web_fetch   any URL → clean LLM-ready markdown, real browser behind it — read it
+
+First web use installs the pinned Obscura 0.2.2 no-render build automatically.
+The download is about 39–48 MiB, verified against its release SHA-256 before
+extraction. It lives under `$REIN_HOME/native/obscura`, default `~/.rein/native/obscura`.
+macOS/Linux arm64 and x64 and Windows x64 have pinned builds. Go, Rust, Chromium,
+and runtime npm packages are unnecessary. Ordinary chat works without Obscura.
+
+An absolute `OBSCURA_BIN` or `obscura.bin` overrides the managed runtime.
+Otherwise Rein prefers its installed runtime, then an `obscura` executable on
+PATH. Optional configuration in `$REIN_HOME/config.json`:
+
+```json
+{"obscura": {"bin": "/absolute/path/to/obscura", "timeoutSeconds": 30, "allowPrivateNetwork": false}}
 ```
 
-Key: `TINYFISH_API_KEY`, or `~/.rein/config.json` → `{"tinyfish": {"apiKey": "..."}}`.
-The system prompt tells the agent to search first, fetch only the 1–2 pages
-that matter, and name the URL behind every web-sourced fact. If the key is
-missing the tool says so plainly instead of failing mysteriously.
+Each request uses temporary browser storage, with a bounded process lifetime
+and output. `/stop` cancels and drains the browser process. Set
+`OBSCURA_ALLOW_PRIVATE_NETWORK=1` or `obscura.allowPrivateNetwork=true` when you
+want pages on local or private networks. The default retains Obscura's network
+restriction. This setting applies to page subresources too.
+
+Search supports `query`, `max_results`, `include_domains`, and `exclude_domains`.
+Domain filters check the returned hostnames, including subdomains, and only
+filter the first page. Blocked/CAPTCHA pages and unrecognized markup produce
+errors. They are not reported as empty searches. Web results are evidence;
+the agent is instructed to cite their source URLs.
+
+Existing tool names and `web_fetch.max_chars` remain compatible. TinyFish keys
+and its old `tinyfish` config are ignored. Its minute freshness, news/research
+verticals, localization, and later-page filters are unsupported and return
+explicit errors. Legacy `purpose` text has no ranking or extraction effect.
+Obscura's single-page CLI does not expose an HTTP status code, so a rendered
+HTTP error page is returned as page content with its title and URL.
 
 ### Completion gates (unlazy)
 
@@ -673,7 +704,7 @@ with its verdict. `--json` for machines.
   spec, not a prompt suggestion.
 - `rein improve` + the `LESSONS.md` convention — the harness eats its own
   dogfood on a schedule.
-- TinyFish `web_search`/`web_fetch` — the web layer, one free key.
+- Native Obscura `web_search`/`web_fetch`, with no hosted API key.
 - `gates` + vendored unlazy — completion discipline with runnable oracles,
   wired in as both a tool and a `rein gates` CLI.
 
@@ -707,7 +738,7 @@ src/
 │   ├── improve.ts             self-improvement loop (autoresearch on this repo)
 │   ├── loop.ts                experiment loop (TASK.md + METRIC.md)
 │   ├── nodeterm.ts            nodeterm surface: status hooks + phone approvals
-│   └── tools/                 read write edit bash grep find ls web(TinyFish) gates(unlazy)
+│   └── tools/                 read write edit bash grep find ls web(Obscura) gates(unlazy)
 └── util/                      ansi · json-salvage · schema · truncate
 vendor/
 └── unlazy/                    Leonxlnx/unlazy (MIT): SKILL.md + gate-check.mjs + templates + references
@@ -800,7 +831,9 @@ Context windows: [fitchmultz/pi-posthorse](https://github.com/fitchmultz/pi-post
 (MIT, pinned source and native Rein adaptation).
 Completion discipline: [Leonxlnx/unlazy](https://github.com/Leonxlnx/unlazy)
 (MIT, vendored — the gate ledger and runnable oracles).
-Web layer: [TinyFish](https://www.tinyfish.ai) Search + Fetch APIs.
+Web engine: [Obscura](https://github.com/h4ckf0r0day/obscura), Apache-2.0,
+with a pinned native runtime and its upstream markdown converter.
+Search results: DuckDuckGo HTML.
 Hardware fit: [magnitudedev/magnitude](https://github.com/magnitudedev/magnitude)
 (Apache-2.0 — concepts ported: hardware discovery, per-domain memory
 reserves, Fits/DoesNotFit assessment, MoE-aware catalog).

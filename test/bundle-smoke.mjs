@@ -10,6 +10,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dir = mkdtempSync(join(tmpdir(), "rein-bundle-"));
 let requests = 0;
 let meatRequests = 0;
+let webRequests = 0;
 const cliEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("NODETERM_"))), REIN_HOME: dir, REIN_API: "", REIN_API_KEY: "", REIN_BASE_URL: "", REIN_MODEL: "" };
 const runCli = (args, extraEnv = {}) => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [join(root, "dist/rein.js"), ...args], { cwd: dir, env: { ...cliEnv, ...extraEnv } });
@@ -25,6 +26,15 @@ const server = createServer(async (req, res) => {
   for await (const chunk of req) text += chunk;
   const body = JSON.parse(text);
   assert.equal(req.url, "/v1/chat/completions");
+  if (body.model === "bundle-web") {
+    webRequests++;
+    assert.ok(body.tools.some(tool => tool.function.name === "web_search"));
+    assert.ok(body.tools.some(tool => tool.function.name === "web_fetch"));
+    if (webRequests === 2) assert.ok(body.messages.some(message => message.role === "tool" && message.content.includes("Native browser fixture")));
+    const message = webRequests === 1 ? { role: "assistant", content: null, tool_calls: [{ id: "fetch", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ url: "https://example.com/" }) } }] } : { role: "assistant", content: "native web bundle OK" };
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ choices: [{ message, finish_reason: webRequests === 1 ? "tool_calls" : "stop" }] })); return;
+  }
   if (body.model === "bundle-meat") {
     meatRequests++;
     assert.ok(body.tools.some(tool => tool.function.name === "submit"));
@@ -75,6 +85,13 @@ try {
   assert.equal(review.input_tokens, 20); assert.equal(review.output_tokens, 10); assert.equal(meatRequests, 2);
   assert.equal(readFileSync(join(dir, "value.txt"), "utf8"), "new_value = 2\n");
   assert.equal(existsSync(join(dir, "go-invoked")), false, "Installed Meat must run without invoking Go.");
+  const browser = join(dir, "obscura-fixture");
+  const browserPage = { kind: "page", title: "Native fixture", url: "https://example.com/", text: "Native browser fixture", chars: 22, truncated: false };
+  writeFileSync(browser, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(JSON.stringify(browserPage))});\n`, { mode: 0o700 });
+  const web = await runCli(["--api", "chat-completions", "--base-url", endpoint, "--model", "bundle-web", "--tools", "native", "-p", "read the fixture"], { OBSCURA_BIN: browser });
+  assert.equal(web.code, 0, web.stderr); assert.equal(webRequests, 2); assert.match(web.stdout, /native web bundle OK/);
+  const invalidWeb = await runCli(["web", "search", "fixture", "--language", "fr"], { OBSCURA_BIN: browser });
+  assert.notEqual(invalidWeb.code, 0); assert.match(invalidWeb.stderr, /does not support --language/);
   console.log(`bundle smoke OK (${process.version})`);
 } finally {
   await new Promise(resolve => server.close(resolve));

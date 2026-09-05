@@ -65,6 +65,9 @@ Usage:
   rein models                   show detected local servers and provider presets
   rein skills [name]            list bundled workflows, or read one without running it
   rein debug <folder> [--json]  inspect exported JSONL sessions offline (counts only)
+  rein web install|status       install or inspect the native Obscura browser
+  rein web search <query>        search DuckDuckGo through Obscura (--json optional)
+  rein web fetch <url>           render a page to markdown (--max-chars 20000)
   rein --visual                 split the terminal into chat and live activity (tmux)
   rein watch <activity-id>       inspect activity; press c for the node canvas
   rein canvas <activity-id>      open the local interactive node canvas
@@ -241,6 +244,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 			console.error("Meat review cancelled."); process.exitCode = cancelledCode;
 		} finally { for (const [signal, handler] of signals) process.off(signal, handler); }
 		return;
+	}
+	if (_[0] === "web") {
+		const { webCommand } = await import("./harness/obscura/cli.ts");
+		await webCommand(_.slice(1), flags); return;
 	}
 	if (_[0] === "tmux") {
 		const { TmuxShells } = await import("./harness/tmux.ts");

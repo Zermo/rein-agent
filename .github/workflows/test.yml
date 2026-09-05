@@ -35,6 +35,18 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: node test/bundle-smoke.mjs
+  obscura-browser:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - run: node test/obscura-live-smoke.mjs
   meat-provenance:
     runs-on: ubuntu-latest
     steps:

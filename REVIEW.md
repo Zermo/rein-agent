@@ -1,5 +1,32 @@
 # Posthorse and harness review
 
+## 0.9.0 Obscura web replacement
+
+The contract is [docs/0.9.0-spec.md](docs/0.9.0-spec.md), from baseline
+`b660b925ebc10d0ecc471a369e68d2c54957472d`.
+
+An independent integration review found three P2 issues, all corrected:
+
+- Installing the managed runtime did not override an incompatible PATH binary.
+  Resolution now prefers explicit config, then the managed runtime, then PATH.
+- The standalone web CLI ignored unsupported filters. It now validates flags
+  per action before navigation, matching the native tool's explicit errors.
+- Cancelling during download-start progress could leave a rejected fetch
+  promise unhandled. The abort helper now accepts factories and checks the
+  signal before creating each operation.
+
+Regression coverage includes these cases, strict domain filtering, malformed
+and blocked search responses, single-line text bounds, private temporary
+storage, cancellation of resistant descendants, and process deadlines. The
+bundled agent executes a native `web_fetch` round trip on Node 18 with a fixture.
+The real Obscura runtime renders a controlled page, follows its redirect, runs
+JavaScript fetch, extracts markdown and resolves source links. A live DuckDuckGo
+query through the actual packaged command returned source links without a key.
+
+All five local release gates pass: source regressions, Node 18 bundle, native
+provenance, real browser extraction, and package assets. CI additionally tests
+the actual native browser on Linux, macOS and Windows.
+
 ## 0.8.0 Chat Completions, tmux, activity canvas, and Meat
 
 The implementation contract is [docs/0.8.0-spec.md](docs/0.8.0-spec.md).
