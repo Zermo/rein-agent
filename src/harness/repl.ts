@@ -15,6 +15,7 @@ import { cyan, dim, gray, green, red, yellow, bold } from "../util/ansi.ts";
 import type { Runner } from "./runner.ts";
 import type { AgentTool } from "../agent/agent-loop.ts";
 import * as nodeterm from "./nodeterm.ts";
+import { readState as autonomyState } from "./autonomy/state.ts";
 
 interface ReplOptions {
 	runner: Runner;
@@ -39,6 +40,15 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	}
 
 	let busy = false;
+	let lastProposalAlert = "";
+	const proposalAlert = () => {
+		try {
+			const pending = autonomyState().proposals.filter(p => p.status === "pending");
+			const ids = pending.map(p => p.id).join(",");
+			if (ids && ids !== lastProposalAlert) console.log(gray(`${pending.length} proactive proposal(s) ready. Review with rein autonomy tui in another terminal, or /autonomy for status.`));
+			lastProposalAlert = ids;
+		} catch { /* Autonomy state must not prevent normal interactive work. */ }
+	};
 	let controller: AbortController | undefined;
 	let approvalAnswer: ((line: string) => void) | undefined;
 
@@ -114,6 +124,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 						"  /resume <id>     continue a previous session with current workspace overlay",
 						"  /branch          branch the current session and continue there",
 						"  /context         show context window usage",
+						"  /autonomy        show proactive proposals and service status",
 						"  /new-context [handoff]  start a fresh window in this session",
 						"  /quit            exit",
 					].join("\n"),
@@ -184,6 +195,12 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			case "context":
 				console.log(gray(runner.contextStatus()));
 				return true;
+			case "autonomy": {
+				const { autonomySnapshot } = await import("./autonomy/command.ts");
+				const { renderDashboard } = await import("./autonomy/tui.ts");
+				console.log(renderDashboard(autonomySnapshot()));
+				return true;
+			}
 			case "new-context":
 				runner.newContext(arg || undefined);
 				console.log(gray(runner.contextStatus()));
@@ -272,6 +289,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	}
 
 	while (true) {
+		proposalAlert();
 		const line = await ask();
 		if (line === null) break;
 		if (!line) continue;

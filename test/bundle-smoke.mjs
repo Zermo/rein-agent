@@ -36,6 +36,21 @@ try {
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /bundle rollover OK/);
   assert.equal(requests, 2);
+  for (const args of [["autonomy", "init", "--daily-budget", "2"], ["autonomy", "status", "--json"], ["autonomy", "tui"]]) {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [join(root, "dist/rein.js"), ...args], { cwd: dir, env: { ...process.env, REIN_HOME: dir } });
+      let stdout = "", stderr = "";
+      child.stdout.on("data", data => stdout += data); child.stderr.on("data", data => stderr += data);
+      child.on("error", reject);
+      const timer = setTimeout(() => child.kill("SIGKILL"), 10000);
+      child.on("close", code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+      child.stdin.end();
+    });
+    assert.equal(result.code, 0, result.stderr);
+    if (args[1] === "status") { const state = JSON.parse(result.stdout); assert.equal(state.paused, true); assert.equal(state.maxRunsPerDay, 2); assert.equal(state.runs.length, 0); }
+    if (args[1] === "tui") assert.match(result.stdout, /Rein autonomy/);
+  }
+  assert.equal(requests, 2, "autonomy controls do not start inference");
   console.log(`bundle smoke OK (${process.version})`);
 } finally {
   await new Promise(resolve => server.close(resolve));

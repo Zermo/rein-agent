@@ -228,6 +228,7 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 			delete saved.sshHost;
 			saveConfig(saved);
 			log(`Saved ${info.label} configuration to ${configPath()}. Credentials remain with the official CLI.`);
+			log("For optional proactive task suggestions, run rein autonomy init, then rein autonomy scan and rein autonomy tui.");
 			return 0;
 		}
 
@@ -296,6 +297,7 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 		saveConfig(saved);
 		log(`Connection passed: ${result.detail}\nSaved ${provider}/${model} at ${baseUrl} to ${configPath()}.`);
 		if (key && !saveKey) log(`Using credentials from the environment; no API key was written to config.`);
+		log("For optional proactive task suggestions, run rein autonomy init, then rein autonomy scan and rein autonomy tui.");
 		return 0;
 	} catch (error) {
 		log(error instanceof Error ? error.message : String(error));

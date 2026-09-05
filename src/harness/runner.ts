@@ -36,6 +36,8 @@ export interface RunnerOptions {
 	tools?: AgentTool[];
 	/** Tool names that require approval before execution (e.g. ["bash", "write"]). */
 	askTools?: string[];
+	/** Host policy checked before every tool, independently of interactive approvals. */
+	toolGuard?: (name: string, args: Record<string, unknown>) => string | undefined | Promise<string | undefined>;
 	/** What happens when an approval times out with no canvas/phone answer, outside nodeterm.
 	 *  Default: deny. The REPL passes a stdin y/n prompt. */
 	askFallback?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
@@ -152,6 +154,8 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					maxTurns: opts.maxTurns ?? 60,
 					getSteeringMessages: () => steering.splice(0, steering.length),
 					beforeToolCall: async (info) => {
+						const denied = await opts.toolGuard?.(info.toolCall.name, (info.args ?? {}) as Record<string, unknown>);
+						if (denied) return { block: true, reason: denied };
 						if (!askTools.includes(info.toolCall.name)) return undefined;
 						const name = info.toolCall.name;
 						const args = (info.args ?? {}) as Record<string, unknown>;
