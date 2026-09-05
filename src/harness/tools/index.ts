@@ -10,16 +10,18 @@ import gatesTool from "./gates.ts";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import type { AgentTool } from "../../agent/agent-loop.ts";
+import { createTmuxTool } from "../tmux.ts";
 
-export const TOOLS: AgentTool[] = [readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool, webTools[0], webTools[1], gatesTool];
+export const TOOLS: AgentTool[] = [readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool, webTools[0], webTools[1], gatesTool, createTmuxTool(process.cwd())];
 
 /** Bind per-runner paths without changing the process or shared tool instances. */
 export function toolsForCwd(cwd: string): AgentTool[] {
 	const root = resolve(cwd);
 	const pathTools = new Set(["read", "write", "edit", "grep", "find", "ls"]);
 	const optionalPaths = new Set(["grep", "find", "ls"]);
-	return TOOLS.map(tool => {
+	return [...TOOLS.map(tool => {
 		if (tool.name === "bash") return createBashTool(root);
+		if (tool.name === "tmux") return createTmuxTool(root);
 		if (!pathTools.has(tool.name) && tool.name !== "gates") return tool;
 		return {
 			...tool,
@@ -32,5 +34,5 @@ export function toolsForCwd(cwd: string): AgentTool[] {
 				return tool.execute(id, { ...args, [field]: path }, signal, onUpdate);
 			},
 		};
-	});
+	})];
 }

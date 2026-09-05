@@ -8,14 +8,16 @@ import { promisify } from "node:util";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 import type { Readable } from "node:stream";
-import { PROVIDER_PRESETS, discoverLocalServers, loadConfig, pickDefaultModelId, apiKeyFor, normalizeBaseUrl, detectEndpoint } from "../ai/models.ts";
+import { PROVIDER_PRESETS, discoverLocalServers, loadConfig, pickDefaultModelId, apiKeyFor, normalizeBaseUrl, detectEndpoint, validateHttpApi } from "../ai/models.ts";
 import { CLI_PROVIDERS, loginCli, checkCliAuth } from "./auth.ts";
 import { withSshTunnel } from "../ai/ssh.ts";
 import { postChatCompletion } from "../ai/chat-request.ts";
 import { GITHUB_MODELS_RETIRED } from "../ai/endpoints.ts";
+import { chatCompletionChunks, chatCompletionText } from "../ai/openai-completions.ts";
 
 type CliProvider = "codex" | "copilot";
 export interface SetupOptions {
+	api?: string;
 	yes?: boolean;
 	status?: boolean;
 	provider?: string;
@@ -126,9 +128,14 @@ export async function testConnection(baseUrl: string, model: string, apiKey?: st
 			const detail = redactKey(await response.text().catch(() => ""), apiKey).slice(0, 300);
 			return { ok: false, detail: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
 		}
-		const body = await response.json() as { choices?: { message?: { content?: unknown; tool_calls?: unknown[] } }[] };
-		const message = body.choices?.[0]?.message;
-		if (!message || (typeof message.content !== "string" && !Array.isArray(message.content) && !message.tool_calls?.length)) {
+		let usable = false;
+		for await (const chunk of chatCompletionChunks(response)) {
+			if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? "The provider returned an error.");
+			const choice = chunk.choices?.[0];
+			const message = choice?.delta ?? choice?.message;
+			if (message && (chatCompletionText(message).trim() || Array.isArray(message.tool_calls) && message.tool_calls.length)) usable = true;
+		}
+		if (!usable) {
 			return { ok: false, detail: "Endpoint returned no valid chat completion. Check the API server URL and selected model." };
 		}
 		return { ok: true, detail: `valid chat completion in ${Date.now() - started}ms` };
@@ -163,15 +170,20 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 	const connection = dependencies.connection ?? testConnection;
 	const cliStatus = dependencies.cliStatus ?? checkCliAuth;
 	try {
+		const requestedApi = opts.api ?? (process.env.REIN_API?.trim() || undefined);
+		if (requestedApi !== undefined) validateHttpApi(requestedApi);
 		if (opts.status) {
 			log(`config: ${configPath()}`);
 			log(`provider: ${config.provider ?? "(unset)"}\nmodel: ${config.model ?? "(unset)"}\nauth: ${config.auth?.type ?? "api-key"}`);
 			if (config.auth?.type === "cli") {
+				if (requestedApi !== undefined) throw new Error("Chat Completions requires an HTTP API provider. CLI subscriptions manage their own transport.");
 				if (!(config.auth.provider in CLI_PROVIDERS)) throw new Error("Unknown saved CLI provider. Run rein setup to repair the configuration.");
 				const status = await cliStatus(config.auth.provider);
 				log(status.detail);
 				return status.available && status.authenticated !== false ? 0 : 1;
 			}
+			const api = validateHttpApi(requestedApi ?? config.api);
+			log(`API protocol: ${api} (OpenAI Chat Completions, JSON or SSE)`);
 			log(`base URL: ${config.baseUrl ?? "(unset)"}${config.sshHost ? `\nSSH host: ${config.sshHost}` : ""}\nAPI key: ${config.apiKey ? "saved (hidden)" : "not saved"}`);
 			if (!config.baseUrl || !config.model) { log("Run rein setup to configure a connection."); return 0; }
 			const key = keyFor(config.provider, config.baseUrl, config.sshHost); if (key) secrets.add(key);
@@ -199,13 +211,14 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 			log("rein setup — local server, remote host, cloud API, or CLI account");
 			const locals = await (dependencies.discover ?? discoverLocalServers)();
 			const choices: Selection[] = locals.map(server => ({ ...server, label: `${server.provider} — ${server.baseUrl}` }));
-			choices.push({ label: "Custom / remote host (model-host, NetBird, LAN, or OpenAI-compatible API)", provider: "custom" });
+			choices.push({ label: "Custom Chat Completions API / remote host (model-host, NetBird, LAN)", provider: "custom" });
 			choices.push(...(["codex", "copilot"] as const).map(provider => ({ label: CLI_PROVIDERS[provider].label, cli: provider })));
 			for (const [provider, preset] of Object.entries(PROVIDER_PRESETS)) if (!LOCAL.has(provider) && provider !== "github") choices.push({ label: `${provider} — cloud API key`, provider, baseUrl: preset.baseUrl });
 			selection = { ...choices[await choose(getPrompt(), log, "Choose connection", choices.map(c => c.label))], model: selection.model };
 		}
 
 		if (selection.cli) {
+			if (requestedApi !== undefined) throw new Error("Chat Completions requires an HTTP API provider. CLI subscriptions manage their own transport.");
 			const provider = selection.cli;
 			const info = CLI_PROVIDERS[provider];
 			if (!info) throw new Error("Unknown saved CLI provider. Run rein setup to repair the configuration.");
@@ -226,12 +239,14 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 			const saved: Record<string, unknown> = { ...config, provider, baseUrl: info.baseUrl, model, auth: { type: "cli", provider } };
 			delete saved.apiKey;
 			delete saved.sshHost;
+			delete saved.api;
 			saveConfig(saved);
 			log(`Saved ${info.label} configuration to ${configPath()}. Credentials remain with the official CLI.`);
 			log("For optional proactive task suggestions, run rein autonomy init, then rein autonomy scan and rein autonomy tui.");
 			return 0;
 		}
 
+		validateHttpApi(requestedApi ?? config.api);
 		if (selection.provider === "github") throw new Error(GITHUB_MODELS_RETIRED);
 		if (selection.provider && selection.provider !== "custom" && !PROVIDER_PRESETS[selection.provider]) throw new Error(`Unknown API provider "${selection.provider}". Use --base-url for a custom host.`);
 		selection.baseUrl ??= selection.provider && PROVIDER_PRESETS[selection.provider]?.baseUrl;
@@ -289,13 +304,13 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 		if (!model) throw new Error("No model available. Load a model on the remote server or pass --model <id>. Check the listening port, 0.0.0.0 binding and NetBird reachability if discovery failed.");
 		const result = await connection(baseUrl, model, key, { sshHost });
 		if (!result.ok) throw new Error(`Connection test failed: ${result.detail}\nConfiguration was not saved. Correct the endpoint, credentials or model and rerun setup.`);
-		const saved: Record<string, unknown> = { ...config, provider, baseUrl, model, auth: { type: "api-key" } };
+		const saved: Record<string, unknown> = { ...config, provider, baseUrl, model, api: "chat-completions", auth: { type: "api-key" } };
 		delete saved.apiKey;
 		delete saved.sshHost;
 		if (sshHost) saved.sshHost = sshHost;
 		if (saveKey) saved.apiKey = saveKey;
 		saveConfig(saved);
-		log(`Connection passed: ${result.detail}\nSaved ${provider}/${model} at ${baseUrl} to ${configPath()}.`);
+		log(`Chat Completions connection passed: ${result.detail}\nPOST ${baseUrl.replace(/\/$/, "")}/chat/completions\nSaved ${provider}/${model} at ${baseUrl} to ${configPath()}.`);
 		if (key && !saveKey) log(`Using credentials from the environment; no API key was written to config.`);
 		log("For optional proactive task suggestions, run rein autonomy init, then rein autonomy scan and rein autonomy tui.");
 		return 0;

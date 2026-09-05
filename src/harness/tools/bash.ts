@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { AgentTool } from "../../agent/agent-loop.ts";
 import { truncateTail } from "../../../vendor/fold/Truncation.ts";
+import { TmuxShells } from "../tmux.ts";
 
 /** Kill the whole owned process group on cancellation, including shell children. */
 async function runShell(command: string, cwd: string | undefined, timeout: number, signal?: AbortSignal) {
@@ -37,10 +38,19 @@ async function runShell(command: string, cwd: string | undefined, timeout: numbe
 export function createBashTool(cwd?: string): AgentTool {
 	return {
 		name: "bash",
-		description: "Execute bash in the working directory. Output keeps the last 500 lines / 20KB using Fold's UTF-8 truncation. Redirect large output to a file for later read/grep. Cancellation stops this command's process group. Commands receive no interactive stdin.",
-		parameters: { type: "object", properties: { command: { type: "string" }, timeout: { type: "integer", minimum: 1, maximum: 600, description: "Seconds; default 120" } }, required: ["command"] },
+		description: "Execute bash in the working directory. Default mode=exec waits with no interactive stdin; output keeps 500 lines / 20KB and cancellation stops the process group. mode=tmux starts a persistent interactive shell and returns its ID, or sends to session. Use the tmux tool to capture, interrupt or stop persistent sessions; they survive /stop.",
+		parameters: { type: "object", properties: { command: { type: "string" }, mode: { type: "string", enum: ["exec", "tmux"] }, session: { type: "string" }, timeout: { type: "integer", minimum: 1, maximum: 600, description: "Seconds for exec mode; default 120" } }, required: ["command"] },
 		executionMode: "sequential",
 		async execute(_id, args, signal) {
+			if (args.mode === "tmux") {
+				try {
+					const shells = new TmuxShells(cwd);
+					let id = typeof args.session === "string" ? args.session : undefined;
+					if (id) await shells.send(id, args.command as string, true, signal);
+					else id = await shells.start(args.command as string, signal);
+					return { content: `Command queued in persistent shell ${id}. Use tmux capture for output; tmux stop to close.`, details: { session: id, persistent: true } };
+				} catch (error) { return { content: (error as Error).message, isError: true }; }
+			}
 			const timeout = typeof args.timeout === "number" ? args.timeout : 120;
 			const result = await runShell(args.command as string, cwd, timeout, signal);
 			const text = [result.stdout, result.stderr].filter(Boolean).join("\n") || "(no output)";

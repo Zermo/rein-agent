@@ -40,7 +40,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		console.log(gray("nodeterm node detected — status badges on; approvals can be answered from the canvas or the phone."));
 	}
 
-	let busy = false;
+	let busy = false, terminating = false;
 	let lastProposalAlert = "";
 	const proposalAlert = () => {
 		try {
@@ -58,12 +58,13 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	let thinkingOn = false;
 
 	const flushLine = () => {
-		if (currentText || thinkingOn) process.stdout.write("\n");
+		if (!terminating && (currentText || thinkingOn)) process.stdout.write("\n");
 		thinkingOn = false;
 		currentText = "";
 	};
 
 	const onEvent = (event: any) => {
+		if (terminating) return;
 		switch (event.type) {
 			case "message_update": {
 				const e = event.event;
@@ -137,7 +138,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			case "model":
 				console.log(
 					gray(
-						`model: ${runner.model.provider}/${runner.model.id}\nbase: ${runner.model.baseUrl}\ntools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`,
+						`model: ${runner.model.provider}/${runner.model.id}\nbase: ${runner.model.baseUrl}\nAPI: ${runner.model.baseUrl.startsWith("cli://") ? "official subscription CLI" : "chat-completions (JSON/SSE)"}\ntools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`,
 					),
 				);
 				return true;
@@ -231,6 +232,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	let inputClosed = false;
 	const lineQueue: string[] = [];
 	rl.on("line", (line) => {
+		if (terminating) return;
 		if (/^\/(stop|quit|exit)\s*$/.test(line.trim()) && busy) {
 			controller?.abort();
 			approvalAnswer?.("");
@@ -278,6 +280,21 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			approvalAnswer = undefined;
 		} else rl.close();
 	});
+	// Closing a tmux pane sends SIGHUP. Await the active run's cancellation so
+	// its detached foreground shell group is cleaned up before this process exits.
+	// Ordinary piped EOF keeps its existing behavior and drains queued requests.
+	const terminate = (code: number) => {
+		if (terminating) return;
+		terminating = true;
+		process.exitCode = code;
+		controller?.abort();
+		lineQueue.length = 0;
+		approvalAnswer?.("");
+		approvalAnswer = undefined;
+		if (!rl.closed) rl.close();
+	};
+	const signals = [["SIGHUP", () => terminate(129)], ["SIGTERM", () => terminate(143)]] as const;
+	for (const [signal, handler] of signals) process.on(signal, handler);
 	let approvalTail = Promise.resolve(false);
 	runner.askFallback = (name, args) => {
 		const pending = approvalTail.then(async () => {
@@ -306,7 +323,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		console.log(gray("ask me anything, or /help for commands. while I'm working, just type — I'll fold it in."));
 	}
 
-	while (true) {
+	try { while (!terminating) {
 		proposalAlert();
 		let line = await ask();
 		if (line === null) break;
@@ -337,19 +354,21 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			busy = true;
 			controller = new AbortController();
 			await runner.run(userMsg, { signal: controller.signal, onEvent });
+			if (terminating) continue;
 			if (process.stdout.isTTY) process.stdout.write("\n");
 			const secs = ((Date.now() - started) / 1000).toFixed(1);
 			const usage = runner.context.messages[runner.context.messages.length - 1];
 			const tokens = (usage as any)?.usage?.output;
 			console.log(gray(`${secs}s${tokens ? ` · ${tokens} out-tokens` : ""}`));
 		} catch (err) {
-			console.log(red(`something broke: ${(err as Error).message}`));
+			if (!terminating) console.log(red(`something broke: ${(err as Error).message}`));
 		} finally {
 			busy = false;
 			controller = undefined;
 			flushLine();
 		}
+	} } finally {
+		for (const [signal, handler] of signals) process.off(signal, handler);
+		if (!rl.closed) rl.close();
 	}
-
-	if (!rl.closed) rl.close();
 }

@@ -1,0 +1,15 @@
+// Added by Rein's build script; upstream source files remain pinned separately.
+package meat
+
+import (
+	"context"
+	"encoding/json"
+)
+
+// ReinReadTool replaces OS-specific repository reads inside WebAssembly.
+var ReinReadTool func(context.Context, string, string, json.RawMessage) (string, bool)
+
+// ReinDiffBudget lowers the per-chunk budget for small configured model windows.
+func ReinDiffBudget(bytes int) {
+	if bytes >= 1024 && bytes < maxDiffBytes { singleRunDiffBytes = bytes }
+}

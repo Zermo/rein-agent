@@ -78,6 +78,7 @@ export async function discoverLocalServers(): Promise<LocalServer[]> {
 
 export interface ReinConfig {
 	provider?: string;
+	api?: "chat-completions";
 	auth?: { type: "api-key" | "cli"; provider?: "codex" | "copilot"; command?: never };
 	sshHost?: string;
 	baseUrl?: string;
@@ -90,6 +91,12 @@ export interface ReinConfig {
 	contextWindow?: number;
 	posthorse?: { enabled?: boolean; reserveTokens?: number };
 	tinyfish?: { apiKey?: string };
+}
+
+/** Config files are untrusted JSON; only the implemented HTTP protocol is accepted. */
+export function validateHttpApi(api: unknown): "chat-completions" {
+	if (api !== undefined && api !== "chat-completions") throw new Error("Supported HTTP API: chat-completions. Use --api chat-completions with an OpenAI-compatible endpoint.");
+	return "chat-completions";
 }
 
 /** Credentials are selected for the logical endpoint, before any SSH forwarding. */
@@ -134,17 +141,20 @@ export function loadConfig(): ReinConfig {
  *   3. Local discovery only when no endpoint was selected
  */
 export async function resolveModel(
-	overrides: { model?: string; baseUrl?: string; provider?: string; sshHost?: string } = {},
+	overrides: { model?: string; baseUrl?: string; provider?: string; sshHost?: string; api?: string } = {},
 ): Promise<Model> {
 	const config = loadConfig();
 	const envBase = process.env.REIN_BASE_URL?.trim() || undefined;
 	const envModel = process.env.REIN_MODEL?.trim() || undefined;
 	const providerOverride = overrides.provider?.toLowerCase();
+	const requestedApi = overrides.api ?? (process.env.REIN_API?.trim() || undefined);
+	if (requestedApi !== undefined) validateHttpApi(requestedApi);
 	const selectingEndpoint = overrides.baseUrl !== undefined || !!envBase;
 	const configuredProvider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : undefined);
 	const providerName = providerOverride ?? (selectingEndpoint ? undefined : configuredProvider);
 	if (providerName === "github") throw new Error(GITHUB_MODELS_RETIRED);
 	if (providerName === "codex" || providerName === "copilot") {
+		if (requestedApi !== undefined) throw new Error("--api/REIN_API selects an HTTP API protocol. Subscription CLI providers manage their own transport.");
 		if (overrides.baseUrl !== undefined || envBase) throw new Error(`CLI provider ${providerName} cannot be combined with an HTTP base URL. Remove --base-url/REIN_BASE_URL or select an API provider.`);
 		if (overrides.sshHost) throw new Error("SSH forwarding applies to HTTP API providers, not subscription CLI providers.");
 		return {
@@ -153,6 +163,7 @@ export async function resolveModel(
 			contextWindow: config.contextWindow ?? 32_768, maxTokens: config.maxTokens ?? 4096,
 		};
 	}
+	validateHttpApi(requestedApi ?? config.api);
 	const preset = providerName ? PROVIDER_PRESETS[providerName] : undefined;
 	if (providerOverride && !preset && !["custom", "openai-compatible"].includes(providerOverride)) {
 		throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, custom`);

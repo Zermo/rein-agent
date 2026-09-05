@@ -17,6 +17,8 @@ import * as nodeterm from "./nodeterm.ts";
 import { Posthorse, POSTHORSE_GUIDANCE } from "./posthorse.ts";
 import { contextTools } from "./tools/context.ts";
 import { skillTool, SKILL_GUIDANCE } from "./skills.ts";
+import { createMeatTool } from "./meat/tool.ts";
+import { ActivityJournal } from "./activity/store.ts";
 
 export interface RunnerOptions {
 	cwd: string;
@@ -24,9 +26,12 @@ export interface RunnerOptions {
 	reserveTokens?: number;
 	autoContext?: boolean;
 	sessionId?: string;
+	/** Optional private event view; never injected into model context. */
+	activityId?: string;
 	modelOverride?: string;
 	baseUrlOverride?: string;
 	providerOverride?: string;
+	api?: string;
 	sshHostOverride?: string;
 	toolsMode?: ToolMode;
 	maxTurns?: number;
@@ -72,6 +77,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 		baseUrl: opts.baseUrlOverride,
 		provider: opts.providerOverride,
 		sshHost: opts.sshHostOverride,
+		api: opts.api,
 	});
 	if (opts.contextWindow !== undefined) model.contextWindow = opts.contextWindow;
 	const apiKey = apiKeyFor(model.provider, model.baseUrl, model.sshHost);
@@ -98,8 +104,9 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 
 	const steering: AgentMessage[] = [];
 	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
-	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillTool);
+	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillTool, createMeatTool(opts.cwd, () => ({ ...opts, toolsMode: runner.toolsMode })));
 	const context: AgentContext = { systemPrompt, messages: posthorse.messages, tools };
+	const activity = opts.activityId ? new ActivityJournal(opts.activityId, opts.cwd, model.id) : undefined;
 	let running = false;
 	const askTools = [...(opts.askTools ?? [])];
 
@@ -129,6 +136,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 		setSession(id) {
 			if (running) throw new Error("Cannot switch sessions during an active run");
 			posthorse.setSession(id);
+			activity?.setSession(id);
 			context.messages = posthorse.messages;
 			steering.length = 0;
 		},
@@ -160,12 +168,13 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					beforeToolCall: async (info) => {
 						const denied = await opts.toolGuard?.(info.toolCall.name, (info.args ?? {}) as Record<string, unknown>);
 						if (denied) return { block: true, reason: denied };
-						if (!askTools.includes(info.toolCall.name)) return undefined;
+						const shellMutation = info.toolCall.name === "tmux" && !["list", "capture"].includes(String((info.args as any)?.op));
+						if (!askTools.includes(info.toolCall.name) && !(shellMutation && askTools.includes("bash"))) return undefined;
 						const name = info.toolCall.name;
 						const args = (info.args ?? {}) as Record<string, unknown>;
 						if (nodeterm.active()) {
 							nodeterm.setTitle(`rein · needs you: ${name}`);
-							const verdict = await nodeterm.requestApproval(name, args);
+							const verdict = await nodeterm.requestApproval(name, args, undefined, runOpts?.signal);
 							if (verdict === "allow") return undefined;
 							if (verdict === "deny") return { block: true, reason: `Denied: ${name} ${summarizeArgs(args)} (canvas/phone said no)` };
 							console.error(`\n[approval] ${name}: no answer in time — ${runner.askFallback ? "requesting local approval" : "denying execution"}\n`);
@@ -177,6 +186,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 				},
 				runOpts?.signal,
 				async (event) => {
+					activity?.event(event);
 					if (event.type === "message_end") posthorse.record(event.message);
 					// nodeterm status + title (no-ops outside a nodeterm node / non-TTY)
 					switch (event.type) {
@@ -205,6 +215,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					await runOpts?.onEvent?.(event);
 				},
 			); } finally {
+				activity?.end(runOpts?.signal?.aborted);
 				if (runOpts?.signal?.aborted) steering.length = 0;
 				posthorse.captureWorkspace(); running = false;
 			}

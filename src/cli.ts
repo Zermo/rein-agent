@@ -65,6 +65,15 @@ Usage:
   rein models                   show detected local servers and provider presets
   rein skills [name]            list bundled workflows, or read one without running it
   rein debug <folder> [--json]  inspect exported JSONL sessions offline (counts only)
+  rein --visual                 split the terminal into chat and live activity (tmux)
+  rein watch <activity-id>       inspect activity; press c for the node canvas
+  rein canvas <activity-id>      open the local interactive node canvas
+  rein meat [ref [ref]]          review a commit or range with the embedded Meat engine
+                                --staged or --working-tree selects uncommitted changes
+  rein tmux start [command]      start a persistent bash shell; returns its session ID
+  rein tmux list                list this workspace's persistent shells
+  rein tmux capture|attach|interrupt|stop <id>
+  rein tmux send <id> <text>     send literal input and Enter to a persistent shell
   rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
   rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
@@ -90,6 +99,8 @@ Model selection (highest wins):
 
 Options:
   --auth <api-key|cli>            setup: API credentials or official subscription CLI
+  --api chat-completions         explicit OpenAI-compatible HTTP protocol
+  --activity <id>                record a private activity view under a fresh UUID
   --device-auth=false             login/setup: browser callback instead of device code
   --tools <auto|native|text>       tool protocol (auto = capability table + runtime fallback)
   --max-turns <n>                  safety cap per prompt (default 60)
@@ -114,7 +125,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -182,6 +193,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	const maxIterations = numberFlag(flags, "max-iterations", 1);
 	const common = {
 		cwd: process.cwd(),
+		activityId: stringFlag(flags, "activity"),
+		api: stringFlag(flags, "api"),
 		modelOverride: stringFlag(flags, "model"),
 		baseUrlOverride: stringFlag(flags, "base-url"),
 		providerOverride: stringFlag(flags, "provider"),
@@ -194,7 +207,50 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		autoContext: flags["no-auto-context"] === true ? false : undefined,
 		askTools: typeof flags.ask === "string" ? flags.ask.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
 	};
+	if (flags.visual === true) {
+		if (_[0] && !("print" in flags || "p" in flags)) throw new Error("Use --visual with an interactive session or --print. The agent's meat tool appears in that session's activity view.");
+		if (common.activityId) throw new Error("--visual creates its own activity ID; omit --activity.");
+		const { launchVisual } = await import("./harness/activity/terminal.ts");
+		process.exitCode = await launchVisual(argv, common.cwd); return;
+	}
+	if (_[0] === "watch" || _[0] === "canvas") {
+		if (!_[1]) throw new Error(`Usage: rein ${_[0]} <activity-id>`);
+		if (_[0] === "watch") { const { watchActivity } = await import("./harness/activity/terminal.ts"); await watchActivity(_[1]); return; }
+		const { startCanvas, openCanvas } = await import("./harness/activity/server.ts");
+		const canvas = await startCanvas(_[1]); console.log(canvas.url);
+		if (flags["no-browser"] !== true) openCanvas(canvas.url);
+		await new Promise<void>(resolve => {
+			const stop = () => { process.off("SIGINT", stop); process.off("SIGTERM", stop); void canvas.close().finally(resolve); };
+			process.on("SIGINT", stop); process.on("SIGTERM", stop);
+		}); return;
+	}
 
+	if (_[0] === "meat") {
+		const { runMeatReview } = await import("./harness/meat/review.ts");
+		const controller = new AbortController();
+		const interrupt = () => controller.abort(); process.on("SIGINT", interrupt);
+		try {
+			const result = await runMeatReview({ ...common, refs: _.slice(1), staged: flags.staged === true, workingTree: flags["working-tree"] === true, signal: controller.signal,
+				onProgress: text => { if (!flags.json) process.stderr.write(`[meat] ${text}\n`); } });
+			console.log(flags.json ? JSON.stringify(result, null, 2) : `${result.summary}\n\nReading diff, not an applicable patch:\n${result.smart_diff}`);
+		} finally { process.off("SIGINT", interrupt); }
+		return;
+	}
+	if (_[0] === "tmux") {
+		const { TmuxShells } = await import("./harness/tmux.ts");
+		const shells = new TmuxShells(common.cwd, flags.view === true ? "visual" : "shell"); const action = _[1] ?? "list", id = _[2] ?? "";
+		switch (action) {
+			case "start": console.log(await shells.start(_.slice(2).join(" ") || undefined)); break;
+			case "list": console.log(JSON.stringify(await shells.list(), null, 2)); break;
+			case "capture": console.log(await shells.capture(id, numberFlag(flags, "lines", 1))); break;
+			case "send": await shells.send(id, _.slice(3).join(" ")); console.log("Input sent."); break;
+			case "interrupt": await shells.interrupt(id); console.log("Interrupted."); break;
+			case "stop": await shells.stop(id); console.log("Stopped."); break;
+			case "attach": process.exitCode = await shells.attach(id); break;
+			default: throw new Error("Usage: rein tmux start|list|capture|send|interrupt|stop|attach [session ID] [text]");
+		}
+		return;
+	}
 	if (_[0] === "skills") {
 		const { readSkill, skillRoster } = await import("./harness/skills.ts");
 		console.log(_[1] ? readSkill(_[1], _[2]) : skillRoster());
@@ -281,6 +337,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		if (cliProvider !== undefined && cliProvider !== "codex" && cliProvider !== "copilot") throw new Error("--cli-provider must be codex or copilot");
 		const { runSetup } = await import("./harness/setup.ts");
 		const code = await runSetup({ yes: flags.yes === true, status: flags.status === true,
+			api: common.api,
 			provider: common.providerOverride, baseUrl: common.baseUrlOverride, model: common.modelOverride,
 			sshHost: common.sshHostOverride, auth, cliProvider, deviceAuth: flags["device-auth"] !== false, noBrowser: flags["no-browser"] === true });
 		process.exitCode = code;

@@ -44,6 +44,29 @@ interface StreamingToolCall {
 	args: string;
 }
 
+/** Compatible servers may return typed content parts or a separate refusal field. */
+export function chatCompletionText(message: { content?: unknown; refusal?: unknown }): string {
+	const text = typeof message.content === "string" ? message.content : Array.isArray(message.content)
+		? message.content.map(part => part?.type === "text" && typeof part.text === "string" ? part.text
+			: part?.type === "refusal" && typeof part.refusal === "string" ? part.refusal : "").join("") : "";
+	const refusal = typeof message.refusal === "string" ? message.refusal : "";
+	return text + (text.trim() && refusal ? "\n" : "") + refusal;
+}
+
+/** The same completion shapes are accepted during setup and normal inference. */
+export async function* chatCompletionChunks(response: Response): AsyncGenerator<any> {
+	if ((response.headers.get("content-type") ?? "").toLowerCase().includes("json")) {
+		const body = await response.json();
+		if (body && typeof body === "object") yield body;
+		return;
+	}
+	for await (const data of sseDataLines(response.body)) {
+		let chunk: unknown;
+		try { chunk = JSON.parse(data); } catch { continue; } // Non-JSON keepalives.
+		if (chunk && typeof chunk === "object") yield chunk;
+	}
+}
+
 function toOpenAIMessage(message: Message, toolsMode: "native" | "text"): OpenAIMessage | OpenAIMessage[] {
 	switch (message.role) {
 		case "user":
@@ -219,20 +242,6 @@ export function stream(
 
 			emit({ type: "start", partial: message });
 
-			// Some servers (or their proxies) answer a stream:true request with a
-			// single non-stream JSON object — legal under the OpenAI contract.
-			// Normalize that shape (choice.message → choice.delta) so the one loop
-			// below handles both; real SSE servers keep true token-by-token streaming.
-			const ct = (response.headers.get("content-type") ?? "").toLowerCase();
-			let dataLines: AsyncIterable<string>;
-			if (ct.includes("json")) {
-				const doc: any = JSON.parse(await response.text());
-				if (doc?.choices?.[0]?.message) doc.choices[0].delta = doc.choices[0].message;
-				dataLines = [JSON.stringify(doc)];
-			} else {
-				dataLines = sseDataLines(response.body);
-			}
-
 			// Streaming state
 			let textBlock: { type: "text"; text: string } | null = null;
 			let thinkingBlock: { type: "thinking"; thinking: string } | null = null;
@@ -258,22 +267,17 @@ export function stream(
 				return thinkingBlock;
 			};
 
-			for await (const data of dataLines) {
-				let chunk: any;
-				try {
-					chunk = JSON.parse(data);
-				} catch {
-					continue; // some servers emit non-JSON keepalives
-				}
-
+			for await (const chunk of chatCompletionChunks(response)) {
 				if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? JSON.stringify(chunk.error));
 
 				const cached = chunk.usage?.prompt_tokens_details?.cached_tokens ?? chunk.timings?.cache_n;
 				if (chunk.usage) {
+					const input = chunk.usage.prompt_tokens ?? 0;
+					const output = chunk.usage.completion_tokens ?? 0;
 					const u: Usage = {
-						input: chunk.usage.prompt_tokens ?? 0,
-						output: chunk.usage.completion_tokens ?? 0,
-						totalTokens: chunk.usage.total_tokens ?? 0,
+						input,
+						output,
+						totalTokens: chunk.usage.total_tokens || input + output,
 					};
 					if (typeof chunk.usage.completion_tokens_details?.reasoning_tokens === "number") {
 						u.reasoning = chunk.usage.completion_tokens_details.reasoning_tokens;
@@ -289,10 +293,11 @@ export function stream(
 				if (choice.finish_reason) finishReason = choice.finish_reason;
 
 				const delta = choice.delta ?? choice.message ?? {};
-				if (typeof delta.content === "string" && delta.content.length > 0) {
+				const visible = chatCompletionText(delta);
+				if (visible) {
 					const block = ensureTextBlock();
-					block.text += delta.content;
-					emit({ type: "text_delta", contentIndex: message.content.indexOf(block), delta: delta.content, partial: message });
+					block.text += visible;
+					emit({ type: "text_delta", contentIndex: message.content.indexOf(block), delta: visible, partial: message });
 				}
 				const reasoning =
 					typeof delta.reasoning_content === "string"

@@ -118,14 +118,19 @@ export function setTitle(text: string): void {
  * Approval via the pending-files protocol.
  *
  * Returns "allow" | "deny" | "timeout" — the caller decides what "timeout"
- * means (nodeterm's reference behavior is fail-open).
+ * means (nodeterm's reference behavior is fail-open). Cancellation denies
+ * immediately and removes the pending files without waiting for the next poll.
  */
 export function requestApproval(
 	toolName: string,
 	toolInput: Record<string, unknown>,
 	timeoutSec?: number,
+	signal?: AbortSignal,
 ): Promise<"allow" | "deny" | "timeout"> {
-	const wait = Math.max(1, Number(timeoutSec ?? process.env.NODETERM_PERM_WAIT_SECS ?? 45));
+	if (signal?.aborted) return Promise.resolve("deny");
+	if (!active()) return Promise.resolve("timeout");
+	const configuredWait = Number(timeoutSec ?? process.env.NODETERM_PERM_WAIT_SECS ?? 45);
+	const wait = Number.isFinite(configuredWait) ? Math.max(1, configuredWait) : 45;
 	const nodeId = process.env.NODETERM_NODE_ID ?? "node";
 	const pendingId = `${nodeId}-${Date.now()}-${randomUUID().slice(0, 8)}`;
 	const dir = pendingDir();
@@ -154,7 +159,24 @@ export function requestApproval(
 
 	const deadline = Date.now() + wait * 1000;
 	return new Promise((resolve) => {
+		let timer: ReturnType<typeof setTimeout> | undefined, settled = false;
+		const finish = (answer: "allow" | "deny" | "timeout", answered = false): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", abort);
+			for (const file of [requestFile, answerFile]) {
+				try { fs.rmSync(file, { force: true }); } catch { /* already gone */ }
+			}
+			if (answered) postEvent(
+				{ hook_event_name: "PostToolUse", tool_name: toolName, hookSpecificOutput: { hookEventName: "PostToolUse" } },
+				{ nodeterm_answered: answer },
+			);
+			resolve(answer);
+		};
+		const abort = (): void => finish("deny");
 		const tick = (): void => {
+			if (signal?.aborted) { abort(); return; }
 			let answer = "";
 			try {
 				answer = fs.readFileSync(answerFile, "utf8").trim().toLowerCase();
@@ -162,31 +184,16 @@ export function requestApproval(
 				answer = "";
 			}
 			if (answer === "allow" || answer === "deny") {
-				for (const f of [requestFile, answerFile]) {
-					try {
-						fs.rmSync(f, { force: true });
-					} catch {
-						/* already gone */
-					}
-				}
-				postEvent(
-					{ hook_event_name: "PostToolUse", tool_name: toolName, hookSpecificOutput: { hookEventName: "PostToolUse" } },
-					{ nodeterm_answered: answer },
-				);
-				resolve(answer);
+				finish(answer, true);
 				return;
 			}
 			if (Date.now() >= deadline) {
-				try {
-					fs.rmSync(requestFile, { force: true });
-				} catch {
-					/* already gone */
-				}
-				resolve("timeout");
+				finish("timeout");
 				return;
 			}
-			setTimeout(tick, 500);
+			timer = setTimeout(tick, 500);
 		};
-		setTimeout(tick, 500);
+		signal?.addEventListener("abort", abort, { once: true });
+		if (signal?.aborted) abort(); else timer = setTimeout(tick, 500);
 	});
 }

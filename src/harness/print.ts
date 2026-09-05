@@ -23,8 +23,10 @@ export async function runPrint(opts: PrintOptions): Promise<number> {
 	}
 
 	const controller = new AbortController();
-	const interrupt = () => controller.abort();
-	process.on("SIGINT", interrupt);
+	let cancelledCode = 130;
+	const cancel = (code: number) => { if (!controller.signal.aborted) cancelledCode = code; controller.abort(); };
+	const signals = [["SIGINT", () => cancel(130)], ["SIGHUP", () => cancel(129)], ["SIGTERM", () => cancel(143)]] as const;
+	for (const [signal, handler] of signals) process.on(signal, handler);
 	try {
 		const runner = await createRunner(opts);
 		if (opts.save) {
@@ -43,7 +45,7 @@ export async function runPrint(opts: PrintOptions): Promise<number> {
 			const text = last?.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
 			if (text) console.log(text);
 		}
-		if (controller.signal.aborted || last?.stopReason === "aborted") return 130;
+		if (controller.signal.aborted || last?.stopReason === "aborted") return cancelledCode;
 		if (last?.stopReason === "error") {
 			console.error(red(last.errorMessage ?? "error"));
 			return 1;
@@ -55,8 +57,8 @@ export async function runPrint(opts: PrintOptions): Promise<number> {
 		return 0;
 	} catch (err) {
 		console.error(red((err as Error).message));
-		return controller.signal.aborted ? 130 : 1;
+		return controller.signal.aborted ? cancelledCode : 1;
 	} finally {
-		process.off("SIGINT", interrupt);
+		for (const [signal, handler] of signals) process.off(signal, handler);
 	}
 }

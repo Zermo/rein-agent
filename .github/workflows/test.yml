@@ -17,11 +17,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y tmux
       - run: npm test
       - run: npm run check:posthorse
       - run: npm run check:natives
       - run: npm run bundle
-      - run: git diff --exit-code -- dist/rein.js
+      - run: git diff --exit-code -- dist/rein.js dist/meat-worker.js
       - run: npm pack --dry-run
   installed-cli:
     runs-on: ubuntu-latest
@@ -34,3 +35,17 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: node test/bundle-smoke.mjs
+  meat-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          cache: false
+      - run: npm run test:meat-upstream
+      - run: npm run check:meat
+      - run: npm run check:natives

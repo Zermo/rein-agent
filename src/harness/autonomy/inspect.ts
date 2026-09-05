@@ -68,7 +68,11 @@ export function inspectionTools(cwd: string): AgentTool[] {
 	return [
 		{ name: "read", description: "Read an ordinary workspace file, at most 200000 bytes. Hidden/private paths and links are excluded.", parameters: { type: "object", required: ["path"], properties: { path: pathSchema } }, async execute(_id, args, signal) {
 			const result = await readOrdinary(args?.path, MAX_FILE_BYTES, signal); aborted(signal);
-			return { content: result.text.slice(0, 15000) };
+			const start = args.start_line ?? 1, end = args.end_line;
+			if (!Number.isSafeInteger(start) || (start as number) < 1 || end !== undefined && (!Number.isSafeInteger(end) || (end as number) < (start as number))) throw new Error("Use an inclusive line range with positive integers and end_line >= start_line.");
+			const text = result.text.split("\n").slice((start as number) - 1, end as number | undefined).join("\n");
+			const marker = "\n[truncated to 15000 characters; request a narrower line range]";
+			return { content: text.length > 15000 ? text.slice(0, 15000 - marker.length) + marker : text };
 		} },
 		{ name: "ls", description: "List up to 200 visible workspace entries, inspecting at most 1000 directory entries.", parameters: { type: "object", properties: { path: pathSchema } }, async execute(_id, args, signal) {
 			const names: string[] = [];

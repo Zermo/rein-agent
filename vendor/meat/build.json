@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "upstreamCommit": "f39f41dfe7b5b37a12b35fdfbaecc7e779855bd3",
+  "go": "1.26.5",
+  "target": "js/wasm",
+  "flags": [
+    "-trimpath",
+    "-buildvcs=false",
+    "-ldflags=-s -w"
+  ],
+  "wasm": "9772c93af10c354a43278ea5a619c89f1b1e0a2e63d4306eef934dba2d850986",
+  "wasmBytes": 6823045,
+  "runtime": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+  "sources": {
+    "src/native/meat/main.go": "347c11af1fbbfbfad5bfc64667f43e2f14d92760298ba2a680a88c2a6305294a",
+    "src/native/meat/adapter.go.txt": "8c3cedbd72cdef69b0b4ecb6e63d842278d8edaad95a47bc187acfd0bc56618e",
+    "scripts/build-meat.mjs": "2900898a6da18eb6c1138dac8ba830745feeac8d70f7fc3a65061a90dbddabff",
+    "vendor/meat/manifest.json": "2caf19aec5c013c5e658265badd5078f649463b79ce7f1284b5644d3a139b3ad"
+  },
+  "licenses": {
+    "LICENSE": "a260403cc440e7650f29216546ff1b203035becfa6ecce6cec95be8fd35a54ec",
+    "APACHE-2.0": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "GO-LICENSE": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+  }
+}

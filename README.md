@@ -5,7 +5,7 @@ any OpenAI-compatible model — local by default, any provider by choice.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  harness/   REPL · print · improve · loop · tools (7)          │  ← the product
+│  harness/   REPL · canvas · print · loop · native tools        │  ← the product
 ├─────────────────────────────────────────────────────────────────┤
 │  agent/     event-driven loop · steering · sessions (JSONL)     │  ← the behavior
 ├─────────────────────────────────────────────────────────────────┤
@@ -21,16 +21,16 @@ Built by studying two codebases:
   *translation layer* (one message model + one streaming event protocol over
   every provider quirk), and its `packages/agent` proves the loop is just:
   stream → run tools (parallel) → repeat, with steering queues, hooks, and
-  truncation safety. rein rebuilds both layers from scratch in ~4,300 lines
-  of its own code (plus 2.5k lines of vendored unlazy, MIT) with zero runtime dependencies, because "runs anywhere Node runs" is the point. (One dev-only tool, esbuild, bundles the CLI to plain JS at publish time — Node won't type-strip `.ts` under `node_modules`.)
+  truncation safety. Rein implements these interfaces with zero runtime npm
+  dependencies. Pinned native components ship under `vendor/`; esbuild bundles
+  the CLI to plain JS because Node won't type-strip `.ts` under `node_modules`.
 - **[karpathy/autoresearch](https://github.com/karpathy/autoresearch)** — the
   *loop* that runs an agent forever against one metric, keeping what improves
   and discarding what doesn't. rein encodes that twice: `rein loop` (any
   project, any metric) and `rein improve` (the harness itself is the target).
 
 And **[karpathy/nanoGPT](https://github.com/karpathy/nanoGPT)** — the values:
-readable over clever, small over complete. Every file here fits on a screen
-or two.
+readable over clever, with explicit limits on context and tool output.
 
 ## Requirements
 
@@ -39,6 +39,9 @@ or two.
   (native TypeScript type-stripping)
 - Any OpenAI-compatible server. Local ones are probed automatically in
   priority order: **Ollama** → **LM Studio** → **llama.cpp** → **vLLM**.
+- tmux and bash for persistent shells and `--visual` on macOS/Linux/WSL.
+  Ordinary chat and foreground bash work without tmux. Meat ships prebuilt WASM;
+  users do not need Go. Native Windows tmux is not supported.
 
 ## Install
 
@@ -92,6 +95,9 @@ rein-agent gates [file] --mode m  unlazy gates: lint | status | approve | reveri
 rein-agent models             what rein can see: local servers + provider presets
 rein skills [name]            bundled Matt Pocock workflows and references
 rein debug <folder> [--json]  offline exported-session diagnostics (counts only)
+rein --visual                 split chat and live activity; press c in the activity pane for the canvas
+rein meat --working-tree      review tracked changes with the embedded Meat engine
+rein tmux start               start a persistent bash shell
 rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
 rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
 rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
@@ -105,6 +111,88 @@ While the agent is working, just type — it's injected as a steering message
 after the current tool batch (pi's steering, not pi's queue).
 `/stop` immediately cancels the current turn and its owned shell process group.
 Queued input is discarded; send a new request when ready to continue.
+
+### Explicit Chat Completions connections
+
+```sh
+rein setup --api chat-completions --base-url http://model-host.internal:8123
+# When the model-host API listens only on its own loopback interface:
+rein setup --api chat-completions --ssh model-host --base-url 127.0.0.1:8123
+```
+
+The wizard records `"api": "chat-completions"` and shows the final POST endpoint.
+`REIN_API=chat-completions` and `--api chat-completions` make the same choice for
+an invocation. Existing HTTP configurations default to this protocol. Custom
+proxy prefixes stay intact; JSON/SSE replies, text-part arrays, refusals, and
+usage replies without `total_tokens` work through the same adapter used by setup.
+Official subscription CLIs keep their own transport and login; HTTP protocol
+flags are rejected when a CLI provider is selected. `model-host` must be a configured
+SSH alias; Rein does not create a public listener on the remote machine.
+
+### Persistent bash and a live node canvas
+
+```sh
+rein --visual
+rein tmux start 'export PROJECT_MODE=dev'
+rein tmux list
+rein tmux send <session-id> 'printf "%s\n" "$PROJECT_MODE"'
+rein tmux capture <session-id>
+rein tmux attach <session-id>
+rein tmux interrupt <session-id>
+rein tmux stop <session-id>
+```
+
+The `bash` tool accepts `mode: "tmux"` and an optional existing `session` ID.
+The separate `tmux` tool exposes start/list/capture/send/interrupt/stop. Environment,
+working directory and interactive programs persist across turns. Rein uses its
+own server and scopes sessions by workspace. `/stop` cancels foreground work;
+intentionally persistent tmux sessions remain until explicitly stopped.
+
+`--visual` opens chat beside a terminal activity tree. Press **Ctrl-b Right** to
+focus the activity pane, then **c** to open the interactive node canvas. Select
+nodes for inputs, results and file paths; drag nodes or the background, zoom,
+fit, or follow the latest work. Arrow keys select terminal steps, **f** follows,
+and **q** closes the activity pane. Thinking appears as a status; only visible
+assistant text and actual tool activity are recorded.
+
+Detach with **Ctrl-b d**. The launcher prints an activity ID and a resume command;
+use `rein tmux list --view`, `rein tmux attach <id> --view`, or
+`rein tmux stop <id> --view` to manage visual sessions. Their server is separate
+from the model's tool shells. Closing a view does not implicitly stop persistent
+tool shells. `rein watch <activity-id>` reopens its activity tree;
+`rein canvas <activity-id>` opens just the browser view (`--no-browser` prints
+the URL). Ctrl-C stops a standalone canvas server.
+
+Activity snapshots live in `$REIN_HOME/activity`, mode 0600, and retain up to 256
+recent steps within 3 MB. Long details are abbreviated. They contain local tool
+inputs/results, so treat them like session files. The canvas listens only on
+127.0.0.1 and requires its printed capability URL. No transcript is uploaded.
+The activity log is separate from Posthorse and is never added to model context.
+
+### Embedded Meat diff review
+
+```sh
+rein meat                     # latest commit
+rein meat main HEAD           # commit range
+rein meat --staged            # staged changes
+rein meat --working-tree      # tracked changes against HEAD
+rein meat --working-tree --json
+```
+
+Rein embeds [Bold Software's Meat](https://github.com/boldsoftware/meat) at a
+pinned revision. Its actual Go algorithm runs as WASM in an isolated Node worker;
+Rein supplies the configured HTTP or official CLI model connection and scoped
+source reads. The agent's `meat` tool uses that session's model overrides and
+streams review progress into the activity view.
+
+Meat validates the model's remove/replace/fold plan against the original diff and
+produces a reading diff and summary. It does not modify files. Limits are 4 MB
+of input, 32 model requests, and five minutes per review; Ctrl-C or `/stop`
+cancels the request. Source reads exclude hidden/private paths, links and files
+over 200 KB. The host's grep tool advertises bounded literal search, not regex.
+Untracked files are outside `--working-tree`. Model usage is additional to the
+main conversation and is reported with the result; a review is not a guarantee
+that a change is correct. See [the pinned runtime and build details](vendor/meat/UPSTREAM.md).
 
 ### Native Fold components and Matt Pocock workflows
 
@@ -631,6 +719,9 @@ test/
 npm test          # offline smoke + node:test regression suites
 npm run bundle    # rebuild the committed Node 18 CLI
 npm run check:posthorse  # verify the pinned upstream source/license snapshot
+npm run check:natives    # Fold, Matt Pocock and Meat provenance
+npm run test:meat-upstream # Go 1.26.5: offline upstream algorithm tests
+npm run check:meat       # Go 1.26.5: reproduce and compare the shipped WASM
 ```
 
 Covers: JSON salvage (7), edit semantics (6), capability table (5),
@@ -684,8 +775,9 @@ no code coupling either way.
 - Subscription login needs a current official CLI and an eligible account. Cloud
   login/paid inference is not exercised by offline tests. Copilot has no read-only
   auth status command, so status reports its authentication as unverified until use.
-- No live token counts, no thinking trace (shown as
-  "thinking…"), no tool-call diff preview
+- Token usage depends on what the provider reports. Thinking is shown as status;
+  the activity view records visible responses and tool results. Meat produces
+  a reading diff after inference, not a patch approval UI.
 - Posthorse uses estimated token budgets. Configure the server's actual context
   limit; a prompt or tool schema that cannot fit fresh still needs a larger window.
 - `rein loop` and `rein improve` require a clean Git root with an initial commit.
