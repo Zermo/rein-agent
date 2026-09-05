@@ -23,6 +23,8 @@ import type {
 	Tool,
 	ToolResultMessage,
 } from "../ai/types.ts";
+import { initialDoomLoopState, observeDoomLoop } from "../../vendor/fold/StopConditions.ts";
+import type { StopConditionConfig } from "../../vendor/fold/StopConditions.ts";
 import { validateArgs } from "../util/schema.ts";
 
 export type AgentMessage = Message;
@@ -104,6 +106,8 @@ export interface AgentLoopConfig {
 	toolExecution?: "parallel" | "sequential";
 	/** Hard safety cap on assistant turns per run. Default: 60. */
 	maxTurns?: number;
+	/** Fold's per-run repeat detector; hosts explicitly choose the policy. */
+	stopConditions?: StopConditionConfig;
 }
 
 type AgentEventSink = (event: AgentEvent) => void | Promise<void>;
@@ -144,11 +148,19 @@ export async function agentLoop(
 	}
 
 	const maxTurns = config.maxTurns ?? 60;
+	let repeatState = initialDoomLoopState;
+	const stopIncomplete = async (reason: string) => {
+		const stopped: AssistantMessage = { role: "assistant", content: [], stopReason: "error", errorMessage: `Harness stopped: ${reason}. Work may be incomplete. Review the last results before continuing.`, model: config.model.id, provider: config.model.provider, usage: { input: 0, output: 0, totalTokens: 0 }, timestamp: Date.now() };
+		ctx.messages.push(stopped); newMessages.push(stopped);
+		await emit({ type: "message_start", message: stopped });
+		await emit({ type: "message_end", message: stopped });
+	};
 	let pending: AgentMessage[] = [];
 	for (let turns = 0; turns < maxTurns && !signal?.aborted; turns++) {
 		if (turns > 0) await emit({ type: "turn_start" });
 		pending.push(...((await config.getSteeringMessages?.()) ?? []));
 		if (signal?.aborted) break;
+		if (pending.length) repeatState = initialDoomLoopState;
 		for (const message of pending) {
 			await emit({ type: "message_start", message });
 			await emit({ type: "message_end", message });
@@ -194,13 +206,20 @@ export async function agentLoop(
 			});
 		}
 		await emit({ type: "turn_end", message, toolResults: batch.messages });
-		if (signal?.aborted || turns + 1 >= maxTurns || message.stopReason === "aborted") break;
+		if (signal?.aborted || message.stopReason === "aborted") break;
 		if (failed) {
-			if (await config.recoverFromError?.({ message, context: ctx })) continue;
+			if (turns + 1 < maxTurns && await config.recoverFromError?.({ message, context: ctx })) continue;
+			break;
+		}
+		if (turns + 1 >= maxTurns) {
+			if (toolCalls.length && !batch.terminate) await stopIncomplete(`turn budget reached (${maxTurns} model turns)`);
 			break;
 		}
 		if (config.shouldStopAfterTurn?.({ message, context: ctx })) break;
 		pending = (await config.getSteeringMessages?.()) ?? [];
+		const observed = observeDoomLoop(config.stopConditions ?? {}, repeatState, toolCalls.map(call => ({ name: call.name, params: call.arguments })));
+		repeatState = observed.state;
+		if (observed.reason && !batch.terminate && !pending.length) { await stopIncomplete(observed.reason); break; }
 		if (pending.length > 0 || (toolCalls.length > 0 && !batch.terminate)) continue;
 		pending = (await config.getFollowUpMessages?.()) ?? [];
 		if (pending.length === 0) break;

@@ -1,6 +1,6 @@
 {
   "name": "rein-agent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "A minimal, local-first agent harness. System prompt + tools + agentic loop + translation layer, with self-hosted local AI as the default provider.",
   "type": "module",
   "bin": {
@@ -13,6 +13,8 @@
     "src",
     "test",
     "vendor",
+    "scripts",
+    "docs",
     "examples",
     "AGENTS.md",
     "GATES.md",
@@ -33,7 +35,8 @@
   "scripts": {
     "test": "node test/smoke.ts && node --test test/*.test.ts",
     "bundle": "node scripts/build.mjs",
-    "check:posthorse": "node scripts/check-posthorse.mjs"
+    "check:posthorse": "node scripts/check-posthorse.mjs",
+    "check:natives": "node scripts/check-natives.mjs"
   },
   "keywords": [
     "agent",

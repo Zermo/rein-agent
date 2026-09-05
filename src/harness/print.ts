@@ -48,6 +48,10 @@ export async function runPrint(opts: PrintOptions): Promise<number> {
 			console.error(red(last.errorMessage ?? "error"));
 			return 1;
 		}
+		if (!last || last.stopReason === "length" || last.stopReason === "toolUse") {
+			console.error(red("The response ended before completion. Work may be incomplete; check the output budget and last results."));
+			return 1;
+		}
 		return 0;
 	} catch (err) {
 		console.error(red((err as Error).message));

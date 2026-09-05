@@ -356,18 +356,26 @@ export function stream(
 				message.usage = { input: 0, output: Math.ceil(chars / 4), totalTokens: Math.ceil(chars / 4), ...(message.usage.cached === undefined ? {} : { cached: message.usage.cached }) };
 			}
 
-			// Stop reason: prefer the server's, else infer (some local servers omit finish_reason)
-			if (finishReason === "tool_calls" || finishReason === "tool_use" || toolCalls.length > 0) {
-				message.stopReason = "toolUse";
-			} else if (finishReason === "length") {
+			// Never execute a tool call that the provider says was cut short.
+			if (finishReason === "length") {
 				message.stopReason = "length";
-			} else if (finishReason === "stop" || finishReason === null || finishReason === "content_filter") {
-				message.stopReason = "stop";
+			} else if (finishReason === "content_filter") {
+				message.stopReason = "error";
+				message.errorMessage = "The provider blocked this response (content_filter).";
+			} else if (finishReason === "aborted") {
+				message.stopReason = "aborted";
+			} else if (finishReason === "tool_calls" || finishReason === "tool_use" || toolCalls.length > 0) {
+				message.stopReason = "toolUse";
 			} else {
-				message.stopReason = finishReason === "aborted" ? "aborted" : "stop";
+				message.stopReason = "stop";
 			}
-			if (message.stopReason === "aborted") {
-				emit({ type: "error", reason: "aborted", error: message });
+			if ((message.stopReason === "stop" || message.stopReason === "toolUse") && toolCalls.length === 0
+				&& !message.content.some((c) => c.type === "text" && c.text.trim())) {
+				message.stopReason = "error";
+				message.errorMessage = "The provider returned no usable assistant output. Check the model, output budget, and endpoint with rein setup --status.";
+			}
+			if (message.stopReason === "aborted" || message.stopReason === "error") {
+				emit({ type: "error", reason: message.stopReason, error: message });
 			} else {
 				emit({ type: "done", reason: message.stopReason, message });
 			}

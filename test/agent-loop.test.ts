@@ -30,6 +30,31 @@ function setup(responses: AssistantMessage[], tools: AgentTool[] = [], extra: Pa
 	return { inputs, events, run: () => agentLoop([], { systemPrompt: "test", messages: [], tools }, config, signal, (event) => { events.push(event); }) };
 }
 
+test("Fold stop policy ends repeated batches with a persisted incomplete outcome", async () => {
+	let executions = 0;
+	const harness = setup([reply([call("a")], "toolUse"), reply([call("b")], "toolUse"), reply([call("c")], "toolUse"), reply([call("d")], "toolUse"), reply()],
+		[tool(async () => { executions++; return { content: "same failure", isError: true }; })],
+		{ stopConditions: { doomLoop: { enabled: true, repeatedToolCalls: 3 } } });
+	const messages = await harness.run();
+	assert.equal(executions, 3); assert.equal(harness.inputs.length, 3);
+	assert.equal(messages.at(-1)?.role, "assistant");
+	assert.match((messages.at(-1) as AssistantMessage).errorMessage!, /doom loop detected/);
+	assert.equal((messages.at(-1) as AssistantMessage).stopReason, "error");
+});
+
+test("new steering at the repeat boundary reaches the model and resets the detector", async () => {
+	let executions = 0, steered = false;
+	const harness = setup([reply([call("a")], "toolUse"), reply([call("b")], "toolUse"), reply([call("c")], "toolUse"), reply()],
+		[tool(async () => { executions++; return { content: "same evidence" }; })], {
+			stopConditions: { doomLoop: { enabled: true, repeatedToolCalls: 3 } },
+			getSteeringMessages: () => executions === 3 && !steered ? (steered = true, [{ role: "user", content: "NEW_SCOPE", timestamp: 1 }]) : [],
+		});
+	const messages = await harness.run();
+	assert.equal(harness.inputs.length, 4);
+	assert.ok(harness.inputs[3].messages.some(m => m.role === "user" && m.content === "NEW_SCOPE"));
+	assert.equal((messages.at(-1) as AssistantMessage).stopReason, "stop");
+});
+
 test("tool isError reaches hooks, events and model context", async () => {
 	let observed: boolean | undefined;
 	const harness = setup([reply([call("a")], "toolUse"), reply()], [tool(async () => ({ content: "failure", isError: true }))], {
@@ -49,6 +74,7 @@ test("final allowed turn still executes and pairs all tool calls", async () => {
 	assert.equal(executed, 2);
 	assert.deepEqual(messages.filter((m) => m.role === "toolResult").map((m) => m.toolCallId), ["a", "b"]);
 	assert.equal(harness.inputs.length, 1);
+	assert.match((messages.at(-1) as AssistantMessage).errorMessage!, /turn budget reached/);
 });
 
 test("sequential abort pairs unexecuted tools and does not drain followups", async () => {

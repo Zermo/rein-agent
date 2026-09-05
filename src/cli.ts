@@ -63,6 +63,8 @@ Usage:
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
+  rein skills [name]            list bundled workflows, or read one without running it
+  rein debug <folder> [--json]  inspect exported JSONL sessions offline (counts only)
   rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
   rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
@@ -193,6 +195,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		askTools: typeof flags.ask === "string" ? flags.ask.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
 	};
 
+	if (_[0] === "skills") {
+		const { readSkill, skillRoster } = await import("./harness/skills.ts");
+		console.log(_[1] ? readSkill(_[1], _[2]) : skillRoster());
+		return;
+	}
+	if (_[0] === "debug") {
+		if (!_[1]) throw new Error("Usage: rein debug <export folder> [--json]");
+		const { analyzeDebugFolder, formatDebugReport } = await import("./harness/debug.ts");
+		const report = await analyzeDebugFolder(_[1]);
+		console.log(flags.json === true ? JSON.stringify(report, null, 2) : formatDebugReport(report));
+		return;
+	}
 	if (_[0] === "models" || _[0] === "model") {
 		const { discoverLocalServers, PROVIDER_PRESETS } = await import("./ai/models.ts");
 		const servers = await discoverLocalServers();

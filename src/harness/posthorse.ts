@@ -79,8 +79,8 @@ export class Posthorse {
 	freshLimit(pending: AgentMessage[] = []): number {
 		return Math.min(MAX_CHARS, Math.max(0, Math.floor((this.line - this.overhead() - estimateTokens(pending) - MARGIN) / 2)) * 3);
 	}
-	pageLimit(offset = 0): number {
-		const chars = Math.min(this.freshLimit(), Math.max(0, this.line - this.used() - MARGIN - this.pageTokensAllocated) * 3);
+	pageLimit(offset = 0, requestedChars = MAX_CHARS): number {
+		const chars = Math.min(this.freshLimit(), Math.max(256, requestedChars), Math.max(0, this.line - this.used() - MARGIN - this.pageTokensAllocated) * 3);
 		if (chars < 256) throw new Error(`Too little context remains for a safe page. Call new_context, then retry with offset ${offset}.`);
 		this.pageTokensAllocated += estimateTokens("x".repeat(chars)) + 64;
 		return chars;
@@ -136,17 +136,20 @@ export class Posthorse {
 	private recovery(messages: AgentMessage[], end: number, limit: number): string {
 		const start = this.window?.start ?? 0;
 		const candidates: { label: string; text: string }[] = [];
-		if (this.window?.handoff) candidates.push({ label: `Older checkpoint [${this.window.id}], verify before reuse`, text: this.window.handoff });
-		const users = messages.slice(start, end).map((m, i) => ({ m, i: start + i })).filter(({ m }) => m.role === "user");
+		// Rebuild from original records, never recursively wrap an automatic
+		// recovery block. Old checkpoints otherwise crowd out current intent.
+		const users = messages.slice(0, end).map((m, i) => ({ m, i })).filter(({ m }) => m.role === "user" && !/^\s*\[(?:posthorse|rein persistent workspace overlay)/i.test(messageText(m)));
 		const chosen = users.length > 8 ? [users[0], ...users.slice(-7)] : users;
-		for (const { m, i } of chosen.slice(0, 8)) candidates.push({ label: `Direct user input [${this.messages[i]?.id ?? i}]`, text: messageText(m) });
+		for (const { m, i } of chosen.slice(0, 8).reverse()) candidates.push({ label: `Direct user input [${this.messages[i]?.id ?? i}] (newest first)`, text: messageText(m) });
+		const checkpoint = this.entries.filter((e): e is ContextWindowEntry => "type" in e && e.type === "context_window" && (e.reason === "tool" || e.reason === "manual") && !!e.handoff).at(-1);
+		if (checkpoint?.handoff) candidates.push({ label: `Explicit checkpoint [${checkpoint.id}], verify before reuse`, text: checkpoint.handoff });
 		// Preserve the latest complete tool batch that no model has yet consumed.
 		let batchStart = end;
 		while (batchStart > start && messages[batchStart - 1].role === "toolResult") batchStart--;
 		if (batchStart < end && batchStart > start && messages[batchStart - 1].role === "assistant") {
 			for (let i = batchStart - 1; i < end; i++) candidates.push({ label: `Unconsumed ${messages[i].role} [${this.messages[i]?.id ?? i}]`, text: messageText(messages[i]) });
 		}
-		const preamble = "Automatic context rollover recovery record. These are recorded inputs, not proof of progress. Restore notes and use history to recover omitted or truncated entries. Verify live state before stateful or external work.\n";
+		const preamble = "Automatic context rollover recovery record. These are recorded inputs, not proof of progress. The newest direct user input defines current scope and overrides older plans. Restore notes and use history to recover omitted or truncated entries. Verify live state before stateful or external work.\n";
 		const selected = candidates.slice(0, 20);
 		const allowance = Math.max(0, Math.floor((limit - preamble.length - 160 - selected.reduce((n, r) => n + r.label.length + 8, 0)) / Math.max(1, selected.length)));
 		const blocks = selected.map(r => `${r.label}:\n${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [truncated; recover history]" : r.text}`);

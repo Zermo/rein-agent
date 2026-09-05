@@ -8,6 +8,7 @@ import lsTool from "./ls.ts";
 import webTools from "./web.ts";
 import gatesTool from "./gates.ts";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 import type { AgentTool } from "../../agent/agent-loop.ts";
 
 export const TOOLS: AgentTool[] = [readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool, webTools[0], webTools[1], gatesTool];
@@ -26,7 +27,8 @@ export function toolsForCwd(cwd: string): AgentTool[] {
 				const field = tool.name === "gates" ? "root" : "path";
 				const value = args[field];
 				const defaultsToRoot = tool.name === "gates" || optionalPaths.has(tool.name);
-				const path = typeof value === "string" ? resolve(root, value) : value === undefined && defaultsToRoot ? root : value;
+				const expanded = value === "~" ? homedir() : typeof value === "string" && value.startsWith("~/") ? resolve(homedir(), value.slice(2)) : value;
+				const path = typeof expanded === "string" ? resolve(root, expanded) : value === undefined && defaultsToRoot ? root : value;
 				return tool.execute(id, { ...args, [field]: path }, signal, onUpdate);
 			},
 		};

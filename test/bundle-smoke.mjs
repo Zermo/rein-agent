@@ -36,7 +36,7 @@ try {
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /bundle rollover OK/);
   assert.equal(requests, 2);
-  for (const args of [["autonomy", "init", "--daily-budget", "2"], ["autonomy", "status", "--json"], ["autonomy", "tui"]]) {
+  for (const args of [["autonomy", "init", "--daily-budget", "2"], ["autonomy", "status", "--json"], ["autonomy", "tui"], ["skills"], ["skills", "diagnosing-bugs"], ["skills", "tdd", "tests.md"], ["debug", join(dir, "sessions"), "--json"]]) {
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [join(root, "dist/rein.js"), ...args], { cwd: dir, env: { ...process.env, REIN_HOME: dir } });
       let stdout = "", stderr = "";
@@ -49,6 +49,8 @@ try {
     assert.equal(result.code, 0, result.stderr);
     if (args[1] === "status") { const state = JSON.parse(result.stdout); assert.equal(state.paused, true); assert.equal(state.maxRunsPerDay, 2); assert.equal(state.runs.length, 0); }
     if (args[1] === "tui") assert.match(result.stdout, /Rein autonomy/);
+    if (args[0] === "skills") assert.match(result.stdout, args[1] === "tdd" ? /test/i : /diagnos/i);
+    if (args[0] === "debug") { const report = JSON.parse(result.stdout); assert.equal(report.sessions, 1); assert.equal(report.totals.toolResults, 1); }
   }
   assert.equal(requests, 2, "autonomy controls do not start inference");
   console.log(`bundle smoke OK (${process.version})`);
