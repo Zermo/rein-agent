@@ -110,17 +110,27 @@ function runCliProcess(provider: CliProvider, args: string[], input: string, cwd
 	return new Promise((resolve, reject) => {
 		const child = spawn(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
 		let stdout = "", stderr = "", pendingLine = "", bytes = 0, error: Error | undefined, forceKill: ReturnType<typeof setTimeout> | undefined;
+		let closed = false, settled = false, exitCode: number | null = null, exitSignal: NodeJS.Signals | null = null;
 		const kill = (signal: NodeJS.Signals) => {
 			try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal); else child.kill(signal); } catch { /* Already exited. */ }
 		};
 		const stop = (reason: string) => {
-			if (error) return; error = new Error(reason); kill("SIGTERM"); forceKill = setTimeout(() => kill("SIGKILL"), 1000); forceKill.unref();
+			if (error) return; error = new Error(reason); kill("SIGTERM");
+			// A provider may exit before a TERM-resistant descendant that closed
+			// its stdio. Keep the owned group's escalation alive and await it.
+			forceKill = setTimeout(() => { kill("SIGKILL"); forceKill = undefined; finish(); }, 1000);
 		};
 		const abort = () => stop("Operation aborted");
 		const timer = setTimeout(() => stop(`${provider} CLI timed out`), options.timeoutMs ?? 300_000); timer.unref();
 		options.signal?.addEventListener("abort", abort, { once: true });
 		if (options.signal?.aborted) abort();
-		const cleanup = () => { clearTimeout(timer); if (forceKill) clearTimeout(forceKill); options.signal?.removeEventListener("abort", abort); };
+		const finish = () => {
+			if (settled || !closed || forceKill) return;
+			settled = true; clearTimeout(timer); options.signal?.removeEventListener("abort", abort);
+			if (error) reject(error);
+			else if (exitCode !== 0) reject(new Error(`${provider} CLI exited ${exitCode ?? exitSignal}. ${stderr.trim().slice(-2000)} Run 'rein login ${provider}' if authentication is required.`));
+			else resolve(stdout);
+		};
 		child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
 		child.stdout.on("data", (data: string) => {
 			bytes += Buffer.byteLength(data);
@@ -139,12 +149,9 @@ function runCliProcess(provider: CliProvider, args: string[], input: string, cwd
 		});
 		child.stderr.on("data", (data: string) => { bytes += Buffer.byteLength(data); stderr = (stderr + data).slice(-8000); if (bytes > (options.maxOutputBytes ?? 2_000_000)) stop(`${provider} CLI output exceeded its size limit`); });
 		child.stdin.on("error", () => {}); // EPIPE is reported by the child's error/exit result.
-		child.on("error", (err: NodeJS.ErrnoException) => { cleanup(); reject(new Error(err.code === "ENOENT" ? missingCli(provider) : err.message)); });
+		child.on("error", (err: NodeJS.ErrnoException) => { error ??= new Error(err.code === "ENOENT" ? missingCli(provider) : err.message); closed = true; finish(); });
 		child.on("close", (code, signal) => {
-			cleanup();
-			if (error) reject(error);
-			else if (code !== 0) reject(new Error(`${provider} CLI exited ${code ?? signal}. ${stderr.trim().slice(-2000)} Run 'rein login ${provider}' if authentication is required.`));
-			else resolve(stdout);
+			exitCode = code; exitSignal = signal; closed = true; finish();
 		});
 		child.stdin.end(input);
 	});

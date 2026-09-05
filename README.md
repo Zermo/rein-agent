@@ -179,6 +179,9 @@ rein meat --working-tree      # tracked changes against HEAD
 rein meat --working-tree --json
 ```
 
+Single-commit review compares merges to their first parent; root commits are
+reviewed against an empty tree. Commit ranges compare their two endpoints.
+
 Rein embeds [Bold Software's Meat](https://github.com/boldsoftware/meat) at a
 pinned revision. Its actual Go algorithm runs as WASM in an isolated Node worker;
 Rein supplies the configured HTTP or official CLI model connection and scoped

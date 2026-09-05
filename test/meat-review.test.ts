@@ -55,3 +55,45 @@ test("Meat cancellation interrupts an in-flight provider request", async t => is
 	await assert.rejects(runMeatReview({ cwd, diff, modelOverride: "fixture", baseUrlOverride: "http://fixture.invalid/v1", signal: controller.signal }), /cancel/i);
 	assert.equal(providerAborted, true);
 }));
+
+test("a running session's Meat tool retains its resolved model and key after config changes", async t => isolated(async cwd => {
+	const git = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe" }).toString();
+	git("init"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.invalid");
+	writeFileSync(join(cwd, "value.txt"), "old_value = 1\n"); git("add", "value.txt"); git("commit", "-m", "fixture");
+	writeFileSync(join(cwd, "value.txt"), "new_value = 2\n");
+	writeFileSync(join(cwd, "config.json"), JSON.stringify({ baseUrl: "http://active.invalid/v1", model: "active-fixture", apiKey: "active-fixture-key", maxTokens: 512, temperature: 0.3 }));
+	const runner = await createRunner({ cwd, toolsMode: "native" });
+	writeFileSync(join(cwd, "config.json"), JSON.stringify({ baseUrl: "http://other.invalid/v1", model: "other-fixture", apiKey: "other-fixture-key", maxTokens: 9999, temperature: 1.9 }));
+	let calls = 0;
+	t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+		calls++; assert.equal(url, runner.model.baseUrl + "/chat/completions");
+		assert.equal(new Headers(init.headers).get("authorization"), "Bearer active-fixture-key");
+		const body = JSON.parse(init.body as string); assert.equal(body.model, "active-fixture"); assert.equal(body.max_tokens, 512); assert.equal(body.temperature, 0.3);
+		return submit();
+	});
+	const result = await runner.tools.find(tool => tool.name === "meat")!.execute("review", { workingTree: true });
+	assert.equal(result.isError, undefined, result.content); assert.ok(calls > 0);
+}));
+
+test("single-commit Meat review includes first-parent merge changes and supports root commits", async () => isolated(async cwd => {
+	const git = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
+	git("init", "--initial-branch=main"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.invalid");
+	writeFileSync(join(cwd, "base.txt"), "base\n"); git("add", "."); git("commit", "-m", "root"); const root = git("rev-parse", "HEAD");
+	git("checkout", "-b", "feature"); writeFileSync(join(cwd, "feature.txt"), "feature change\n"); git("add", "."); git("commit", "-m", "feature");
+	git("checkout", "main"); writeFileSync(join(cwd, "main.txt"), "main change\n"); git("add", "."); git("commit", "-m", "main"); git("merge", "--no-ff", "feature", "-m", "merge");
+	assert.match(await reviewDiff(cwd), /\+feature change/);
+	assert.doesNotMatch(await reviewDiff(cwd), /diff --cc|diff --combined|\+main change/);
+	assert.match(await reviewDiff(cwd, { refs: [root] }), /\+base/);
+}));
+
+test("Meat completes through the text tool protocol with named source-read results", async t => isolated(async cwd => {
+	writeFileSync(join(cwd, "value.txt"), "source clue\n"); let calls = 0;
+	t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+		const body = JSON.parse(init.body as string); assert.equal(body.tools, undefined);
+		if (++calls > 1) { assert.match(JSON.stringify(body.messages), /read_file/); assert.match(JSON.stringify(body.messages), /source clue/); }
+		const name = calls === 1 ? "read_file" : "submit", args = calls === 1 ? { path: "value.txt" } : { remove: [], replace: [], fold: [], summary: "Text protocol review." };
+		return Response.json({ choices: [{ message: { content: `<tool name="${name}">${JSON.stringify(args)}</tool>` }, finish_reason: "stop" }] });
+	});
+	const result = await runMeatReview({ cwd, diff, baseUrlOverride: "http://fixture.invalid/v1", modelOverride: "fixture", toolsMode: "text" });
+	assert.equal(result.smart_diff, diff); assert.equal(calls, 2); assert.equal(result.summary, "Text protocol review.");
+}));

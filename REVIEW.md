@@ -1,5 +1,59 @@
 # Posthorse and harness review
 
+## 0.8.0 Chat Completions, tmux, activity canvas, and Meat
+
+The implementation contract is [docs/0.8.0-spec.md](docs/0.8.0-spec.md).
+Three reviewers covered provider setup/distribution, persistent shells, and the
+activity interface. Final parallel Standards and Spec reviews compared the
+0.7.0 baseline `0cc5d69` to implementation `617c8b5`, then rechecked the fixes.
+
+### Standards
+
+- P2, resolved: Meat reloaded mutable config instead of retaining its active
+  runner's connection. The tool now receives the resolved model, key, temperature,
+  token budget, and current tool mode. A config-drift regression covers each.
+- P2, resolved: single-commit review omitted clean merge changes or supplied
+  unsupported combined diffs. First-parent review now covers merge commits;
+  a regression also preserves root-commit handling.
+
+Two findings, both resolved. The most consequential was changing the model
+connection during an existing session's review.
+
+### Spec
+
+- P2, resolved: Meat could leave the active model connection after a config edit.
+  The connection snapshot fix above satisfies the session connection contract.
+- P2, resolved: standalone Meat exited on SIGHUP/SIGTERM without stopping its
+  subscription CLI. It now cancels and drains the provider. Process-group cleanup
+  also survives the provider parent's exit, so a TERM-resistant descendant cannot
+  continue after the harness finishes. Four real subprocess regressions cover
+  all three signals and resistant providers/descendants.
+
+Two findings, both resolved. The most consequential was an owned provider
+process continuing after the harness stopped. No unresolved Spec findings.
+
+### Integration verification
+
+Earlier review fixes cover usage without `total_tokens`, setup/runtime protocol
+validation, merge-safe original diffs, line ranges before source truncation,
+tmux cancellation cleanup, stale/removed environment variables, literal input,
+visual-server isolation, mouse node selection, recovered status, transient
+canvas reconnects, and malformed snapshot responses. Foreground shutdown also
+cancels pending Nodeterm approvals and removes only its own pending files.
+
+The actual browser canvas was checked for mouse and keyboard selection, zoom,
+fit, follow-live, progress updates, and recovery after an unchanged snapshot
+became readable again. A real PTY fixture exercised the bundled `--visual`
+launcher, split panes, a mock Chat Completions response, activity recording,
+separate shell lists, detach, and owned session cleanup on macOS/tmux 3.6a.
+
+Release gates verify the Node 22.19 source suite, Node 18 bundle including an
+actual Meat worker and local mock model, npm package assets, original upstream
+tests, pinned licenses/sources, and an identical Go 1.26.5 WASM rebuild. The HTTP
+text tool protocol is covered as well as native tool calling. CI runs source on
+22.19/24 and bundles on 18/20/22/24, plus the upstream rebuild job. No cloud
+subscription sign-in or paid inference was performed in these tests.
+
 ## 0.7.0 Fold and native workflow review
 
 The September export diagnosis and integration contract are recorded in

@@ -228,12 +228,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	if (_[0] === "meat") {
 		const { runMeatReview } = await import("./harness/meat/review.ts");
 		const controller = new AbortController();
-		const interrupt = () => controller.abort(); process.on("SIGINT", interrupt);
+		let cancelledCode = 130;
+		const cancel = (code: number) => { if (!controller.signal.aborted) cancelledCode = code; controller.abort(); };
+		const signals = [["SIGINT", () => cancel(130)], ["SIGHUP", () => cancel(129)], ["SIGTERM", () => cancel(143)]] as const;
+		for (const [signal, handler] of signals) process.on(signal, handler);
 		try {
 			const result = await runMeatReview({ ...common, refs: _.slice(1), staged: flags.staged === true, workingTree: flags["working-tree"] === true, signal: controller.signal,
 				onProgress: text => { if (!flags.json) process.stderr.write(`[meat] ${text}\n`); } });
 			console.log(flags.json ? JSON.stringify(result, null, 2) : `${result.summary}\n\nReading diff, not an applicable patch:\n${result.smart_diff}`);
-		} finally { process.off("SIGINT", interrupt); }
+		} catch (error) {
+			if (!controller.signal.aborted) throw error;
+			console.error("Meat review cancelled."); process.exitCode = cancelledCode;
+		} finally { for (const [signal, handler] of signals) process.off(signal, handler); }
 		return;
 	}
 	if (_[0] === "tmux") {

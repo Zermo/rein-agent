@@ -104,7 +104,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 
 	const steering: AgentMessage[] = [];
 	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
-	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillTool, createMeatTool(opts.cwd, () => ({ ...opts, toolsMode: runner.toolsMode })));
+	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillTool, createMeatTool(opts.cwd, () => ({ model: { ...model }, apiKey, toolsMode: runner.toolsMode, forcedMode, temperature: opts.temperature ?? config.temperature })));
 	const context: AgentContext = { systemPrompt, messages: posthorse.messages, tools };
 	const activity = opts.activityId ? new ActivityJournal(opts.activityId, opts.cwd, model.id) : undefined;
 	let running = false;

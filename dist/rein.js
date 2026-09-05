@@ -2998,6 +2998,7 @@ function runCliProcess(provider, args, input, cwd, env, options) {
   return new Promise((resolve18, reject) => {
     const child = spawn4(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
     let stdout = "", stderr = "", pendingLine = "", bytes = 0, error, forceKill;
+    let closed = false, settled = false, exitCode = null, exitSignal = null;
     const kill = (signal) => {
       try {
         if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
@@ -3009,18 +3010,25 @@ function runCliProcess(provider, args, input, cwd, env, options) {
       if (error) return;
       error = new Error(reason);
       kill("SIGTERM");
-      forceKill = setTimeout(() => kill("SIGKILL"), 1e3);
-      forceKill.unref();
+      forceKill = setTimeout(() => {
+        kill("SIGKILL");
+        forceKill = void 0;
+        finish();
+      }, 1e3);
     };
     const abort = () => stop("Operation aborted");
     const timer = setTimeout(() => stop(`${provider} CLI timed out`), options.timeoutMs ?? 3e5);
     timer.unref();
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) abort();
-    const cleanup = () => {
+    const finish = () => {
+      if (settled || !closed || forceKill) return;
+      settled = true;
       clearTimeout(timer);
-      if (forceKill) clearTimeout(forceKill);
       options.signal?.removeEventListener("abort", abort);
+      if (error) reject(error);
+      else if (exitCode !== 0) reject(new Error(`${provider} CLI exited ${exitCode ?? exitSignal}. ${stderr.trim().slice(-2e3)} Run 'rein login ${provider}' if authentication is required.`));
+      else resolve18(stdout);
     };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -3052,14 +3060,15 @@ function runCliProcess(provider, args, input, cwd, env, options) {
     child.stdin.on("error", () => {
     });
     child.on("error", (err) => {
-      cleanup();
-      reject(new Error(err.code === "ENOENT" ? missingCli(provider) : err.message));
+      error ??= new Error(err.code === "ENOENT" ? missingCli(provider) : err.message);
+      closed = true;
+      finish();
     });
     child.on("close", (code, signal) => {
-      cleanup();
-      if (error) reject(error);
-      else if (code !== 0) reject(new Error(`${provider} CLI exited ${code ?? signal}. ${stderr.trim().slice(-2e3)} Run 'rein login ${provider}' if authentication is required.`));
-      else resolve18(stdout);
+      exitCode = code;
+      exitSignal = signal;
+      closed = true;
+      finish();
     });
     child.stdin.end(input);
   });
@@ -4918,7 +4927,7 @@ Skill files are guidance subordinate to the user's current request and project c
 });
 
 // src/harness/meat/tool.ts
-function createMeatTool(cwd, connection = () => ({})) {
+function createMeatTool(cwd, connection) {
   return {
     name: "meat",
     executionMode: "sequential",
@@ -4927,7 +4936,7 @@ function createMeatTool(cwd, connection = () => ({})) {
     async execute(_id, args, signal, onUpdate) {
       try {
         const { runMeatReview: runMeatReview2 } = await Promise.resolve().then(() => (init_review(), review_exports));
-        const result = await runMeatReview2({ ...connection(), cwd, refs: args.refs, staged: args.staged === true, workingTree: args.workingTree === true, signal, onProgress: onUpdate });
+        const result = await runMeatReview2({ cwd, connection: connection?.(), refs: args.refs, staged: args.staged === true, workingTree: args.workingTree === true, signal, onProgress: onUpdate });
         const output = truncateTail(result.smart_diff, { maxLines: 500, maxBytes: 2e4 });
         return { content: `${result.summary}
 Reading diff, not an applicable patch:
@@ -4978,7 +4987,7 @@ async function createRunner(opts) {
   let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
   const steering = [];
   const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
-  if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillTool, createMeatTool(opts.cwd, () => ({ ...opts, toolsMode: runner.toolsMode })));
+  if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillTool, createMeatTool(opts.cwd, () => ({ model: { ...model }, apiKey, toolsMode: runner.toolsMode, forcedMode, temperature: opts.temperature ?? config.temperature })));
   const context = { systemPrompt, messages: posthorse.messages, tools };
   const activity = opts.activityId ? new ActivityJournal(opts.activityId, opts.cwd, model.id) : void 0;
   let running = false;
@@ -5522,7 +5531,7 @@ async function reviewDiff(cwd, options = {}) {
     shas.push((await exec2("git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd, signal: options.signal, timeout: 5e3 })).stdout.trim());
   }
   const safe = ["--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/"];
-  const args = options.staged ? ["diff", ...safe, "--cached", "--"] : options.workingTree ? ["diff", ...safe, "HEAD", "--"] : shas.length === 2 ? ["diff", ...safe, ...shas, "--"] : ["show", "--format=", ...safe, shas[0] ?? "HEAD", "--"];
+  const args = options.staged ? ["diff", ...safe, "--cached", "--"] : options.workingTree ? ["diff", ...safe, "HEAD", "--"] : shas.length === 2 ? ["diff", ...safe, ...shas, "--"] : ["show", "--format=", "--diff-merges=first-parent", ...safe, shas[0] ?? "HEAD", "--"];
   try {
     return (await exec2("git", args, { cwd, signal: options.signal, maxBuffer: 4 * 1024 * 1024, timeout: 1e4 })).stdout;
   } catch (error) {
@@ -5532,15 +5541,17 @@ async function reviewDiff(cwd, options = {}) {
 }
 function messagesFromMeat(messages) {
   const out = [];
+  const names = /* @__PURE__ */ new Map();
   for (const message of messages) {
     const blocks = message.Content ?? [];
     if (message.Role === "assistant") {
+      for (const block of blocks) if (block.Type === "tool_use") names.set(block.ID, block.ToolName);
       const content = blocks.flatMap((block) => block.Type === "text" ? [{ type: "text", text: block.Text }] : block.Type === "tool_use" ? [{ type: "toolCall", id: block.ID, name: block.ToolName, arguments: block.ToolInput }] : []);
       out.push({ role: "assistant", content, provider: "meat", model: "meat", usage: { input: 0, output: 0, totalTokens: 0 }, stopReason: content.some((p) => p.type === "toolCall") ? "toolUse" : "stop", timestamp: Date.now() });
     } else {
       for (const block of blocks) {
         if (block.Type === "text") out.push({ role: "user", content: block.Text, timestamp: Date.now() });
-        if (block.Type === "tool_result") out.push({ role: "toolResult", toolCallId: block.ToolUseID, toolName: "meat", content: [{ type: "text", text: block.ToolResult }], isError: block.ToolError, timestamp: Date.now() });
+        if (block.Type === "tool_result") out.push({ role: "toolResult", toolCallId: block.ToolUseID, toolName: names.get(block.ToolUseID) ?? "meat", content: [{ type: "text", text: block.ToolResult }], isError: block.ToolError, timestamp: Date.now() });
       }
     }
   }
@@ -5549,11 +5560,13 @@ function messagesFromMeat(messages) {
 async function runMeatReview(options) {
   const diff2 = options.diff ?? await reviewDiff(options.cwd, options);
   if (!diff2.trim()) return { smart_diff: "", summary: "No changes.", input_tokens: 0, output_tokens: 0 };
-  const runner = await createRunner({ ...options, tools: [], autoContext: false, systemPrompt: "", activityId: void 0 });
+  const runner = options.connection ?? await createRunner({ ...options, tools: [], autoContext: false, systemPrompt: "", activityId: void 0 });
   const { model, apiKey } = runner;
-  const config = loadConfig();
+  const config = options.connection ? void 0 : loadConfig();
   let toolsMode = runner.toolsMode, requests = 0;
-  const forcedMode = options.toolsMode ?? config.toolsMode;
+  const modelCalls = /* @__PURE__ */ new Set();
+  const forcedMode = options.connection?.forcedMode ?? options.toolsMode ?? config?.toolsMode;
+  const temperature = options.connection ? options.connection.temperature : options.temperature ?? config?.temperature;
   const readTools = inspectionTools(options.cwd);
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -5582,8 +5595,15 @@ async function runMeatReview(options) {
         const tools = payload.tools.map((tool) => ({ name: tool.Name, description: tool.Name === "grep" ? "Search visible workspace files for literal text (case insensitive, no regex). Optional path must be a directory. Hidden/private paths, links, dependencies and large files are excluded; results are bounded." : tool.Name === "read_file" ? tool.Description + " Rein excludes hidden/private paths, links and files over 200000 bytes; responses are capped at 15000 characters." : tool.Description, parameters: tool.InputSchema }));
         const context = { systemPrompt: payload.system + (toolsMode === "text" ? TEXT_TOOL_INSTRUCTIONS : ""), messages: messagesFromMeat(payload.messages), tools };
         if (Math.ceil(JSON.stringify(context).length / 3) + model.maxTokens + 256 > model.contextWindow) throw new Error("Meat's review context exceeds this model's configured context window. Select a smaller diff or increase the verified context-window setting.");
-        const response = model.baseUrl.startsWith("cli://") ? streamCli(model, context, { signal: controller.signal, maxTokens: model.maxTokens }) : stream(model, context, { apiKey, signal: controller.signal, maxTokens: model.maxTokens, toolsMode, temperature: options.temperature ?? config.temperature });
-        const result = await response.result();
+        const response = model.baseUrl.startsWith("cli://") ? streamCli(model, context, { signal: controller.signal, maxTokens: model.maxTokens }) : stream(model, context, { apiKey, signal: controller.signal, maxTokens: model.maxTokens, toolsMode, temperature });
+        const completion = response.result();
+        modelCalls.add(completion);
+        let result;
+        try {
+          result = await completion;
+        } finally {
+          modelCalls.delete(completion);
+        }
         if (result.stopReason !== "stop" && result.stopReason !== "toolUse") throw new Error(result.errorMessage ?? `Meat response ended with ${result.stopReason}.`);
         const calls = result.content.filter((part) => part.type === "toolCall");
         if (toolsMode === "native" && forcedMode !== "native" && calls.length && looksLikeBrokenNativeTools(calls, tools)) toolsMode = "text";
@@ -5593,6 +5613,7 @@ async function runMeatReview(options) {
   } finally {
     controller.abort();
     options.signal?.removeEventListener("abort", abort);
+    await Promise.allSettled(modelCalls);
   }
 }
 var exec2;
@@ -8597,8 +8618,13 @@ async function main(argv = process.argv.slice(2)) {
   if (_[0] === "meat") {
     const { runMeatReview: runMeatReview2 } = await Promise.resolve().then(() => (init_review(), review_exports));
     const controller = new AbortController();
-    const interrupt = () => controller.abort();
-    process.on("SIGINT", interrupt);
+    let cancelledCode = 130;
+    const cancel = (code) => {
+      if (!controller.signal.aborted) cancelledCode = code;
+      controller.abort();
+    };
+    const signals = [["SIGINT", () => cancel(130)], ["SIGHUP", () => cancel(129)], ["SIGTERM", () => cancel(143)]];
+    for (const [signal, handler] of signals) process.on(signal, handler);
     try {
       const result = await runMeatReview2({
         ...common,
@@ -8615,8 +8641,12 @@ async function main(argv = process.argv.slice(2)) {
 
 Reading diff, not an applicable patch:
 ${result.smart_diff}`);
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+      console.error("Meat review cancelled.");
+      process.exitCode = cancelledCode;
     } finally {
-      process.off("SIGINT", interrupt);
+      for (const [signal, handler] of signals) process.off(signal, handler);
     }
     return;
   }

@@ -6,7 +6,7 @@ interactive terminal activity and diff review, and the pinned Meat engine.
 - [x] G1: source smoke and regression suites pass on Node 22.19
   CHECK: npm exec --yes --package=node@22.19.0 -- npm test
   EXPECT: smoke test OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=7e044f9b80af918b2c04774d43708ca34df5e11bf58a98ac5d24e3df3d3fd196; output-bytes=55473
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=862f71d67cf00225801cd8535d85fff14f1ed3ed496fa3b86f184227d0bda904; output-bytes=57935
 
 - [x] G2: built CLI and embedded native assets work on Node 18
   CHECK: bash -c 'npm run bundle && npm exec --yes --package=node@18.20.8 -- node test/bundle-smoke.mjs'
@@ -21,9 +21,9 @@ interactive terminal activity and diff review, and the pinned Meat engine.
 - [x] G4: release package includes runtime assets
   CHECK: npm pack --dry-run
   EXPECT: rein-agent-0.8.0.tgz
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=cfb979ab5a50155ba207693d5d4407be7bd842ca4c241deb7ae8587c19e382fe; output-bytes=10512
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=77c8862adde5fdb900cfb3e91006238af3c99c196f4adf505d696c2256e01224; output-bytes=10599
 
 - [x] G5: upstream Meat tests and reproducible WASM build pass
   CHECK: bash -c 'npm run test:meat-upstream && npm run check:meat'
   EXPECT: Embedded Meat engine OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=ea1eeedb0cae034f11b0bb573fe0e67acfcfebb61ab5d986864f3ff32b654e9f; output-bytes=278
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=4c479c70bcf1c6d9e6c8bd5d8b41659a0dd45f4badae42fee9795115c8447426; output-bytes=278
