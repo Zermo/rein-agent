@@ -749,6 +749,11 @@ test/
 
 ## Testing
 
+CI tests the newest Node.js release using the `node` version alias, alongside
+the numbered versions in our compatibility range. Browser smoke tests cover
+Linux, macOS, and Windows on Node 18 and the newest release. The GitHub Actions
+helpers use their own Node 24 runtime, independently of the Node version tested.
+
 ```sh
 npm test          # offline smoke + node:test regression suites
 npm run bundle    # rebuild the committed Node 18 CLI
