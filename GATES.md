@@ -18,11 +18,11 @@ Scope: replace TinyFish search and scraping with native Obscura.
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=64f91f73e5061877b3c12f9d6554ac5a38b7182a4d4c892d4b3934723f744a38; output-bytes=243
 
 - [x] G4: real Obscura extracts a JavaScript page through the packaged CLI
-  CHECK: node test/obscura-live-smoke.mjs
+  CHECK: npm exec --yes --package=node@18.20.8 -- node test/obscura-live-smoke.mjs
   EXPECT: Obscura live smoke OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=5c7cfbdb9690fa08d256e21bb0beec73272eff5e0349d61a0820486e641ce3ca; output-bytes=46
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=c22d9946edd1d8facba5346b134bf42bd6e33bee925022f39f683087b09bbdf3; output-bytes=47
 
 - [x] G5: release package includes native integration assets
   CHECK: npm pack --dry-run
   EXPECT: rein-agent-0.9.0.tgz
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=77aa62cfd9b43f226eb72f2a929635a1561c74f8ca59858ccaae0aa6dcc1a5d6; output-bytes=11222
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=a2fb3d7774f3d945685cc15897737093f1f239d8e72505b0e9dd6dc8a12a8236; output-bytes=11223

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,7 +54,10 @@ try {
   assert.equal(Object.hasOwn(result.details, "httpStatus"), false);
   const status = await run(["web", "status", "--json"]);
   assert.equal(status.code, 0, status.stderr); assert.equal(JSON.parse(status.stdout).available, true);
-  writeFileSync(join(dir, "config.json"), JSON.stringify({ obscura: { bin: runtime.binary, allowPrivateNetwork: false } }));
+  env.OBSCURA_ALLOW_PRIVATE_NETWORK = "0";
+  const restricted = await run(["web", "fetch", `${base}/page`, "--json"]);
+  assert.notEqual(restricted.code, 0); assert.match(restricted.stdout, /private|blocked|loopback/i);
+  assert.equal(dataHits, 1, "Disabling private-network access must prevent navigation.");
   console.log(`Obscura live smoke OK (${process.platform}/${process.arch}, ${process.version})`);
 } finally {
   await new Promise(resolve => server.close(resolve));

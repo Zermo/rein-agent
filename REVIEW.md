@@ -27,6 +27,21 @@ All five local release gates pass: source regressions, Node 18 bundle, native
 provenance, real browser extraction, and package assets. CI additionally tests
 the actual native browser on Linux, macOS and Windows.
 
+### Standards
+
+The independent final review of `b660b92..c6a0c2f` found no unresolved Standards
+findings. TypeScript ESM, no runtime npm dependencies, bounded tool output and
+returned errors follow the repository's conventions. The reviewer also passed
+38 focused Obscura tests and the native provenance check.
+
+### Spec
+
+The independent final Spec review found no unresolved implementation findings
+or extra scope. The source and bundle contain no TinyFish service calls.
+Release completion additionally requires the push, CI and installed CLI checks.
+The real browser test verifies that private network access can be enabled for
+the fixture and that disabling it prevents navigation.
+
 ## 0.8.0 Chat Completions, tmux, activity canvas, and Meat
 
 The implementation contract is [docs/0.8.0-spec.md](docs/0.8.0-spec.md).
