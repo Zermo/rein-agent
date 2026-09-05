@@ -995,6 +995,7 @@ function emptyCounts() {
     toolResults: 0,
     toolErrors: 0,
     providerErrors: 0,
+    harnessStops: 0,
     aborted: 0,
     emptyReplies: 0,
     lengthStops: 0,
@@ -1015,6 +1016,15 @@ function emptyCounts() {
   };
 }
 async function analyzeDebugFolder(folder) {
+  try {
+    return await readExport(folder);
+  } catch (error) {
+    if (error instanceof DebugInputError) throw error;
+    const code = error?.code;
+    throw new DebugInputError(code === "ENOENT" ? "Export folder or session is missing. Check the supplied folder and try again." : code === "EACCES" || code === "EPERM" ? "Export is not readable. Check its permissions and try again." : "Export could not be read. Use a stable, readable copy of the session export.");
+  }
+}
+async function readExport(folder) {
   const root = await realpath(resolve2(folder));
   let directory;
   let files = [];
@@ -1031,20 +1041,20 @@ async function analyzeDebugFolder(folder) {
       if (err.code !== "ENOENT") throw err;
     }
   }
-  if (!directory) throw new Error("No JSONL session files found in the folder, raw/, or sessions/raw/.");
-  if (files.length > 200) throw new Error("This export exceeds the 200-session analysis limit. Select a smaller export.");
+  if (!directory) throw new DebugInputError("No JSONL session files found in the folder, raw/, or sessions/raw/.");
+  if (files.length > 200) throw new DebugInputError("This export exceeds the 200-session analysis limit. Select a smaller export.");
   const perSession = [];
   let totalBytes = 0;
   for (const name of files) {
     const path2 = resolve2(directory, name);
-    if (await realpath(path2) !== path2) throw new Error("Symlinked session files are not supported.");
+    if (await realpath(path2) !== path2) throw new DebugInputError("Symlinked session files are not supported.");
     const handle = await open(path2, "r");
     const counts = emptyCounts();
     let repeatState = initialDoomLoopState, turns = 0;
     try {
       const stat = await handle.stat();
       totalBytes += stat.size;
-      if (!stat.isFile() || stat.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new Error("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
+      if (!stat.isFile() || stat.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
       const bytes = Buffer.alloc(stat.size + 1);
       let read = 0;
       while (read < bytes.length) {
@@ -1052,7 +1062,7 @@ async function analyzeDebugFolder(folder) {
         if (!chunk.bytesRead) break;
         read += chunk.bytesRead;
       }
-      if (read > stat.size) throw new Error("A session changed during analysis. Use a stable export and try again.");
+      if (read > stat.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
       for (const line of bytes.subarray(0, read).toString("utf8").split("\n")) {
         if (!line.trim()) continue;
         if (Buffer.byteLength(line) > 8 * 1024 * 1024) {
@@ -1080,7 +1090,7 @@ async function analyzeDebugFolder(folder) {
             counts.malformedRecords++;
             continue;
           }
-          if (!entry.content.startsWith("[posthorse]") && !entry.content.startsWith("[workspace-overlay]")) {
+          if (!/^\s*\[(?:posthorse|workspace-overlay|rein persistent workspace overlay)/i.test(entry.content)) {
             counts.users++;
             turns = 0;
             repeatState = initialDoomLoopState;
@@ -1091,13 +1101,17 @@ async function analyzeDebugFolder(folder) {
             continue;
           }
           counts.assistants++;
+          const error = typeof entry.errorMessage === "string" ? entry.errorMessage : "";
+          if (entry.stopReason === "error" && error.startsWith("Harness stopped:")) {
+            counts.harnessStops++;
+            continue;
+          }
           turns++;
           counts.maxTurnsPerRequest = Math.max(counts.maxTurnsPerRequest, turns);
           counts.inputTokens += tokenCount(entry.usage?.input);
           counts.outputTokens += tokenCount(entry.usage?.output);
           if (entry.stopReason === "error") {
             counts.providerErrors++;
-            const error = typeof entry.errorMessage === "string" ? entry.errorMessage : "";
             if (/\b401\b/.test(error)) counts.unauthorizedErrors++;
             if (/fetch failed|ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(error)) counts.transportErrors++;
           }
@@ -1137,7 +1151,7 @@ function formatDebugReport(report) {
     `Rein offline debug report: ${report.sessions} sessions`,
     "Counts only. No transcript text, paths, credentials, or embedded instructions are emitted or executed.",
     `Messages: ${c.users} user, ${c.assistants} assistant, ${c.toolResults} tool results (${c.toolErrors} failed).`,
-    `Responses: ${c.providerErrors} errors (${c.unauthorizedErrors} HTTP 401, ${c.transportErrors} transport), ${c.aborted} aborted, ${c.emptyReplies} empty successes, ${c.lengthStops} output-limit stops.`,
+    `Responses: ${c.providerErrors} provider errors (${c.unauthorizedErrors} HTTP 401, ${c.transportErrors} transport), ${c.harnessStops} harness stops, ${c.aborted} aborted, ${c.emptyReplies} empty successes, ${c.lengthStops} output-limit stops.`,
     `Recovery: ${c.contextWindows} windows, ${c.nestedRecoveryWindows} nested recovery records, maximum depth ${c.maxRecoveryDepth}.`,
     `Paths: ${c.notesPathErrors} doubled notes prefixes, ${c.homePathErrors} unexpanded home shortcuts in failed tools.`,
     `Output: ${c.oversizedToolResults} tool results above 20 KB, largest ${c.maxToolResultBytes} bytes.`,
@@ -1147,12 +1161,14 @@ function formatDebugReport(report) {
     "These are diagnostics, not proof of a provider root cause or permission to replay past actions."
   ].join("\n");
 }
-var textParts, tokenCount;
+var textParts, tokenCount, DebugInputError;
 var init_debug = __esm({
   "src/harness/debug.ts"() {
     init_StopConditions();
     textParts = (content) => typeof content === "string" ? content : Array.isArray(content) ? content.filter((p) => p?.type === "text" && typeof p.text === "string").map((p) => p.text).join("\n") : "";
     tokenCount = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    DebugInputError = class extends Error {
+    };
   }
 });
 
@@ -4625,7 +4641,7 @@ function contextTools(state, cwd) {
             closeSync(fd);
           }
         }
-        return { content: `${op === "write" ? "Wrote" : "Appended to"} .pi/notes/${args.path}` };
+        return { content: `${op === "write" ? "Wrote" : "Appended to"} .pi/notes/${relative(root, path2)}` };
       }
       if (op === "read") {
         const path2 = safePath(root, required(args.path, "path"));
@@ -4673,16 +4689,22 @@ function contextTools(state, cwd) {
       }
       if (args.op === "list" || args.all) {
         const roots = /* @__PURE__ */ new Map();
-        for (const session of listSessions(200)) {
+        let scoped = 0;
+        for (const session of listSessions(Number.MAX_SAFE_INTEGER)) {
           if (signal?.aborted) throw new Error("Operation aborted");
+          if (scoped >= 200) break;
           if (session.id === state.sessionId) {
             sources.push(current);
+            scoped++;
             continue;
           }
           if (!session.cwd) continue;
           try {
             if (!roots.has(session.cwd)) roots.set(session.cwd, notesRoot(session.cwd));
-            if (roots.get(session.cwd) === dirname6(dirname6(root)) && !sources.some((s) => s.id === session.id)) sources.push({ id: session.id, entries: args.op === "list" ? [] : loadSession(session.id).entries });
+            if (roots.get(session.cwd) === dirname6(dirname6(root))) {
+              scoped++;
+              if (!sources.some((s) => s.id === session.id)) sources.push({ id: session.id, entries: args.op === "list" ? [] : loadSession(session.id).entries });
+            }
           } catch {
           }
         }
@@ -7329,7 +7351,7 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
       answer(line);
       return;
     }
-    if (busy && line.trim() && !line.startsWith("/")) {
+    if (busy && !controller?.signal.aborted && line.trim() && !line.startsWith("/")) {
       runner.steer({ role: "user", content: line, timestamp: Date.now() });
       console.log(gray("(queued \u2014 I'll fold that in after the current step)"));
       return;
@@ -7603,8 +7625,13 @@ async function main(argv = process.argv.slice(2)) {
   if (_[0] === "debug") {
     if (!_[1]) throw new Error("Usage: rein debug <export folder> [--json]");
     const { analyzeDebugFolder: analyzeDebugFolder2, formatDebugReport: formatDebugReport2 } = await Promise.resolve().then(() => (init_debug(), debug_exports));
-    const report = await analyzeDebugFolder2(_[1]);
-    console.log(flags.json === true ? JSON.stringify(report, null, 2) : formatDebugReport2(report));
+    try {
+      const report = await analyzeDebugFolder2(_[1]);
+      console.log(flags.json === true ? JSON.stringify(report, null, 2) : formatDebugReport2(report));
+    } catch (error) {
+      console.error(error.message);
+      process.exitCode = 1;
+    }
     return;
   }
   if (_[0] === "models" || _[0] === "model") {

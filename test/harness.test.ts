@@ -38,6 +38,16 @@ function cli(args: string[], homeDir: string, input?: string): Promise<ChildResu
 	});
 }
 
+test("debug CLI errors never echo supplied private filenames", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "rein-debug-cli-"));
+	try {
+		const result = await cli(["debug", join(dir, "PRIVATE_PATH_SENTINEL"), "--json"], dir);
+		assert.equal(result.code, 1);
+		assert.match(result.stderr, /missing/);
+		assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_PATH_SENTINEL|rein-debug-cli-|ENOENT/);
+	} finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("print/REPL stream, persistence, resume, and JSON errors", { timeout: 20_000 }, async () => {
 	const requests: any[] = [];
 	const server = createServer((req, res) => {
@@ -130,10 +140,10 @@ test("REPL /stop aborts a running shell and discards queued steering before the 
 		const result = await new Promise<ChildResult>((resolve, reject) => {
 			child = spawn(process.execPath, [join(root, "bin/rein.js"), "--base-url", `http://127.0.0.1:${(server.address() as any).port}/v1`, "--model", "stop-fixture", "--tools", "native"], { cwd: dir, env: { ...process.env, REIN_HOME: join(dir, "home"), NODETERM_API: "", NO_COLOR: "1" } });
 			const timer = setTimeout(() => child?.kill("SIGKILL"), 10_000);
-			let stdout = "", stderr = "", resumed = false;
+			let stdout = "", stderr = "", answered = false;
 			child.stdout!.on("data", data => {
 				stdout += data;
-				if (!resumed && stdout.includes("Stopped. Send a new request")) { resumed = true; child!.stdin!.end("NEW_SCOPE\n/quit\n"); }
+				if (!answered && stdout.includes("new request answered")) { answered = true; child!.stdin!.end("/quit\n"); }
 			});
 			child.stderr!.on("data", data => stderr += data);
 			child.on("error", reject);
@@ -142,7 +152,7 @@ test("REPL /stop aborts a running shell and discards queued steering before the 
 			poll = setInterval(() => {
 				if (existsSync(join(dir, "started"))) {
 					clearInterval(poll); poll = undefined;
-					child!.stdin!.write("STALE_QUEUED_REQUEST\n/stop\n");
+					child!.stdin!.write("STALE_QUEUED_REQUEST\n/stop\nNEW_SCOPE\n");
 				}
 			}, 10);
 		});

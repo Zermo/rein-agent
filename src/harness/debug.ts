@@ -5,7 +5,7 @@ import { initialDoomLoopState, observeDoomLoop } from "../../vendor/fold/StopCon
 
 export interface DebugCounts {
 	users: number; assistants: number; toolResults: number; toolErrors: number;
-	providerErrors: number; aborted: number; emptyReplies: number; lengthStops: number;
+	providerErrors: number; harnessStops: number; aborted: number; emptyReplies: number; lengthStops: number;
 	unauthorizedErrors: number; transportErrors: number; contextWindows: number;
 	nestedRecoveryWindows: number; maxRecoveryDepth: number; repeatedBatches: number;
 	notesPathErrors: number; homePathErrors: number; oversizedToolResults: number;
@@ -15,7 +15,7 @@ export interface DebugCounts {
 export interface DebugReport { version: 1; sessions: number; totals: DebugCounts; perSession: Array<DebugCounts & { session: number }>; }
 
 function emptyCounts(): DebugCounts {
-	return { users: 0, assistants: 0, toolResults: 0, toolErrors: 0, providerErrors: 0, aborted: 0,
+	return { users: 0, assistants: 0, toolResults: 0, toolErrors: 0, providerErrors: 0, harnessStops: 0, aborted: 0,
 		emptyReplies: 0, lengthStops: 0, unauthorizedErrors: 0, transportErrors: 0, contextWindows: 0,
 		nestedRecoveryWindows: 0, maxRecoveryDepth: 0, repeatedBatches: 0, notesPathErrors: 0,
 		homePathErrors: 0, oversizedToolResults: 0, maxToolResultBytes: 0, maxTurnsPerRequest: 0,
@@ -24,8 +24,20 @@ function emptyCounts(): DebugCounts {
 const textParts = (content: unknown): string => typeof content === "string" ? content : Array.isArray(content)
 	? content.filter(p => p?.type === "text" && typeof p.text === "string").map(p => p.text).join("\n") : "";
 const tokenCount = (value: unknown): number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+class DebugInputError extends Error {}
 
 export async function analyzeDebugFolder(folder: string): Promise<DebugReport> {
+	try { return await readExport(folder); }
+	catch (error) {
+		if (error instanceof DebugInputError) throw error;
+		const code = (error as NodeJS.ErrnoException)?.code;
+		throw new DebugInputError(code === "ENOENT" ? "Export folder or session is missing. Check the supplied folder and try again."
+			: code === "EACCES" || code === "EPERM" ? "Export is not readable. Check its permissions and try again."
+			: "Export could not be read. Use a stable, readable copy of the session export.");
+	}
+}
+
+async function readExport(folder: string): Promise<DebugReport> {
 	const root = await realpath(resolve(folder));
 	let directory: string | undefined;
 	let files: string[] = [];
@@ -38,20 +50,20 @@ export async function analyzeDebugFolder(folder: string): Promise<DebugReport> {
 			if (files.length) { directory = path; break; }
 		} catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
 	}
-	if (!directory) throw new Error("No JSONL session files found in the folder, raw/, or sessions/raw/.");
-	if (files.length > 200) throw new Error("This export exceeds the 200-session analysis limit. Select a smaller export.");
+	if (!directory) throw new DebugInputError("No JSONL session files found in the folder, raw/, or sessions/raw/.");
+	if (files.length > 200) throw new DebugInputError("This export exceeds the 200-session analysis limit. Select a smaller export.");
 	const perSession: DebugReport["perSession"] = [];
 	let totalBytes = 0;
 	for (const name of files) {
 		const path = resolve(directory, name);
-		if ((await realpath(path)) !== path) throw new Error("Symlinked session files are not supported.");
+		if ((await realpath(path)) !== path) throw new DebugInputError("Symlinked session files are not supported.");
 		const handle = await open(path, "r");
 		const counts = emptyCounts();
 		let repeatState = initialDoomLoopState, turns = 0;
 		try {
 			const stat = await handle.stat();
 			totalBytes += stat.size;
-			if (!stat.isFile() || stat.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new Error("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
+			if (!stat.isFile() || stat.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
 			// A bounded read also handles files that grow while being inspected.
 			const bytes = Buffer.alloc(stat.size + 1);
 			let read = 0;
@@ -60,7 +72,7 @@ export async function analyzeDebugFolder(folder: string): Promise<DebugReport> {
 				if (!chunk.bytesRead) break;
 				read += chunk.bytesRead;
 			}
-			if (read > stat.size) throw new Error("A session changed during analysis. Use a stable export and try again.");
+			if (read > stat.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
 			for (const line of bytes.subarray(0, read).toString("utf8").split("\n")) {
 				if (!line.trim()) continue;
 				if (Buffer.byteLength(line) > 8 * 1024 * 1024) { counts.malformedRecords++; continue; }
@@ -74,17 +86,19 @@ export async function analyzeDebugFolder(folder: string): Promise<DebugReport> {
 					if (depth > 1) counts.nestedRecoveryWindows++;
 				} else if (entry.role === "user") {
 					if (typeof entry.content !== "string") { counts.malformedRecords++; continue; }
-					if (!entry.content.startsWith("[posthorse]") && !entry.content.startsWith("[workspace-overlay]")) {
+					if (!/^\s*\[(?:posthorse|workspace-overlay|rein persistent workspace overlay)/i.test(entry.content)) {
 						counts.users++; turns = 0; repeatState = initialDoomLoopState;
 					}
 				} else if (entry.role === "assistant") {
 					if (!Array.isArray(entry.content)) { counts.malformedRecords++; continue; }
-					counts.assistants++; turns++;
+					counts.assistants++;
+					const error = typeof entry.errorMessage === "string" ? entry.errorMessage : "";
+					if (entry.stopReason === "error" && error.startsWith("Harness stopped:")) { counts.harnessStops++; continue; }
+					turns++;
 					counts.maxTurnsPerRequest = Math.max(counts.maxTurnsPerRequest, turns);
 					counts.inputTokens += tokenCount(entry.usage?.input); counts.outputTokens += tokenCount(entry.usage?.output);
 					if (entry.stopReason === "error") {
 						counts.providerErrors++;
-						const error = typeof entry.errorMessage === "string" ? entry.errorMessage : "";
 						if (/\b401\b/.test(error)) counts.unauthorizedErrors++;
 						if (/fetch failed|ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(error)) counts.transportErrors++;
 					}
@@ -123,7 +137,7 @@ export function formatDebugReport(report: DebugReport): string {
 		`Rein offline debug report: ${report.sessions} sessions`,
 		"Counts only. No transcript text, paths, credentials, or embedded instructions are emitted or executed.",
 		`Messages: ${c.users} user, ${c.assistants} assistant, ${c.toolResults} tool results (${c.toolErrors} failed).`,
-		`Responses: ${c.providerErrors} errors (${c.unauthorizedErrors} HTTP 401, ${c.transportErrors} transport), ${c.aborted} aborted, ${c.emptyReplies} empty successes, ${c.lengthStops} output-limit stops.`,
+		`Responses: ${c.providerErrors} provider errors (${c.unauthorizedErrors} HTTP 401, ${c.transportErrors} transport), ${c.harnessStops} harness stops, ${c.aborted} aborted, ${c.emptyReplies} empty successes, ${c.lengthStops} output-limit stops.`,
 		`Recovery: ${c.contextWindows} windows, ${c.nestedRecoveryWindows} nested recovery records, maximum depth ${c.maxRecoveryDepth}.`,
 		`Paths: ${c.notesPathErrors} doubled notes prefixes, ${c.homePathErrors} unexpanded home shortcuts in failed tools.`,
 		`Output: ${c.oversizedToolResults} tool results above 20 KB, largest ${c.maxToolResultBytes} bytes.`,

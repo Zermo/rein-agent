@@ -66,3 +66,21 @@ test("offline analyzer rejects oversized exports and never follows a raw-directo
 		await assert.rejects(analyzeDebugFolder(dir), /200-session/);
 	} finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("offline counters distinguish generated workspace overlays and harness stops from user and provider activity", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "rein-debug-generated-"));
+	try {
+		const assistant = { role: "assistant", content: [{ type: "text", text: "observed" }], stopReason: "stop" };
+		writeFileSync(join(dir, "session.jsonl"), [
+			{ role: "user", content: "direct request" }, assistant,
+			{ role: "user", content: "[rein persistent workspace overlay — generated on resume]\nGenerated evidence." }, assistant,
+			{ role: "assistant", content: [], stopReason: "error", errorMessage: "Harness stopped: turn budget reached (2 model turns)." },
+		].map(e => JSON.stringify(e)).join("\n"));
+		const report = await analyzeDebugFolder(dir);
+		assert.equal(report.totals.users, 1);
+		assert.equal(report.totals.assistants, 3);
+		assert.equal(report.totals.maxTurnsPerRequest, 2);
+		assert.equal(report.totals.harnessStops, 1);
+		assert.equal(report.totals.providerErrors, 0);
+	} finally { rmSync(dir, { recursive: true, force: true }); }
+});

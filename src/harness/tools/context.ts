@@ -104,7 +104,7 @@ export function contextTools(state: Posthorse, cwd: string): AgentTool[] {
 						writeFileSync(fd, `${stat.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
 					} finally { closeSync(fd); }
 				}
-				return { content: `${op === "write" ? "Wrote" : "Appended to"} .pi/notes/${args.path}` };
+				return { content: `${op === "write" ? "Wrote" : "Appended to"} .pi/notes/${relative(root, path)}` };
 			}
 			if (op === "read") {
 				const path = safePath(root, required(args.path, "path"));
@@ -151,13 +151,18 @@ export function contextTools(state: Posthorse, cwd: string): AgentTool[] {
 			}
 			if (args.op === "list" || args.all) {
 				const roots = new Map<string, string>();
-				for (const session of listSessions(200)) {
+				let scoped = 0;
+				for (const session of listSessions(Number.MAX_SAFE_INTEGER)) {
 					if (signal?.aborted) throw new Error("Operation aborted");
-					if (session.id === state.sessionId) { sources.push(current); continue; }
+					if (scoped >= 200) break;
+					if (session.id === state.sessionId) { sources.push(current); scoped++; continue; }
 					if (!session.cwd) continue;
 					try {
 						if (!roots.has(session.cwd)) roots.set(session.cwd, notesRoot(session.cwd));
-						if (roots.get(session.cwd) === dirname(dirname(root)) && !sources.some(s => s.id === session.id)) sources.push({ id: session.id, entries: args.op === "list" ? [] : loadSession(session.id).entries });
+						if (roots.get(session.cwd) === dirname(dirname(root))) {
+							scoped++;
+							if (!sources.some(s => s.id === session.id)) sources.push({ id: session.id, entries: args.op === "list" ? [] : loadSession(session.id).entries });
+						}
 					} catch { /* Moved project or unreadable session. */ }
 				}
 			}
