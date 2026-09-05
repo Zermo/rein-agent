@@ -1140,7 +1140,7 @@ var init_tmux = __esm({
         signal?.throwIfAborted();
         let pane;
         try {
-          pane = (await this.command(["split-window", "-d", "-h", "-p", "40", "-t", target, "-c", this.cwd, "-P", "-F", "#{pane_id}", "/bin/sh", "-c", command], void 0, void 0, current)).trim();
+          pane = (await this.command(["split-window", "-d", "-h", "-l", "40%", "-t", target, "-c", this.cwd, "-P", "-F", "#{pane_id}", "/bin/sh", "-c", command], void 0, void 0, current)).trim();
           if (!/^%\d+$/.test(pane)) throw new Error("tmux did not return the created pane ID.");
           signal?.throwIfAborted();
           return pane;

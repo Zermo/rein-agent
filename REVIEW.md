@@ -47,6 +47,10 @@ became readable again. A real PTY fixture exercised the bundled `--visual`
 launcher, split panes, a mock Chat Completions response, activity recording,
 separate shell lists, detach, and owned session cleanup on macOS/tmux 3.6a.
 
+Ubuntu CI exposed tmux 3.4's broken `split-window -p` handling. Splits now use
+the shared `-l 40%` syntax, and the real-pane regression checks the resulting
+widths as well as selection, execution, and cancellation cleanup.
+
 Release gates verify the Node 22.19 source suite, Node 18 bundle including an
 actual Meat worker and local mock model, npm package assets, original upstream
 tests, pinned licenses/sources, and an identical Go 1.26.5 WASM rebuild. The HTTP

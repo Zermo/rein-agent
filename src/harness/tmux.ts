@@ -132,7 +132,8 @@ export class TmuxShells {
 		try {
 			// Let this short, timeout-bounded RPC return its pane ID even when
 			// cancellation arrives, so only the newly created pane is cleaned up.
-			pane = (await this.command(["split-window", "-d", "-h", "-p", "40", "-t", target, "-c", this.cwd, "-P", "-F", "#{pane_id}", "/bin/sh", "-c", command], undefined, undefined, current)).trim();
+			// Percentage sizes through -l also work on tmux 3.4, where -p is broken.
+			pane = (await this.command(["split-window", "-d", "-h", "-l", "40%", "-t", target, "-c", this.cwd, "-P", "-F", "#{pane_id}", "/bin/sh", "-c", command], undefined, undefined, current)).trim();
 			if (!/^%\d+$/.test(pane)) throw new Error("tmux did not return the created pane ID.");
 			signal?.throwIfAborted();
 			return pane;

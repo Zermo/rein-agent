@@ -6,7 +6,7 @@ interactive terminal activity and diff review, and the pinned Meat engine.
 - [x] G1: source smoke and regression suites pass on Node 22.19
   CHECK: npm exec --yes --package=node@22.19.0 -- npm test
   EXPECT: smoke test OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=862f71d67cf00225801cd8535d85fff14f1ed3ed496fa3b86f184227d0bda904; output-bytes=57935
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=13a70c3ecb3e536394c0a8904ba1550e7bc7884a9908016221a0488ea53a4555; output-bytes=57919
 
 - [x] G2: built CLI and embedded native assets work on Node 18
   CHECK: bash -c 'npm run bundle && npm exec --yes --package=node@18.20.8 -- node test/bundle-smoke.mjs'

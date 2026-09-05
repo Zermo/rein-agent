@@ -101,6 +101,8 @@ test("tmux visual split runs a quoted command in its workspace and leaves the ma
 	assert.equal(rows.length, 2);
 	assert.ok(rows[0].startsWith("0:1:"));
 	assert.ok(rows[1].endsWith(pane));
+	const widths = (await exec(realTmux, ["-L", shells.socket, "list-panes", "-t", id, "-F", "#{pane_width}"])).stdout.trim().split("\n").map(Number);
+	assert.deepEqual(widths, [71, 48], "The side pane occupies 40% of the 120-column window, with one divider column.");
 	await shells.send(id, "printf main > main");
 	await until(() => existsSync(join(dir, "main")));
 }));
