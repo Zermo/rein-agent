@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, relative } from "node:path";
 import { Posthorse } from "../src/harness/posthorse.ts";
 import { contextTools } from "../src/harness/tools/context.ts";
 import { toolsForCwd } from "../src/harness/tools/index.ts";
-import { createSession, appendMessage } from "../src/agent/session.ts";
+import { createSession, appendMessage, sessionPath } from "../src/agent/session.ts";
 import { stream } from "../src/ai/openai-completions.ts";
 
 const model = { id: "offline", provider: "custom", baseUrl: "http://unused", contextWindow: 8000, maxTokens: 1000 };
@@ -20,6 +20,7 @@ test("notes accepts its documented .pi/notes prefix without nesting it again", a
 		const notes = contextTools(horse(), dir).find(tool => tool.name === "notes")!;
 		const result = await notes.execute("read", { op: "read", path: ".pi/notes/MEMORY.md" });
 		assert.equal(result.content, "verified current task");
+		assert.equal((await notes.execute("append", { op: "append", path: ".pi/notes/MEMORY.md", content: "next fact" })).content, "Appended to .pi/notes/MEMORY.md");
 		await assert.rejects(notes.execute("bad", { op: "write", path: ".pi/notes/../../outside", content: "bad" }), /path/);
 	} finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -58,6 +59,20 @@ test("history lists scoped sessions and reads a session ID without mistaking it 
 		assert.doesNotMatch((await history.execute("list", { op: "list" })).content, new RegExp(foreign));
 		assert.match((await history.execute("read", { op: "read", id: saved })).content, /known earlier request/);
 		await assert.rejects(history.execute("foreign", { op: "read", id: foreign }), /No history|repository|scope/);
+	} finally { if (previous === undefined) delete process.env.REIN_HOME; else process.env.REIN_HOME = previous; rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("history applies its recent-session cap within the repository scope", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "rein-debug-history-cap-")); const previous = process.env.REIN_HOME;
+	process.env.REIN_HOME = join(dir, "home");
+	try {
+		const cwd = join(dir, "project"), other = join(dir, "other"); mkdirSync(cwd); mkdirSync(other);
+		const saved = createSession({ cwd }); appendMessage(saved, { role: "user", content: "SCOPED_HISTORY_SENTINEL", timestamp: 1 });
+		utimesSync(sessionPath(saved), 1, 1);
+		for (let i = 0; i < 200; i++) createSession({ cwd: other });
+		const history = contextTools(horse(), cwd).find(tool => tool.name === "history")!;
+		assert.match((await history.execute("list", { op: "list" })).content, new RegExp(saved));
+		assert.match((await history.execute("search", { op: "search", all: true, query: "SCOPED_HISTORY_SENTINEL" })).content, /SCOPED_HISTORY_SENTINEL/);
 	} finally { if (previous === undefined) delete process.env.REIN_HOME; else process.env.REIN_HOME = previous; rmSync(dir, { recursive: true, force: true }); }
 });
 

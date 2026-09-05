@@ -245,7 +245,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			answer(line);
 			return;
 		}
-		if (busy && line.trim() && !line.startsWith("/")) {
+		if (busy && !controller?.signal.aborted && line.trim() && !line.startsWith("/")) {
 			runner.steer({ role: "user", content: line, timestamp: Date.now() });
 			console.log(gray("(queued — I'll fold that in after the current step)"));
 			return;

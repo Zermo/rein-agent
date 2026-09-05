@@ -1,5 +1,45 @@
 # Posthorse and harness review
 
+## 0.7.0 Fold and native workflow review
+
+The September export diagnosis and integration contract are recorded in
+[docs/debug-2026-09-05.md](docs/debug-2026-09-05.md). Fold's pure stop policy
+and truncation are pinned alongside Matt Pocock's three selected workflows.
+Rein implements skill loading against its own tools; this does not replace the
+entire harness with Fold's Effect runtime.
+
+Two parallel reviewers followed Matt Pocock's Standards and Spec review axes
+against the exported build, `8b5410a`, through implementation commit `14245e4`.
+Their findings below were fixed and retained as regression tests.
+
+### Standards
+
+- P2, resolved: the global 200-session cutoff hid a repository's older history
+  behind newer sessions from unrelated projects. Scope filtering now precedes
+  the cutoff; a fixture with 200 foreign sessions verifies discovery and search.
+- P2, resolved: input entered during `/stop` cleanup was acknowledged as queued
+  but discarded. Input after cancellation now enters the next-run queue.
+
+Two findings, both resolved. The most consequential was loss of the user's
+next request during cancellation.
+
+### Spec
+
+- P2, resolved: a next request could disappear during cancellation. A real CLI
+  fixture now sends `/stop` and the next request in the same input chunk.
+- P2, resolved: filesystem errors from offline diagnosis disclosed supplied
+  paths. Fixed diagnostics cover failures, with both output streams tested.
+- P2, resolved: generated workspace overlays counted as direct user input,
+  while synthetic harness stops counted as provider errors. The analyzer now
+  identifies both record types and reports harness stops separately.
+
+Three findings, all resolved. The most consequential was loss of the user's
+next request during cancellation.
+
+The notes acknowledgment also uses its normalized path. Source regressions,
+Node 18 packaged CLI smoke, pinned provenance, and package contents are release
+gates. The raw user export is not included in the repository or package.
+
 The integration ports Posthorse 0.4.1 to Rein's own session and tool interfaces.
 Upstream source and MIT license are pinned under `vendor/pi-posthorse`.
 Three parallel reviewers checked the loop, provider adapter, and CLI, followed
