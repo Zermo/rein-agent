@@ -90,6 +90,8 @@ rein-agent loop               autonomous experiment loop (TASK.md + METRIC.md)
 rein-agent improve [goal]     self-improvement loop on this repo
 rein-agent gates [file] --mode m  unlazy gates: lint | status | approve | reverify
 rein-agent models             what rein can see: local servers + provider presets
+rein skills [name]            bundled Matt Pocock workflows and references
+rein debug <folder> [--json]  offline exported-session diagnostics (counts only)
 rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
 rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
 rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
@@ -98,9 +100,37 @@ rein login codex|copilot       official browser/device account sign-in
 rein --version                print version
 ```
 
-REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /context /new-context [handoff] /quit`.
+REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /context /new-context [handoff] /skills /skill <name> <task> /stop /quit`.
 While the agent is working, just type — it's injected as a steering message
 after the current tool batch (pi's steering, not pi's queue).
+`/stop` immediately cancels the current turn and its owned shell process group.
+Queued input is discarded; send a new request when ready to continue.
+
+### Native Fold components and Matt Pocock workflows
+
+Rein integrates [Fold](https://github.com/humanlayer/fold)'s repeated-tool-batch
+detector and UTF-8 output truncation, with a native skill loader based on its
+stable roster design. This is a component integration, not the full Fold CLI.
+Three identical consecutive tool batches stop the run with an incomplete-work
+notice. Set `repeatToolLimit` to 0 to disable, or an integer from 2 to 50 to tune it.
+Shell output keeps up to 500 lines / 20 KB, including single-line output.
+
+[Matt Pocock's skills](https://github.com/mattpocock/skills) ship as native
+workflows: `diagnosing-bugs`, `tdd`, and `code-review`. The model loads them
+through `skill`; users can invoke `/skill diagnosing-bugs <task>` in the REPL.
+`rein skills tdd tests.md` reads a bundled reference without starting inference.
+Bodies load on demand without changing the system prefix. Scripts stay inert
+unless separately executed within the user's request. Skills do not themselves
+provide sub-agent tools.
+
+`rein debug /path/to/export` reads JSONL sessions offline. It reports counts of
+empty responses, provider errors, nested recovery, path mistakes, large outputs,
+and repeated tool batches. `--json` includes counters per session in sorted
+file order; output never includes transcript text, filenames, or credentials.
+The analyzer reads at most 200 files, 32 MB per file, 256 MB total, and skips
+records above 8 MB. See the [September export diagnosis](docs/debug-2026-09-05.md)
+for findings, fixes, and limitations. Both upstreams are pinned under `vendor/`;
+`npm run check:natives` verifies their source and license hashes.
 
 ### Remote servers, API keys, and subscription login
 

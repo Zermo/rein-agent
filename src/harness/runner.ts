@@ -16,6 +16,7 @@ import { toolsForCwd } from "./tools/index.ts";
 import * as nodeterm from "./nodeterm.ts";
 import { Posthorse, POSTHORSE_GUIDANCE } from "./posthorse.ts";
 import { contextTools } from "./tools/context.ts";
+import { skillTool, SKILL_GUIDANCE } from "./skills.ts";
 
 export interface RunnerOptions {
 	cwd: string;
@@ -75,6 +76,8 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	if (opts.contextWindow !== undefined) model.contextWindow = opts.contextWindow;
 	const apiKey = apiKeyFor(model.provider, model.baseUrl, model.sshHost);
 	const config = loadConfig();
+	const repeatToolLimit = config.repeatToolLimit ?? 3;
+	if (!Number.isSafeInteger(repeatToolLimit) || repeatToolLimit < 0 || repeatToolLimit === 1 || repeatToolLimit > 50) throw new Error("repeatToolLimit must be 0 (disabled) or an integer from 2 to 50.");
 	const reserveTokens = opts.reserveTokens ?? config.posthorse?.reserveTokens;
 	// Small local windows need a smaller implicit output budget. Explicit
 	// maxTokens remains authoritative and is validated by Posthorse below.
@@ -89,13 +92,13 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	const withContextTools = opts.tools === undefined;
 	const autoContext = opts.autoContext ?? (withContextTools && config.posthorse?.enabled !== false);
 	const contextGuidance = autoContext ? POSTHORSE_GUIDANCE : POSTHORSE_GUIDANCE.replace("Automatic rollover starts a fresh window without generating a summary.", "Automatic rollover is disabled. Use new_context to start a fresh window without generating a summary.");
-	const basePrompt = (opts.systemPrompt ?? buildSystemPrompt(opts.cwd)) + (withContextTools ? contextGuidance : "");
+	const basePrompt = (opts.systemPrompt ?? buildSystemPrompt(opts.cwd)) + (withContextTools ? contextGuidance + SKILL_GUIDANCE : "");
 	const tools = [...(opts.tools ?? toolsForCwd(opts.cwd))];
 	let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
 
 	const steering: AgentMessage[] = [];
 	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
-	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd));
+	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillTool);
 	const context: AgentContext = { systemPrompt, messages: posthorse.messages, tools };
 	let running = false;
 	const askTools = [...(opts.askTools ?? [])];
@@ -152,6 +155,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					recoverFromError: ({ message, context: loopContext }) => posthorse.recover(message, loopContext.messages),
 					streamFn: (m, ctx, o) => cliProvider ? streamCli(m, ctx, o) : openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
 					maxTurns: opts.maxTurns ?? 60,
+					stopConditions: { doomLoop: repeatToolLimit ? { enabled: true, repeatedToolCalls: repeatToolLimit } : { enabled: false } },
 					getSteeringMessages: () => steering.splice(0, steering.length),
 					beforeToolCall: async (info) => {
 						const denied = await opts.toolGuard?.(info.toolCall.name, (info.args ?? {}) as Record<string, unknown>);
@@ -200,7 +204,10 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					}
 					await runOpts?.onEvent?.(event);
 				},
-			); } finally { posthorse.captureWorkspace(); running = false; }
+			); } finally {
+				if (runOpts?.signal?.aborted) steering.length = 0;
+				posthorse.captureWorkspace(); running = false;
+			}
 		},
 	};
 

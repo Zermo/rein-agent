@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -90,5 +90,70 @@ test("print/REPL stream, persistence, resume, and JSON errors", { timeout: 20_00
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 		rmSync(testHome, { recursive: true, force: true });
+	}
+});
+
+test("print mode returns failure for empty and output-limited responses", { timeout: 15_000 }, async () => {
+	const server = createServer((req, res) => {
+		let raw = ""; req.on("data", chunk => raw += chunk); req.on("end", () => {
+			const body = JSON.parse(raw);
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify({ choices: [{ message: { content: body.model === "length-fixture" ? "partial answer" : null }, finish_reason: body.model === "length-fixture" ? "length" : "stop" }] }));
+		});
+	});
+	await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+	const dir = mkdtempSync(join(tmpdir(), "rein-incomplete-"));
+	try {
+		for (const model of ["empty-fixture", "length-fixture"]) {
+			const result = await cli(["--base-url", `http://127.0.0.1:${(server.address() as any).port}/v1`, "--model", model, "--no-tools", "-p", "hello"], dir);
+			assert.equal(result.code, 1, result.stdout + result.stderr);
+			assert.match(result.stderr, /no usable|before completion/);
+		}
+	} finally { await new Promise<void>(resolve => server.close(() => resolve())); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("REPL /stop aborts a running shell and discards queued steering before the next request", { timeout: 15_000 }, async () => {
+	const dir = mkdtempSync(join(tmpdir(), "rein-repl-stop-"));
+	const requests: any[] = [];
+	const server = createServer((req, res) => {
+		let raw = ""; req.on("data", chunk => raw += chunk); req.on("end", () => {
+			requests.push(JSON.parse(raw));
+			res.setHeader("content-type", "application/json");
+			const message = requests.length === 1 ? { tool_calls: [{ id: "owned-shell", function: { name: "bash", arguments: JSON.stringify({ command: "printf started > started; sleep 1; printf continued > escaped" }) } }] } : { content: "new request answered" };
+			res.end(JSON.stringify({ choices: [{ message, finish_reason: requests.length === 1 ? "tool_calls" : "stop" }] }));
+		});
+	});
+	await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+	let child: ReturnType<typeof spawn> | undefined;
+	let poll: ReturnType<typeof setInterval> | undefined;
+	try {
+		const result = await new Promise<ChildResult>((resolve, reject) => {
+			child = spawn(process.execPath, [join(root, "bin/rein.js"), "--base-url", `http://127.0.0.1:${(server.address() as any).port}/v1`, "--model", "stop-fixture", "--tools", "native"], { cwd: dir, env: { ...process.env, REIN_HOME: join(dir, "home"), NODETERM_API: "", NO_COLOR: "1" } });
+			const timer = setTimeout(() => child?.kill("SIGKILL"), 10_000);
+			let stdout = "", stderr = "", resumed = false;
+			child.stdout!.on("data", data => {
+				stdout += data;
+				if (!resumed && stdout.includes("Stopped. Send a new request")) { resumed = true; child!.stdin!.end("NEW_SCOPE\n/quit\n"); }
+			});
+			child.stderr!.on("data", data => stderr += data);
+			child.on("error", reject);
+			child.on("close", code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+			child.stdin!.write("start fixture\n");
+			poll = setInterval(() => {
+				if (existsSync(join(dir, "started"))) {
+					clearInterval(poll); poll = undefined;
+					child!.stdin!.write("STALE_QUEUED_REQUEST\n/stop\n");
+				}
+			}, 10);
+		});
+		assert.equal(result.code, 0, result.stdout + result.stderr);
+		assert.equal(requests.length, 2);
+		assert.match(JSON.stringify(requests[1]), /NEW_SCOPE/);
+		assert.doesNotMatch(JSON.stringify(requests[1]), /STALE_QUEUED_REQUEST/);
+		await new Promise(resolve => setTimeout(resolve, 1100));
+		assert.equal(existsSync(join(dir, "escaped")), false);
+	} finally {
+		if (poll) clearInterval(poll); child?.kill("SIGKILL");
+		await new Promise<void>(resolve => server.close(() => resolve())); rmSync(dir, { recursive: true, force: true });
 	}
 });

@@ -85,6 +85,7 @@ export interface ReinConfig {
 	model?: string;
 	temperature?: number;
 	maxTokens?: number;
+	repeatToolLimit?: number;
 	toolsMode?: "native" | "text" | "auto";
 	contextWindow?: number;
 	posthorse?: { enabled?: boolean; reserveTokens?: number };

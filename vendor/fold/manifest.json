@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/humanlayer/fold",
+  "commit": "7c5cc8dab311b8575e4a79162964839822b836b6",
+  "files": {
+    "upstream/StopConditions/StopConditions.ts": "ff93dae00fa089a8c5656e4c44589d1801d953564641d98b48fef6e6e1371c3e",
+    "upstream/Tools/Truncation.ts": "25a72809050cc5b84ce354bccd74e07d969c64c08a58c70e7bb9b74f908035e5",
+    "upstream/Skills/SkillTool.ts": "5a8f8764a3541342a31a8b612d18ca0853bdc7184ba7d48c756393e439e640a2",
+    "LICENSE": "5f13c18ea00ea5c1384f41745feeca774079164f7f59a92e4ac0899ad217b26f",
+    "Truncation.ts": "25a72809050cc5b84ce354bccd74e07d969c64c08a58c70e7bb9b74f908035e5",
+    "StopConditions.ts": "ebf43a2a47fb330f791f438777b0a6f898850cacf412d9d0b4ba250570508ad0"
+  }
+}

@@ -16,6 +16,7 @@ import type { Runner } from "./runner.ts";
 import type { AgentTool } from "../agent/agent-loop.ts";
 import * as nodeterm from "./nodeterm.ts";
 import { readState as autonomyState } from "./autonomy/state.ts";
+import { skillRequest, skillRoster } from "./skills.ts";
 
 interface ReplOptions {
 	runner: Runner;
@@ -124,6 +125,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 						"  /resume <id>     continue a previous session with current workspace overlay",
 						"  /branch          branch the current session and continue there",
 						"  /context         show context window usage",
+						"  /skills          list bundled workflows",
+						"  /skill <name> <task>  apply a bundled workflow to a request",
+						"  /stop            cancel the active turn and its shell processes",
 						"  /autonomy        show proactive proposals and service status",
 						"  /new-context [handoff]  start a fresh window in this session",
 						"  /quit            exit",
@@ -195,6 +199,12 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			case "context":
 				console.log(gray(runner.contextStatus()));
 				return true;
+			case "skills":
+				console.log(skillRoster());
+				return true;
+			case "stop":
+				console.log(gray("Stopped. Send a new request when ready."));
+				return true;
 			case "autonomy": {
 				const { autonomySnapshot } = await import("./autonomy/command.ts");
 				const { renderDashboard } = await import("./autonomy/tui.ts");
@@ -221,6 +231,14 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	let inputClosed = false;
 	const lineQueue: string[] = [];
 	rl.on("line", (line) => {
+		if (/^\/(stop|quit|exit)\s*$/.test(line.trim()) && busy) {
+			controller?.abort();
+			approvalAnswer?.("");
+			approvalAnswer = undefined;
+			lineQueue.length = 0;
+			lineQueue.push(line.trim());
+			return;
+		}
 		if (approvalAnswer) {
 			const answer = approvalAnswer;
 			approvalAnswer = undefined;
@@ -290,11 +308,19 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
 	while (true) {
 		proposalAlert();
-		const line = await ask();
+		let line = await ask();
 		if (line === null) break;
 		if (!line) continue;
 
-		if (line.startsWith("/")) {
+		if (/^\/skill(?:\s|$)/.test(line)) {
+			try {
+				const [, name, task] = line.match(/^\/skill\s+(\S+)\s+([\s\S]+)$/) ?? [];
+				line = skillRequest(name ?? "", task ?? "");
+			} catch (err) {
+				console.log(yellow((err as Error).message));
+				continue;
+			}
+		} else if (line.startsWith("/")) {
 			try {
 				const keep = await handleCommand(line);
 				if (!keep) break;

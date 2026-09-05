@@ -19,6 +19,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run check:posthorse
+      - run: npm run check:natives
       - run: npm run bundle
       - run: git diff --exit-code -- dist/rein.js
       - run: npm pack --dry-run

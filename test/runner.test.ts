@@ -34,6 +34,22 @@ test("default runner registers context tools and {} status calls keep native mod
 	assert.equal(requests, 2);
 }));
 
+test("skill loading leaves the system prefix unchanged and returns reference bodies only on demand", async (t) => isolated(async () => {
+	const bodies: any[] = [];
+	t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+		bodies.push(JSON.parse(init.body as string));
+		return bodies.length === 1 ? call("skill", { name: "tdd", file: "tests.md" }) : reply();
+	});
+	const runner = await createRunner(defaults);
+	const prefix = runner.systemPrompt;
+	const messages = await runner.run(user("inspect the test workflow"));
+	assert.equal(runner.systemPrompt, prefix);
+	assert.equal(bodies[0].messages[0].content, bodies[1].messages[0].content);
+	assert.ok(messages.some(m => m.role === "toolResult" && m.toolName === "skill" && !m.isError));
+	const empty = await createRunner({ ...defaults, tools: [] });
+	assert.doesNotMatch(empty.systemPrompt, /Bundled workflows/);
+}));
+
 test("{} new_context persists a boundary, removes old replay, and survives resume/followup", async (t) => isolated(async () => {
 	const bodies: any[] = [];
 	const server = createServer(async (req, res) => {
