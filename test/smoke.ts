@@ -391,7 +391,9 @@ console.log("12. doctor + heartbeat");
 	mkdirSync(hbDir, { recursive: true });
 	writeFileSync(hbJoin(hbDir, "HEARTBEAT.md"), HEARTBEAT_TEMPLATE);
 	const prevHome = process.env.HOME;
+	const prevReinHome = process.env.REIN_HOME;
 	process.env.HOME = hbHome;
+	process.env.REIN_HOME = hbJoin(hbHome, ".rein");
 	const prevCwd = process.cwd();
 	process.chdir(hbDir);
 	let hbCode = -1;
@@ -401,6 +403,7 @@ console.log("12. doctor + heartbeat");
 	} finally {
 		process.chdir(prevCwd);
 		process.env.HOME = prevHome;
+		if (prevReinHome === undefined) delete process.env.REIN_HOME; else process.env.REIN_HOME = prevReinHome;
 		iSrv.close();
 	}
 	check("heartbeat: idle beat exits 0", hbCode === 0, `exit ${hbCode}`);

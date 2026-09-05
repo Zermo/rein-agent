@@ -485,6 +485,15 @@ the edge.
 
 ### Self-sustaining — `rein doctor` + `rein heartbeat`
 
+Expected Node versions in the compatibility matrix are recorded as
+`{ kind: "compatibility", silent: true }` flags. They stay out of terminal
+warnings, repair prompts, and warning/failure totals. `rein doctor --json`
+retains the flags, and heartbeat writes them to `$REIN_HOME/heartbeat.log`
+(default `~/.rein/heartbeat.log`). Use `--silent=false` with doctor or heartbeat
+to display compatibility information; `--silent` is the default. Actual health
+warnings and failures remain visible. This controls Rein diagnostics; GitHub
+generates its own Actions runtime annotations.
+
 The baseline for agents that keep themselves alive and advancing. Two commands:
 
 ```sh

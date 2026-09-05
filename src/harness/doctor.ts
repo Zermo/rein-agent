@@ -24,10 +24,19 @@ import { profileHardware } from "../hardware/profile.ts";
 
 export type DoctorStatus = "ok" | "warn" | "fail";
 
+export interface DoctorFlag {
+	name: string;
+	kind: "compatibility";
+	silent: true;
+	detail: string;
+}
+
 export interface DoctorCheck {
 	name: string;
 	status: DoctorStatus;
 	detail: string;
+	/** Expected compatibility information, never a warning or a repair request. */
+	flag?: DoctorFlag;
 	fix?: string; // human hint
 	autoFix?: () => Promise<string>; // returns what it did; run under --fix
 }
@@ -36,7 +45,45 @@ export interface DoctorResult {
 	healthy: number;
 	total: number;
 	fixed: string[];
+	warnings: number;
+	failures: number;
+	flags: DoctorFlag[];
 	checks: DoctorCheck[];
+}
+
+/** These majors remain in our explicit CI compatibility matrix. */
+const NODE_COMPATIBILITY_MAJORS = new Set([18, 20, 22, 24]);
+
+export function checkNodeRuntime(version = process.versions.node): DoctorCheck {
+	const major = Number(version.split(".")[0]);
+	const supported = Number.isSafeInteger(major) && major >= 18;
+	return {
+		name: "node", status: supported ? "ok" : "fail", detail: `v${version}`,
+		fix: supported ? undefined : "node ≥18 required (brew install node)",
+		flag: supported && NODE_COMPATIBILITY_MAJORS.has(major) ? {
+			name: "node-runtime", kind: "compatibility", silent: true,
+			detail: `Node.js ${version} is in Rein's compatibility matrix; CI also tests the newest Node.js release.`,
+		} : undefined,
+	};
+}
+
+export function summarizeDoctor(checks: DoctorCheck[], fixed: string[] = []): DoctorResult {
+	return {
+		healthy: checks.filter(c => c.status === "ok").length,
+		total: checks.length, fixed, checks,
+		warnings: checks.filter(c => c.status === "warn").length,
+		failures: checks.filter(c => c.status === "fail").length,
+		// Only a passing check can carry an expected compatibility flag.
+		flags: checks.flatMap(c => c.status === "ok" && c.flag ? [c.flag] : []),
+	};
+}
+
+export function formatDoctorCheck(check: DoctorCheck, silent = true): string | undefined {
+	if (silent && check.status === "ok" && check.flag?.silent) return undefined;
+	const mark = check.status === "ok" ? green("✓") : check.status === "warn" ? yellow("△") : red("✗");
+	const fix = check.fix && check.status !== "ok" ? dim(`  → ${check.fix}`) : "";
+	const compatibility = check.status === "ok" && check.flag ? dim(`  (${check.flag.detail})`) : "";
+	return `  ${mark} ${check.name.padEnd(10)} ${check.detail}${fix}${compatibility}`;
 }
 
 function sh(cmd: string, opts: { input?: string; timeout?: number } = {}): { out: string; err: string } {
@@ -113,21 +160,13 @@ export async function checkConfiguredProvider(config: ReinConfig): Promise<Docto
 	} catch (error) { return { name: "server", status: "fail", detail: (error as Error).message, fix: "rein setup" }; }
 }
 
-export async function runDoctor(opts: { fix?: boolean; quiet?: boolean } = {}): Promise<DoctorResult> {
+export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?: boolean } = {}): Promise<DoctorResult> {
 	const checks: DoctorCheck[] = [];
 	const say = (s: string) => { if (!opts.quiet) console.log(s); };
 	const config = loadConfig();
 
 	// 1. node runtime
-	{
-		const major = parseInt(process.versions.node.split(".")[0], 10);
-		checks.push({
-			name: "node",
-			status: major >= 18 ? "ok" : "fail",
-			detail: `v${process.versions.node}`,
-			fix: major >= 18 ? undefined : "node ≥18 required (brew install node)",
-		});
-	}
+	checks.push(checkNodeRuntime());
 
 	// 2. rein on PATH → real install
 	let binPath: string | undefined;
@@ -283,15 +322,14 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean } = {}): 
 		}
 	}
 
-	const healthy = checks.filter((c) => c.status === "ok").length;
-	const result: DoctorResult = { healthy, total: checks.length, fixed, checks };
+	const result = summarizeDoctor(checks, fixed);
+	const { healthy } = result;
 
 	// --- render
 	if (!opts.quiet) {
 		for (const c of checks) {
-			const mark = c.status === "ok" ? green("✓") : c.status === "warn" ? yellow("△") : red("✗");
-			const fix = c.fix && c.status !== "ok" ? dim(`  → ${c.fix}`) : "";
-			console.log(`  ${mark} ${c.name.padEnd(10)} ${c.detail}${fix}`);
+			const line = formatDoctorCheck(c, opts.silent ?? true);
+			if (line !== undefined) console.log(line);
 		}
 		const bad = checks.length - healthy;
 		const line = bad === 0

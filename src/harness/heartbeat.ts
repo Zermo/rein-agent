@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { bold, cyan, dim, green, red, yellow } from "../util/ansi.ts";
 import { runDoctor } from "./doctor.ts";
+import type { DoctorResult } from "./doctor.ts";
 import { createRunner } from "./runner.ts";
 import type { RunnerOptions } from "./runner.ts";
 import { runImproveLoop } from "./improve.ts";
@@ -27,6 +28,7 @@ export interface HeartbeatOptions extends RunnerOptions {
 	improveGoal?: string;
 	init?: boolean;
 	quiet?: boolean;
+	silent?: boolean;
 }
 
 export const HEARTBEAT_TEMPLATE = `# HEARTBEAT.md — what the agent does on every \`rein heartbeat\`.
@@ -53,7 +55,7 @@ export interface HeartbeatTask {
 export interface HeartbeatResult {
 	file: string;
 	tasks: HeartbeatTask[];
-	doctor: { healthy: number; total: number; fixed: string[] };
+	doctor: Omit<DoctorResult, "checks">;
 	improve: string | null;
 	durationMs: number;
 }
@@ -79,11 +81,11 @@ function resolveHeartbeatFile(explicit?: string): string {
 	if (explicit) return isAbsolute(explicit) ? explicit : resolve(explicit);
 	const local = resolve(process.cwd(), "HEARTBEAT.md");
 	if (existsSync(local)) return local;
-	return join(homedir(), ".rein", "HEARTBEAT.md");
+	return join(process.env.REIN_HOME || join(homedir(), ".rein"), "HEARTBEAT.md");
 }
 
 function logBeat(result: HeartbeatResult): string {
-	const dir = join(homedir(), ".rein");
+	const dir = process.env.REIN_HOME || join(homedir(), ".rein");
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, "heartbeat.log");
 	appendFileSync(path, JSON.stringify({
@@ -120,7 +122,7 @@ export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number>
 
 	// 1. SELF-HEAL — detect & repair before doing any work
 	say(`\n${bold("1/4 self-heal")}`);
-	const doctor = await runDoctor({ fix: true, quiet: opts.quiet });
+	const doctor = await runDoctor({ fix: true, quiet: opts.quiet, silent: opts.silent });
 	say(dim(`   doctor: ${doctor.healthy}/${doctor.total} healthy${doctor.fixed.length ? ` (${doctor.fixed.length} repaired)` : ""}`));
 
 	// 2. TASKS — the periodic work
@@ -128,7 +130,7 @@ export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number>
 	const results: HeartbeatTask[] = [];
 	if (tasks.length === 0) {
 		say(yellow("   idle — HEARTBEAT.md has no tasks (self-heal only)"));
-	} else if (!opts.model && !process.env.REIN_BASE_URL && !existsSync(join(homedir(), ".rein", "config.json"))) {
+	} else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync(join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json"))) {
 		say(red(`   ${tasks.length} task(s) queued but no model configured — run: rein setup`));
 		for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
 	} else {
@@ -171,7 +173,7 @@ export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number>
 	const logPath = logBeat({
 		file,
 		tasks: results,
-		doctor: { healthy: doctor.healthy, total: doctor.total, fixed: doctor.fixed },
+		doctor: { healthy: doctor.healthy, total: doctor.total, fixed: doctor.fixed, warnings: doctor.warnings, failures: doctor.failures, flags: doctor.flags },
 		improve: improveNote,
 		durationMs: Date.now() - started,
 	});

@@ -63,6 +63,14 @@ try {
   assert.equal(requests, 2);
   const invalidApi = await runCli(["--api", "responses", "--base-url", endpoint, "--model", "bundle-mock", "-p", "must not send"]);
   assert.notEqual(invalidApi.code, 0); assert.match(invalidApi.stderr, /Supported HTTP API/);
+  const health = await runCli(["doctor", "--silent", "--json"], { REIN_HOME: join(dir, "health"), PATH: "/usr/bin:/bin" });
+  const report = JSON.parse(health.stdout);
+  assert.equal(health.code, 1, "Missing configuration must remain a failure in silent mode.");
+  assert.equal(report.checks.find(check => check.name === "node").status, "ok");
+  const compatibilityRuntime = [18, 20, 22, 24].includes(Number(process.versions.node.split(".")[0]));
+  assert.equal(report.flags.length, compatibilityRuntime ? 1 : 0);
+  if (compatibilityRuntime) assert.equal(report.flags[0].silent, true);
+  assert.ok(report.failures >= 1);
   for (const args of [["autonomy", "init", "--daily-budget", "2"], ["autonomy", "status", "--json"], ["autonomy", "tui"], ["skills"], ["skills", "diagnosing-bugs"], ["skills", "tdd", "tests.md"], ["debug", join(dir, "sessions"), "--json"]]) {
     const result = await runCli(args);
     assert.equal(result.code, 0, result.stderr);

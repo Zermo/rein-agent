@@ -78,7 +78,7 @@ Usage:
   rein tmux capture|attach|interrupt|stop <id>
   rein tmux send <id> <text>     send literal input and Enter to a persistent shell
   rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
-  rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
+  rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
   rein setup                    provider → login/key → model → connection test
@@ -101,6 +101,8 @@ Model selection (highest wins):
   auto-detect                      Ollama, LM Studio, llama.cpp, vLLM (in that order)
 
 Options:
+  --silent[=false]               doctor/heartbeat: compatibility flags stay silent by default
+                                 false shows them as information; warnings and failures remain visible
   --auth <api-key|cli>            setup: API credentials or official subscription CLI
   --api chat-completions         explicit OpenAI-compatible HTTP protocol
   --activity <id>                record a private activity view under a fresh UUID
@@ -128,7 +130,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -191,6 +193,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		console.log(`rein ${cliVersion()}`);
 		return;
 	}
+	if (flags.silent !== undefined && !["doctor", "heartbeat", "hb"].includes(_[0])) throw new Error("--silent controls compatibility flags for doctor and heartbeat.");
 
 	if (flags.tools !== undefined && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
 	const maxIterations = numberFlag(flags, "max-iterations", 1);
@@ -307,7 +310,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
 	if (_[0] === "doctor") {
 		const { runDoctor } = await import("./harness/doctor.ts");
-		const r = await runDoctor({ fix: flags.fix === true });
+		const r = await runDoctor({ fix: flags.fix === true, quiet: flags.json === true, silent: flags.silent !== false });
+		if (flags.json === true) console.log(JSON.stringify(r, null, 2));
 		process.exitCode = r.healthy === r.total ? 0 : 1;
 		return;
 	}
@@ -327,6 +331,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 			improve: "improve" in flags && flags.improve !== "false",
 			improveGoal: typeof flags.improve === "string" ? flags.improve : undefined,
 			init: flags.init === true || _[1] === "init",
+			silent: flags.silent !== false,
 		});
 		process.exitCode = code;
 		return;

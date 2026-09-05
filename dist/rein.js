@@ -6537,13 +6537,51 @@ var init_auth = __esm({
 var doctor_exports = {};
 __export(doctor_exports, {
   checkConfiguredProvider: () => checkConfiguredProvider,
+  checkNodeRuntime: () => checkNodeRuntime,
+  formatDoctorCheck: () => formatDoctorCheck,
   runDoctor: () => runDoctor,
+  summarizeDoctor: () => summarizeDoctor,
   usesLocalHardware: () => usesLocalHardware
 });
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { existsSync as existsSync13, lstatSync as lstatSync6, readFileSync as readFileSync14, readdirSync as readdirSync4, realpathSync as realpathSync6, statSync as statSync6 } from "node:fs";
 import { homedir as homedir11 } from "node:os";
 import { dirname as dirname8, join as join17 } from "node:path";
+function checkNodeRuntime(version = process.versions.node) {
+  const major = Number(version.split(".")[0]);
+  const supported = Number.isSafeInteger(major) && major >= 18;
+  return {
+    name: "node",
+    status: supported ? "ok" : "fail",
+    detail: `v${version}`,
+    fix: supported ? void 0 : "node \u226518 required (brew install node)",
+    flag: supported && NODE_COMPATIBILITY_MAJORS.has(major) ? {
+      name: "node-runtime",
+      kind: "compatibility",
+      silent: true,
+      detail: `Node.js ${version} is in Rein's compatibility matrix; CI also tests the newest Node.js release.`
+    } : void 0
+  };
+}
+function summarizeDoctor(checks, fixed = []) {
+  return {
+    healthy: checks.filter((c) => c.status === "ok").length,
+    total: checks.length,
+    fixed,
+    checks,
+    warnings: checks.filter((c) => c.status === "warn").length,
+    failures: checks.filter((c) => c.status === "fail").length,
+    // Only a passing check can carry an expected compatibility flag.
+    flags: checks.flatMap((c) => c.status === "ok" && c.flag ? [c.flag] : [])
+  };
+}
+function formatDoctorCheck(check, silent = true) {
+  if (silent && check.status === "ok" && check.flag?.silent) return void 0;
+  const mark = check.status === "ok" ? green("\u2713") : check.status === "warn" ? yellow("\u25B3") : red("\u2717");
+  const fix = check.fix && check.status !== "ok" ? dim(`  \u2192 ${check.fix}`) : "";
+  const compatibility = check.status === "ok" && check.flag ? dim(`  (${check.flag.detail})`) : "";
+  return `  ${mark} ${check.name.padEnd(10)} ${check.detail}${fix}${compatibility}`;
+}
 function sh2(cmd, opts = {}) {
   try {
     const out = execFileSync3("sh", ["-c", cmd], {
@@ -6628,15 +6666,7 @@ async function runDoctor(opts = {}) {
     if (!opts.quiet) console.log(s);
   };
   const config = loadConfig();
-  {
-    const major = parseInt(process.versions.node.split(".")[0], 10);
-    checks.push({
-      name: "node",
-      status: major >= 18 ? "ok" : "fail",
-      detail: `v${process.versions.node}`,
-      fix: major >= 18 ? void 0 : "node \u226518 required (brew install node)"
-    });
-  }
+  checks.push(checkNodeRuntime());
   let binPath;
   let repo;
   {
@@ -6785,13 +6815,12 @@ async function runDoctor(opts = {}) {
       }
     }
   }
-  const healthy = checks.filter((c) => c.status === "ok").length;
-  const result = { healthy, total: checks.length, fixed, checks };
+  const result = summarizeDoctor(checks, fixed);
+  const { healthy } = result;
   if (!opts.quiet) {
     for (const c of checks) {
-      const mark = c.status === "ok" ? green("\u2713") : c.status === "warn" ? yellow("\u25B3") : red("\u2717");
-      const fix = c.fix && c.status !== "ok" ? dim(`  \u2192 ${c.fix}`) : "";
-      console.log(`  ${mark} ${c.name.padEnd(10)} ${c.detail}${fix}`);
+      const line2 = formatDoctorCheck(c, opts.silent ?? true);
+      if (line2 !== void 0) console.log(line2);
     }
     const bad = checks.length - healthy;
     const line = bad === 0 ? green(`${healthy}/${checks.length} healthy`) + (fixed.length ? dim(` (${fixed.length} self-healed)`) : "") : red(`${healthy}/${checks.length} healthy, ${bad} problem${bad > 1 ? "s" : ""}`) + yellow(bad > 0 ? " \u2014 run `rein doctor --fix` to auto-repair" : "");
@@ -6799,6 +6828,7 @@ async function runDoctor(opts = {}) {
   }
   return result;
 }
+var NODE_COMPATIBILITY_MAJORS;
 var init_doctor = __esm({
   "src/harness/doctor.ts"() {
     init_ansi();
@@ -6807,6 +6837,7 @@ var init_doctor = __esm({
     init_catalog();
     init_fit();
     init_profile();
+    NODE_COMPATIBILITY_MAJORS = /* @__PURE__ */ new Set([18, 20, 22, 24]);
   }
 });
 
@@ -8054,10 +8085,10 @@ function resolveHeartbeatFile(explicit) {
   if (explicit) return isAbsolute6(explicit) ? explicit : resolve18(explicit);
   const local = resolve18(process.cwd(), "HEARTBEAT.md");
   if (existsSync16(local)) return local;
-  return join22(homedir13(), ".rein", "HEARTBEAT.md");
+  return join22(process.env.REIN_HOME || join22(homedir13(), ".rein"), "HEARTBEAT.md");
 }
 function logBeat(result) {
-  const dir = join22(homedir13(), ".rein");
+  const dir = process.env.REIN_HOME || join22(homedir13(), ".rein");
   mkdirSync11(dir, { recursive: true });
   const path2 = join22(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
@@ -8091,14 +8122,14 @@ async function runHeartbeat(opts = {}) {
   say(bold(`heartbeat \xB7 ${file}`) + dim(` \xB7 ${(/* @__PURE__ */ new Date()).toISOString()}`));
   say(`
 ${bold("1/4 self-heal")}`);
-  const doctor = await runDoctor({ fix: true, quiet: opts.quiet });
+  const doctor = await runDoctor({ fix: true, quiet: opts.quiet, silent: opts.silent });
   say(dim(`   doctor: ${doctor.healthy}/${doctor.total} healthy${doctor.fixed.length ? ` (${doctor.fixed.length} repaired)` : ""}`));
   say(`
 ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.model && !process.env.REIN_BASE_URL && !existsSync16(join22(homedir13(), ".rein", "config.json"))) {
+  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync16(join22(process.env.REIN_HOME || join22(homedir13(), ".rein"), "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -8138,7 +8169,7 @@ ${bold("3/4 self-advance")}`);
   const logPath = logBeat({
     file,
     tasks: results,
-    doctor: { healthy: doctor.healthy, total: doctor.total, fixed: doctor.fixed },
+    doctor: { healthy: doctor.healthy, total: doctor.total, fixed: doctor.fixed, warnings: doctor.warnings, failures: doctor.failures, flags: doctor.flags },
     improve: improveNote,
     durationMs: Date.now() - started
   });
@@ -8988,7 +9019,7 @@ Usage:
   rein tmux capture|attach|interrupt|stop <id>
   rein tmux send <id> <text>     send literal input and Enter to a persistent shell
   rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
-  rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
+  rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal \u2192 HEARTBEAT.md tasks \u2192 self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
   rein setup                    provider \u2192 login/key \u2192 model \u2192 connection test
@@ -9011,6 +9042,8 @@ Model selection (highest wins):
   auto-detect                      Ollama, LM Studio, llama.cpp, vLLM (in that order)
 
 Options:
+  --silent[=false]               doctor/heartbeat: compatibility flags stay silent by default
+                                 false shows them as information; warnings and failures remain visible
   --auth <api-key|cli>            setup: API credentials or official subscription CLI
   --api chat-completions         explicit OpenAI-compatible HTTP protocol
   --activity <id>                record a private activity view under a fresh UUID
@@ -9031,7 +9064,7 @@ Options:
   -h, --help                       this help
   -v, --version                    print version`);
 }
-var BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view"]);
+var BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent"]);
 function parseArgs(argv) {
   const positional = [];
   const flags = {};
@@ -9088,6 +9121,7 @@ async function main(argv = process.argv.slice(2)) {
     console.log(`rein ${cliVersion()}`);
     return;
   }
+  if (flags.silent !== void 0 && !["doctor", "heartbeat", "hb"].includes(_[0])) throw new Error("--silent controls compatibility flags for doctor and heartbeat.");
   if (flags.tools !== void 0 && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
   const maxIterations = numberFlag(flags, "max-iterations", 1);
   const common = {
@@ -9252,7 +9286,8 @@ config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, s
   }
   if (_[0] === "doctor") {
     const { runDoctor: runDoctor2 } = await Promise.resolve().then(() => (init_doctor(), doctor_exports));
-    const r = await runDoctor2({ fix: flags.fix === true });
+    const r = await runDoctor2({ fix: flags.fix === true, quiet: flags.json === true, silent: flags.silent !== false });
+    if (flags.json === true) console.log(JSON.stringify(r, null, 2));
     process.exitCode = r.healthy === r.total ? 0 : 1;
     return;
   }
@@ -9268,7 +9303,8 @@ config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, s
       file: typeof flags.file === "string" ? flags.file : void 0,
       improve: "improve" in flags && flags.improve !== "false",
       improveGoal: typeof flags.improve === "string" ? flags.improve : void 0,
-      init: flags.init === true || _[1] === "init"
+      init: flags.init === true || _[1] === "init",
+      silent: flags.silent !== false
     });
     process.exitCode = code;
     return;

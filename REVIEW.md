@@ -1,5 +1,16 @@
 # Posthorse and harness review
 
+## 0.9.1 Silent compatibility flags
+
+Expected Node versions in the CI matrix now carry `kind: "compatibility"` and
+`silent: true` in doctor results and heartbeat logs. These passing checks never
+increase warning/failure counts. `--silent=false` reveals the information;
+actual warnings and failures remain visible regardless of the flag.
+
+Regression coverage includes supported and unsupported Node versions, a stale
+flag on a failing check, JSON output, CLI flag forwarding, authentication
+failure exit status, and heartbeat log isolation under `REIN_HOME`.
+
 ## 0.9.0 Obscura web replacement
 
 The contract is [docs/0.9.0-spec.md](docs/0.9.0-spec.md), from baseline
