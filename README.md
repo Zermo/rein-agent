@@ -366,6 +366,98 @@ egeneration (improve) → memory (log)*. An agent that can check itself,
 fix itself, do its periodic work, and improve itself from its own lessons
 is the baseline for fully self-sustaining agents.
 
+### Proactive work from task history
+
+`rein autonomy` adds a background supervisor and a terminal dashboard. It uses
+the host's user service manager: launchd on macOS, or systemd on Linux. Setup
+offers the commands; installing the package alone does not start inference.
+
+Start in a workspace whose Rein history you want the supervisor to inspect:
+
+```sh
+rein autonomy init
+rein autonomy scan
+rein autonomy tui
+```
+
+The first command enrolls the directory and leaves the supervisor paused. The
+scan compares older and recent user/assistant excerpts with current Git status
+and change statistics. A tool-free adviser proposes work; a second tool-free
+reviewer checks it against the evidence. Unchanged history makes no model calls.
+Prior approval decisions and completed run reports inform later suggestions.
+
+The dashboard shows the exact task, workspace, cadence, reason, and cited history
+excerpts before approval. Use arrows or j/k to select, `a` to review approval,
+`d` to dismiss, `r` to queue an enabled task, `p` to pause/resume, and `q` to exit.
+New pending proposals produce dashboard alerts. The regular REPL also reports
+new proposals between turns; `/autonomy` shows their status.
+
+Start the background service after reviewing its scope:
+
+```sh
+rein autonomy enable
+rein autonomy status
+rein autonomy pause
+rein autonomy resume
+rein autonomy disable
+```
+
+`enable` enrolls the current directory and registers only Rein's own user service.
+`disable` pauses work, stops the service, and removes its registration, keeping
+reports and decisions. `rein autonomy plan` prints the generated service
+definition. Unsupported hosts can use `rein autonomy resume` followed by
+`rein autonomy daemon` in a terminal. User services depend on the login session;
+Linux persistence after logout requires a host already configured for it. The
+supervisor does not prevent system sleep or attach to other applications.
+
+The service uses saved Rein configuration and official CLI login profiles.
+Terminal exports such as `REIN_BASE_URL`, `REIN_MODEL`, or API keys may be absent
+from its environment. `enable` checks for those differences and stays paused
+until startup is confirmed. Save the intended settings with `rein setup`, or use
+`rein autonomy daemon` from the configured shell. API keys are never copied into
+service definitions. To save an API key through interactive setup, unset its
+shell variable for that command, then enter the key and choose to save it.
+For an SSH tunnel to a DGX, the service also needs noninteractive SSH access;
+an agent available only through the terminal's `SSH_AUTH_SOCK` may be unavailable.
+
+Dashboard approvals enable read-only inspection with bounded `read`, `ls`, and
+literal `search` tools. These tools exclude links, hidden files, and common
+credential files. For a task that needs editing or command execution, review
+`rein autonomy show <id>` and explicitly run:
+
+```sh
+rein autonomy approve <id> --allow-writes
+```
+
+This grants the normal Rein tools, including shell commands and file writes,
+for that proposal. Those tools run with your account's permissions; the working
+directory is not an OS sandbox. Revocation and pause cancel active background
+work, and each tool call checks that its approval still applies.
+
+Routine proposals recur at their approved interval. Loop and project proposals
+receive one bounded run; continuing a larger project needs another explicit
+run. Runs save a normal Rein session and a report. Generated sessions and their
+forks cannot become fresh evidence of user intent.
+
+Defaults are one history check per hour, six operations per rolling 24 hours,
+eight model turns per approved run, and a 180-second cancellation deadline.
+A scan uses at most two model generations and counts as one operation. Limits
+can be set with `init --interval 60 --daily-budget 6 --turn-budget 8 --timeout 180`.
+Scans and runs share a lock and budget; model failures are recorded and scans
+wait until their next interval before retrying.
+
+Enrollment is explicit and limited to 32 directories. Use
+`rein autonomy init --workspace /absolute/path` for additional workspaces. The
+command `rein autonomy unenroll --workspace /absolute/path` removes a workspace
+and disables its tasks. The
+collector reads only Rein JSONL histories matching those directories, at most
+200 sessions with bounded older/recent excerpts. It omits tool bodies, thinking,
+and recognizable credentials. Chat histories from other apps are not imported.
+The selected evidence and inspected file text are sent to your configured model.
+Learning here consists of persisted reports and review decisions, stored in
+`$REIN_HOME/autonomy/state.json`. State retains at most 100 proposals and 200 run
+reports; full run sessions remain in the normal Rein session archive.
+
 ### Autonomous experiment loop
 
 ```

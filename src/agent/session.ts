@@ -15,6 +15,8 @@ export interface SessionHeader {
 	model?: string;
 	provider?: string;
 	cwd?: string;
+	/** Background-generated sessions are excluded from proactive suggestion evidence. */
+	purpose?: "autonomy";
 }
 export type StoredMessage = AgentMessage & { id: string };
 export interface ContextWindowEntry {
@@ -41,7 +43,7 @@ export function sessionPath(id: string): string {
 	if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(id)) throw new Error("Invalid session id. Use the full id from /sessions.");
 	return join(sessionsDir(), `${id}.jsonl`);
 }
-export function createSession(opts: { id?: string; model?: string; provider?: string; cwd?: string }): string {
+export function createSession(opts: { id?: string; model?: string; provider?: string; cwd?: string; purpose?: "autonomy" }): string {
 	mkdirSync(sessionsDir(), { recursive: true });
 	const id = opts.id ?? newSessionId();
 	const header: SessionHeader = { ...opts, type: "header", version: 1, id, created: new Date().toISOString() };
@@ -171,7 +173,7 @@ export function listSessions(limit = 20): SessionSummary[] {
 export function branchSession(sourceId: string, upToMessageIndex?: number, newId?: string): string {
 	const { header, entries, messages } = loadSession(sourceId);
 	if (upToMessageIndex !== undefined && (!Number.isInteger(upToMessageIndex) || upToMessageIndex < 0 || upToMessageIndex >= messages.length)) throw new Error("Invalid branch message index");
-	const id = createSession({ model: header?.model, provider: header?.provider, cwd: header?.cwd, id: newId });
+	const id = createSession({ model: header?.model, provider: header?.provider, cwd: header?.cwd, purpose: header?.purpose, id: newId });
 	let count = 0;
 	for (const entry of entries) {
 		if (upToMessageIndex !== undefined && count > upToMessageIndex && "role" in entry) break;

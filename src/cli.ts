@@ -70,6 +70,8 @@ Usage:
   rein setup                    provider → login/key → model → connection test
                                 saves $REIN_HOME/config.json (default ~/.rein)
   rein setup --yes              non-interactive (first local server / existing config)
+  rein autonomy                 task-history proposals and background service controls
+  rein autonomy help            enrollment, budgets, approvals, pause, and removal
   rein setup --status           show config, detected servers, test the connection
   rein login codex|copilot      open official subscription device sign-in
   rein setup --provider codex   use a ChatGPT subscription through the official CLI
@@ -110,7 +112,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -219,6 +221,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		const { runDoctor } = await import("./harness/doctor.ts");
 		const r = await runDoctor({ fix: flags.fix === true });
 		process.exitCode = r.healthy === r.total ? 0 : 1;
+		return;
+	}
+
+	if (_[0] === "autonomy") {
+		const { runAutonomyCommand } = await import("./harness/autonomy/command.ts");
+		await runAutonomyCommand(_.slice(1), flags);
 		return;
 	}
 

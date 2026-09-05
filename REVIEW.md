@@ -105,3 +105,31 @@ all passed. The server listener was left unchanged.
 
 Local release checks passed on Node 22.19: 73 smoke assertions and 125 regression
 tests. The bundled Node 18 smoke test and Posthorse provenance check also passed.
+
+## 0.6.0 proactive service review
+
+Three parallel reviewers implemented and cross-checked user services, history
+evidence, and the terminal dashboard. The supervisor uses explicitly enrolled
+Rein workspaces and the configured model. No service is installed by npm hooks.
+
+Review fixes cover approval changes during active work, cancellation between
+tool calls, shared run budgets and locks, recovery after interrupted lock
+publication, source excerpts in proposal reviews, generated-session exclusion
+across forks, restricted instruction prompts, and bounded asynchronous inspection
+that excludes links, hidden files, and common credential files. Dashboard tests
+cover terminal escape removal, exact approval review, stale proposals, and terminal
+cleanup. Service tests validate escaping, ownership, idempotence, failure reporting,
+and removal without changing unrelated services.
+
+Offline tests use mocked model replies and real temporary sessions/files. They
+exercise the actual provider adapter and approved tool loop without cloud inference.
+Native macOS validation registered an isolated paused LaunchAgent, confirmed the
+daemon was running, then stopped and removed it. No model calls were made.
+Per-user service lifetime follows the host's login/session configuration. Normal
+write-enabled tools retain the user's account permissions and are not an OS sandbox.
+
+Final review also caught concurrent stale-lock recovery, scan revocation before
+the next model request, evidence starvation with 32 enrolled workspaces, and
+terminal-only provider settings unavailable to the OS service. Regression tests
+cover those cases. Enabling the service requires confirmed startup before work
+is unpaused; service definitions never acquire copied API credentials.
