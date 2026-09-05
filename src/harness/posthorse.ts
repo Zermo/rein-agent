@@ -4,11 +4,13 @@
 import { randomUUID } from "node:crypto";
 import type { AgentMessage, AgentTool } from "../agent/agent-loop.ts";
 import type { AssistantMessage, Model, ToolResultMessage } from "../ai/types.ts";
-import { appendSessionEntry, loadSession, windowMessage, providerMessages, validWindowStart } from "../agent/session.ts";
+import { appendSessionEntry, latestWorkspaceSnapshot, loadSession, windowMessage, workspaceMemoryRecords, providerMessages, validWindowStart } from "../agent/session.ts";
 import type { ContextWindowEntry, SessionEntry, StoredMessage } from "../agent/session.ts";
+import { captureWorkspaceSnapshot, sameWorkspaceState, workspaceResumeOverlay } from "../agent/workspace.ts";
+import type { WorkspaceSnapshotEntry } from "../agent/workspace.ts";
 
-export const POSTHORSE_GUIDANCE = `\n\n## Context windows (Posthorse)
-Use get_context_remaining when the context budget matters. Automatic rollover starts a fresh window without generating a summary. Before new_context, save durable goal, decisions, progress, and next steps with notes, or pass a concise handoff. The boundary commits only after the entire tool batch succeeds. Earlier conversation remains recoverable with history. After rollover, restore notes and inspect history. Recovery records preserve inputs, not proof of progress; verify live state before stateful or external actions.`;
+export const POSTHORSE_GUIDANCE = `\n\n## Context windows and durable memory (Posthorse)
+Use get_context_remaining when the context budget matters. Automatic rollover starts a fresh window without generating a summary. Before new_context, save durable goal, decisions, progress, and next steps with notes, or pass a concise handoff. Put stable cross-session facts in .pi/notes/MEMORY.md; it is loaded when an archived session resumes. The boundary commits only after the entire tool batch succeeds. Earlier conversation remains recoverable with history. Reopening a non-empty session creates a fresh resume window with a current workspace overlay and squashed Git diff, so stale tool transcripts are not replayed. Recovery records are evidence, not proof of progress; verify live state before stateful or external actions.`;
 const MAX_CHARS = 20_000;
 const MARGIN = 512;
 // Tokenization varies by provider; usage refines this deliberately conservative estimate.
@@ -27,12 +29,15 @@ export class Posthorse {
 	readonly reserveTokens: number;
 	private prompt: () => string;
 	private tools: () => AgentTool[];
-	private usage?: { count: number; tokens: number; windowId: string };
+	private usage?: { count: number; tokens: number; cached?: number; windowId: string };
 	private lastRequestCount = 0;
 	private lastOverflowCount = -1;
 	private pageTokensAllocated = 0;
-	constructor(options: { model: Model; enabled?: boolean; reserveTokens?: number; prompt: () => string; tools: () => AgentTool[] }) {
+	private cwd?: string;
+	private workspaceSnapshot?: WorkspaceSnapshotEntry;
+	constructor(options: { model: Model; enabled?: boolean; reserveTokens?: number; prompt: () => string; tools: () => AgentTool[]; cwd?: string }) {
 		this.model = options.model; this.prompt = options.prompt; this.tools = options.tools;
+		this.cwd = options.cwd;
 		this.enabled = options.enabled !== false;
 		this.reserveTokens = options.reserveTokens ?? Math.max(this.model.maxTokens, Math.min(4096, Math.floor(this.model.contextWindow / 5)));
 		if (!Number.isSafeInteger(this.model.contextWindow) || this.model.contextWindow < 1024) throw new Error("contextWindow must be an integer of at least 1024 tokens");
@@ -47,7 +52,10 @@ export class Posthorse {
 	setSession(id: string): void {
 		const loaded = loadSession(id);
 		this.sessionId = id; this.messages = loaded.messages; this.entries = loaded.entries; this.window = loaded.window;
+		this.workspaceSnapshot = latestWorkspaceSnapshot(loaded.entries);
 		this.usage = undefined; this.lastRequestCount = providerMessages(loaded.messages).length; this.lastOverflowCount = -1; this.pageTokensAllocated = 0;
+		if (this.cwd && this.messages.length > 0) this.resumeWorkspace();
+		this.captureWorkspace();
 	}
 	private store(entry: SessionEntry): void {
 		if (this.sessionId) appendSessionEntry(this.sessionId, entry);
@@ -57,7 +65,7 @@ export class Posthorse {
 		const entry: StoredMessage = { ...message, id: randomUUID() };
 		this.store(entry); this.messages.push(entry);
 		if (message.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted" && Number.isFinite(message.usage?.totalTokens) && message.usage.totalTokens > 0) {
-			this.usage = { count: this.messages.length, tokens: message.usage.totalTokens, windowId: this.windowId };
+			this.usage = { count: this.messages.length, tokens: message.usage.totalTokens, ...(message.usage.cached === undefined ? {} : { cached: message.usage.cached }), windowId: this.windowId };
 		}
 	}
 	active(messages: AgentMessage[] = this.messages): AgentMessage[] {
@@ -78,7 +86,7 @@ export class Posthorse {
 		return chars;
 	}
 	status(): string {
-		return JSON.stringify({ windowId: this.windowId, estimatedTokens: this.used(), contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens, untilRollover: Math.max(0, this.line - this.used()), untilHardLimit: Math.max(0, this.model.contextWindow - this.used()), automatic: this.enabled, estimate: true });
+		return JSON.stringify({ windowId: this.windowId, estimatedTokens: this.used(), contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens, untilRollover: Math.max(0, this.line - this.used()), untilHardLimit: Math.max(0, this.model.contextWindow - this.used()), ...(this.usage?.cached === undefined ? {} : { lastPromptCacheTokens: this.usage.cached }), automatic: this.enabled, estimate: true });
 	}
 	validateHandoff(handoff?: string): void {
 		const limit = this.freshLimit();
@@ -91,6 +99,35 @@ export class Posthorse {
 		const window: ContextWindowEntry = { type: "context_window", id: randomUUID(), timestamp: Date.now(), start, handoff: handoff?.trim() || undefined, reason };
 		this.store(window); // Persist before changing which messages the model can see.
 		this.window = window; this.usage = undefined; this.pageTokensAllocated = 0;
+	}
+	/** Persist only changed Git state; snapshots are metadata, never model-visible tool logs. */
+	captureWorkspace(): void {
+		if (!this.cwd) return;
+		try {
+			const current = captureWorkspaceSnapshot(this.cwd);
+			if (sameWorkspaceState(this.workspaceSnapshot, current)) return;
+			this.store(current);
+			this.workspaceSnapshot = current;
+		} catch { /* Workspace inspection is advisory and must not break a session. */ }
+	}
+	/**
+	 * Resume is a deterministic squash boundary, not a generated summary. It
+	 * keeps the detailed prior window in history and places current Git state,
+	 * peer checkpoint and durable note evidence in the next isolated window.
+	 */
+	private resumeWorkspace(): void {
+		if (!this.cwd) return;
+		try {
+			const overlay = workspaceResumeOverlay(this.cwd, this.workspaceSnapshot, workspaceMemoryRecords(captureWorkspaceSnapshot(this.cwd).scope, this.sessionId), this.freshLimit());
+			if (validWindowStart(this.messages, this.messages.length)) this.rollover(overlay.text, "resume", this.messages.length);
+			else {
+				// Preserve an interrupted tool batch exactly; providerMessages will
+				// make missing results explicit before this overlay is sent.
+				this.record({ role: "user", timestamp: Date.now(), content: overlay.text });
+			}
+			if (!sameWorkspaceState(this.workspaceSnapshot, overlay.snapshot)) this.store(overlay.snapshot);
+			this.workspaceSnapshot = overlay.snapshot;
+		} catch { /* A non-Git/moved workspace still resumes with its own transcript. */ }
 	}
 	afterBatch(info: { message: AssistantMessage; toolResults: ToolResultMessage[]; newContext?: { handoff?: string } }): void {
 		if (info.newContext) this.rollover(info.newContext.handoff, "tool");

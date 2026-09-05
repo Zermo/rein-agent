@@ -92,7 +92,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
 
 	const steering: AgentMessage[] = [];
-	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools });
+	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
 	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd));
 	const context: AgentContext = { systemPrompt, messages: posthorse.messages, tools };
 	let running = false;
@@ -182,6 +182,9 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 						break;
 						case "tool_execution_end":
 						nodeterm.status.toolEnd(event.toolName);
+						// Make a completed tool's filesystem changes visible to a
+						// concurrently resumed archived session before this run ends.
+						posthorse.captureWorkspace();
 						break;
 						case "agent_end":
 						nodeterm.status.done();
@@ -193,7 +196,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					}
 					await runOpts?.onEvent?.(event);
 				},
-			); } finally { running = false; }
+			); } finally { posthorse.captureWorkspace(); running = false; }
 		},
 	};
 

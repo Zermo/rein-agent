@@ -111,7 +111,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 						"  /tools <list>    show available tools",
 						"  /ask [tools]    tools that need approval (y/N here, or canvas/phone)",
 						"  /sessions        list recent sessions",
-						"  /resume <id>     continue a previous session (reloads its messages)",
+						"  /resume <id>     continue a previous session with current workspace overlay",
 						"  /branch          branch the current session and continue there",
 						"  /context         show context window usage",
 						"  /new-context [handoff]  start a fresh window in this session",
@@ -171,7 +171,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 				}
 				runner.setSession(arg);
 				sessionId = arg;
-				console.log(gray(`resumed ${arg} with ${runner.context.messages.length} messages`));
+				console.log(gray(`resumed ${arg} with ${runner.context.messages.length} archived messages; next request starts from current workspace state`));
 				return true;
 			}
 			case "branch": {

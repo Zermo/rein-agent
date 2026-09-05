@@ -37,6 +37,8 @@ export interface Usage {
 	input: number;
 	output: number;
 	totalTokens: number;
+	/** Prompt tokens served from a provider cache, when it reports them. */
+	cached?: number;
 	/** Tokens the server reported for reasoning, if any. Subset of output. */
 	reasoning?: number;
 }

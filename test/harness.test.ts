@@ -75,7 +75,8 @@ test("print/REPL stream, persistence, resume, and JSON errors", { timeout: 20_00
 		const resumed = await cli([...args, "--resume", file.replace(/\.jsonl$/, "")], testHome, "/context\nsecond prompt\n/quit\n");
 		assert.equal(resumed.code, 0, resumed.stderr);
 		assert.equal(resumed.stdout.split("unique-answer").length - 1, 1, "REPL must render streamed text once");
-		assert.ok(requests.at(-1).messages.some((m: any) => m.role === "user" && m.content === "first prompt"), "resume must load history");
+		assert.ok(requests.at(-1).messages.some((m: any) => m.role === "user" && /persistent workspace overlay/.test(m.content)), "resume must load current workspace evidence");
+		assert.ok(!requests.at(-1).messages.some((m: any) => m.role === "user" && m.content === "first prompt"), "resume must keep archived history out of the fresh provider window");
 		const rotated = await cli([...args, "--resume", file.replace(/\.jsonl$/, "")], testHome, "/resume missing-session\n/new-context carry-forward-marker\nthird prompt\n/quit\n");
 		assert.equal(rotated.code, 0, rotated.stderr);
 		assert.match(rotated.stdout, /No such session/);

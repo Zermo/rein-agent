@@ -53,23 +53,23 @@ function sshArguments(host, baseUrl, localPort) {
 }
 async function unusedPort() {
   const server = createServer();
-  await new Promise((resolve7, reject) => {
+  await new Promise((resolve8, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve7);
+    server.listen(0, "127.0.0.1", resolve8);
   });
   const port = server.address().port;
-  await new Promise((resolve7, reject) => server.close((error) => error ? reject(error) : resolve7()));
+  await new Promise((resolve8, reject) => server.close((error) => error ? reject(error) : resolve8()));
   return port;
 }
 function portReady(port) {
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     const socket = createConnection({ host: "127.0.0.1", port });
     let done = false;
     const finish = (ready) => {
       if (done) return;
       done = true;
       socket.destroy();
-      resolve7(ready);
+      resolve8(ready);
     };
     socket.once("connect", () => finish(true));
     socket.once("error", () => finish(false));
@@ -86,16 +86,16 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
   let failure;
   let closed = false;
   let stderr = "";
-  const exited = new Promise((resolve7) => {
+  const exited = new Promise((resolve8) => {
     child.once("error", (error) => {
       failure = error;
       closed = true;
-      resolve7();
+      resolve8();
     });
     child.once("close", (code) => {
       closed = true;
       failure ??= new Error(`SSH exited (${code ?? "signal"}). ${stderr.trim()}`);
-      resolve7();
+      resolve8();
     });
   });
   child.stderr?.on("data", (chunk) => {
@@ -113,7 +113,7 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
       if (failure) throw new Error(`Cannot open SSH tunnel through ${sshHost}: ${failure.message}. Check that ssh ${sshHost} works with key authentication.`);
       if (Date.now() >= deadline) throw new Error(`SSH tunnel through ${sshHost} timed out. Check the VPN and SSH connection.`);
       if (await portReady(port)) break;
-      await new Promise((resolve7) => setTimeout(resolve7, 40));
+      await new Promise((resolve8) => setTimeout(resolve8, 40));
     }
     const forwarded = new URL(baseUrl);
     forwarded.hostname = "127.0.0.1";
@@ -195,6 +195,16 @@ function modelIds(doc) {
   if (values.length && !ids.length) return void 0;
   return [...new Set(ids)];
 }
+function serverProvider(doc, fallback) {
+  if (fallback !== "custom" && fallback !== "openai-compatible") return fallback;
+  const values = Array.isArray(doc?.data) ? doc.data : Array.isArray(doc?.models) ? doc.models : [];
+  const owner = values.map((item) => `${item?.owned_by ?? ""} ${item?.object ?? ""}`).join(" ").toLowerCase();
+  if (/llama[._ -]?cpp|llama-server/.test(owner)) return "llamacpp";
+  if (/\bollama\b/.test(owner)) return "ollama";
+  if (/\bvllm\b/.test(owner)) return "vllm";
+  if (/lm[ _-]?studio/.test(owner)) return "lmstudio";
+  return fallback;
+}
 async function detectEndpoint(input, options = {}) {
   const logicalBase = normalizeBaseUrl(input, options.provider);
   const provider = options.provider?.toLowerCase() ?? guessProvider(logicalBase, "custom");
@@ -268,7 +278,7 @@ async function detectEndpointDirect(input, options) {
       }
       const rawDetectedBase = endpoint.endsWith("/models") ? endpoint.slice(0, -7) : probe.base;
       const detectedBase = new URL(rawDetectedBase).pathname === "/" ? new URL(rawDetectedBase).origin + "/" : rawDetectedBase;
-      return { baseUrl: detectedBase, provider, models, ...models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." } };
+      return { baseUrl: detectedBase, provider: serverProvider(doc, provider), models, ...models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." } };
     } catch (err) {
       if (controller.signal.aborted || err.name === "AbortError") return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
       const cause = err;
@@ -994,8 +1004,8 @@ var init_event_stream = __esm({
       constructor(isComplete, extractResult) {
         this.isComplete = isComplete ?? (() => false);
         this.extractResult = extractResult ?? ((event) => event);
-        this.finalResultPromise = new Promise((resolve7) => {
-          this.resolveFinalResult = resolve7;
+        this.finalResultPromise = new Promise((resolve8) => {
+          this.resolveFinalResult = resolve8;
         });
       }
       push(event) {
@@ -1024,7 +1034,7 @@ var init_event_stream = __esm({
           if (this.queue.length > 0) yield this.queue.shift();
           else if (this.done) return;
           else {
-            const result = await new Promise((resolve7) => this.waiting.push(resolve7));
+            const result = await new Promise((resolve8) => this.waiting.push(resolve8));
             if (result.done) return;
             yield result.value;
           }
@@ -1274,11 +1284,11 @@ function rejectedField(detail) {
   if (!UNSUPPORTED.test(`${code} ${message}`)) return { message };
   const rejectedClause = message.split(/[.!?;\n]/).find((clause) => UNSUPPORTED.test(clause));
   const named = rejectedClause?.match(/(?:unsupported(?:[_ ](?:parameter|argument|field|value))?|unrecognized(?: request)?(?: argument)?(?: supplied)?|unknown(?: (?:parameter|field|argument))?|unexpected(?: keyword)?(?: argument)?)[\s:="'`]*([a-z_]+)/i)?.[1];
-  const before = rejectedClause?.match(/\b(max_tokens|stream_options|temperature|top_p)\b[\s"'`]*(?:is |does )?(?:not supported|not support|unsupported)/i)?.[1];
+  const before = rejectedClause?.match(/\b(max_tokens|stream_options|temperature|top_p|cache_prompt)\b[\s"'`]*(?:is |does )?(?:not supported|not support|unsupported)/i)?.[1];
   const field = typeof parameter === "string" ? parameter.match(FIELD)?.[1] : named ? named.match(FIELD)?.[0] === named ? named : void 0 : before;
   return { field: field === "max_completion_tokens" ? void 0 : field, message };
 }
-async function postChatCompletion(url, body, init = {}, fetchFn = fetch) {
+async function postChatCompletion(url, body, init = {}, fetchFn = fetch, onCompatibilityFallback) {
   const requestBody = { ...body };
   const changed = /* @__PURE__ */ new Set();
   for (; ; ) {
@@ -1294,13 +1304,14 @@ async function postChatCompletion(url, body, init = {}, fetchFn = fetch) {
     }
     delete requestBody[field];
     changed.add(field);
+    onCompatibilityFallback?.(field);
     await response.body?.cancel();
   }
 }
 var FIELD, UNSUPPORTED;
 var init_chat_request = __esm({
   "src/ai/chat-request.ts"() {
-    FIELD = /\b(max_tokens|max_completion_tokens|stream_options|temperature|top_p)\b/;
+    FIELD = /\b(max_tokens|max_completion_tokens|stream_options|temperature|top_p|cache_prompt)\b/;
     UNSUPPORTED = /unsupported|not supported|does not support|unrecognized|unknown (?:parameter|field|argument)|unexpected (?:keyword )?argument|extra inputs are not permitted/i;
   }
 });
@@ -1357,7 +1368,8 @@ function stream(model, context, options = {}) {
       try {
         let final;
         await withSshTunnel(model.baseUrl, model.sshHost, async (baseUrl) => {
-          for await (const event of stream({ ...model, baseUrl, sshHost: void 0 }, context, options)) {
+          const promptCacheKey = `${model.provider}\0ssh:${model.sshHost}\0${model.baseUrl}`;
+          for await (const event of stream({ ...model, baseUrl, sshHost: void 0 }, context, { ...options, promptCacheKey })) {
             if (event.type === "done" || event.type === "error") final = event;
             else out.push(event);
           }
@@ -1417,6 +1429,8 @@ Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
       if (typeof options.maxTokens === "number") body.max_tokens = options.maxTokens;
       else body.max_tokens = model.maxTokens || 4096;
       if (options.includeUsage !== false) body.stream_options = { include_usage: true };
+      const promptCacheKey = options.promptCacheKey ?? `${model.provider}\0${model.baseUrl}`;
+      if ((model.provider === "llamacpp" || model.baseUrl.startsWith("http://")) && !promptCacheUnsupported.has(promptCacheKey)) body.cache_prompt = true;
       if (options.extra) Object.assign(body, options.extra);
       if (toolsMode === "native" && hasTools) {
         body.tools = (context.tools ?? []).map((t) => ({
@@ -1433,6 +1447,8 @@ Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
         headers,
         signal: options.signal,
         redirect: "error"
+      }, fetch, (field) => {
+        if (field === "cache_prompt") promptCacheUnsupported.add(promptCacheKey);
       });
       if (!response.ok) {
         const text = await response.text().catch(() => "");
@@ -1482,6 +1498,7 @@ Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
           continue;
         }
         if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? JSON.stringify(chunk.error));
+        const cached = chunk.usage?.prompt_tokens_details?.cached_tokens ?? chunk.timings?.cache_n;
         if (chunk.usage) {
           const u = {
             input: chunk.usage.prompt_tokens ?? 0,
@@ -1491,7 +1508,10 @@ Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
           if (typeof chunk.usage.completion_tokens_details?.reasoning_tokens === "number") {
             u.reasoning = chunk.usage.completion_tokens_details.reasoning_tokens;
           }
+          if (typeof cached === "number" && Number.isFinite(cached) && cached >= 0) u.cached = cached;
           message.usage = u;
+        } else if (typeof cached === "number" && Number.isFinite(cached) && cached >= 0) {
+          message.usage.cached = cached;
         }
         const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : void 0;
         if (!choice) continue;
@@ -1548,7 +1568,7 @@ Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
       }
       if (message.usage.totalTokens === 0) {
         const chars = message.content.reduce((n, c) => n + ("text" in c ? c.text.length : "thinking" in c ? c.thinking.length : 0), 0);
-        message.usage = { input: 0, output: Math.ceil(chars / 4), totalTokens: Math.ceil(chars / 4) };
+        message.usage = { input: 0, output: Math.ceil(chars / 4), totalTokens: Math.ceil(chars / 4), ...message.usage.cached === void 0 ? {} : { cached: message.usage.cached } };
       }
       if (finishReason === "tool_calls" || finishReason === "tool_use" || toolCalls.length > 0) {
         message.stopReason = "toolUse";
@@ -1573,7 +1593,7 @@ Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
   })();
   return out;
 }
-var TEXT_TOOL_INSTRUCTIONS, TOOL_BLOCK_RE;
+var TEXT_TOOL_INSTRUCTIONS, TOOL_BLOCK_RE, promptCacheUnsupported;
 var init_openai_completions = __esm({
   "src/ai/openai-completions.ts"() {
     init_event_stream();
@@ -1594,6 +1614,7 @@ Rules for tool blocks:
 - After writing tool blocks, wait for the results before continuing.
 `;
     TOOL_BLOCK_RE = /<tool\s+name="([^"]+)"\s*>([\s\S]*?)<\/tool>/g;
+    promptCacheUnsupported = /* @__PURE__ */ new Set();
   }
 });
 
@@ -1706,7 +1727,7 @@ function streamCli(model, context, options = {}) {
   return out;
 }
 function runCliProcess(provider, args, input, cwd, env, options) {
-  return new Promise((resolve7, reject) => {
+  return new Promise((resolve8, reject) => {
     const child = spawn2(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
     let stdout = "", stderr = "", pendingLine = "", bytes = 0, error, forceKill;
     const kill = (signal) => {
@@ -1770,7 +1791,7 @@ function runCliProcess(provider, args, input, cwd, env, options) {
       cleanup();
       if (error) reject(error);
       else if (code !== 0) reject(new Error(`${provider} CLI exited ${code ?? signal}. ${stderr.trim().slice(-2e3)} Run 'rein login ${provider}' if authentication is required.`));
-      else resolve7(stdout);
+      else resolve8(stdout);
     });
     child.stdin.end(input);
   });
@@ -1814,7 +1835,7 @@ async function loginCli(provider, options = {}) {
   mkdirSync2(directory, { recursive: true, mode: 448 });
   const device = options.deviceAuth !== false;
   const args = ["login", ...device ? [provider === "codex" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     const child = spawn3(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: "inherit", shell: false });
     child.once("spawn", () => {
       if (device && options.openBrowser !== false) openLoginPage(CLI_PROVIDERS[provider].loginUrl);
@@ -1840,20 +1861,20 @@ async function loginCli(provider, options = {}) {
     };
     child.on("error", (error) => {
       cleanup();
-      resolve7({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
+      resolve8({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
     });
     child.on("close", (code) => {
       cleanup();
-      if (options.signal?.aborted || timedOut) resolve7({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
-      else resolve7(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
+      if (options.signal?.aborted || timedOut) resolve8({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
+      else resolve8(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
     });
   });
 }
 async function checkCliAuth(provider, options = {}) {
   if (!(provider in CLI_PROVIDERS)) return { available: false, authenticated: false, detail: `Unknown CLI provider: ${provider}` };
   const env = cliEnvironment(provider, options.env);
-  const run = (args) => new Promise((resolve7) => {
-    execFile2(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve7({ ok: !error, missing: error?.code === "ENOENT" }));
+  const run = (args) => new Promise((resolve8) => {
+    execFile2(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve8({ ok: !error, missing: error?.code === "ENOENT" }));
   });
   const version = await run(["--version"]);
   if (!version.ok) return { available: false, authenticated: false, detail: version.missing ? missingCli(provider) : `${provider} CLI could not be checked. Update it and try again.` };
@@ -2582,6 +2603,8 @@ function buildSystemPrompt(cwd) {
     "",
     SELF_IMPROVE,
     "",
+    DURABLE_MEMORY,
+    "",
     ENV(cwd, process.platform === "darwin" ? `macOS (${process.arch})` : `${process.platform} (${process.arch})`)
   ];
   const project = readProjectInstructions(cwd);
@@ -2605,7 +2628,7 @@ function buildImprovePrompt(repoDir) {
 - If you find nothing worth improving, say so plainly and stop. An honest "no change" is a valid result.`
   ].join("\n");
 }
-var WHO, VOICE, WORK, WEB, GATES, SELF_IMPROVE, ENV;
+var WHO, VOICE, WORK, WEB, GATES, SELF_IMPROVE, DURABLE_MEMORY, ENV;
 var init_system_prompt = __esm({
   "src/harness/system-prompt.ts"() {
     WHO = `You are rein \u2014 a coding agent with a small, sharp toolset. You run on local AI by default and are expected to be useful without internet.`;
@@ -2639,6 +2662,10 @@ var init_system_prompt = __esm({
 - If you learn something durable in this session \u2014 a quirk of this model, a bug pattern, a command that works, a user preference \u2014 append one line to LESSONS.md in the project root (create it if missing). One line, actionable, no preamble.
 - LESSONS.md is shared memory across sessions. Read it before starting non-trivial work.
 - If the rein harness itself did something clunky for you (a tool result that was hard to use, a confusing error, a missing flag), note it under a "## harness" section in LESSONS.md \u2014 the rein improve loop reads that file.`;
+    DURABLE_MEMORY = `Cross-session memory:
+- .pi/notes/MEMORY.md is the repository's durable operational memory. Read it when the task needs prior decisions; append concise, verified facts, decisions, constraints, and next steps when they will matter after this session. Do not put secrets or speculative claims there.
+- Reopening an archived session supplies a current workspace overlay and a bounded squashed Git diff in a fresh context window. It supersedes old transcript assumptions. Use history for exact prior tool calls; do not replay them blindly.
+- Provider KV cache is opportunistic and exists only while the server keeps a matching prompt slot. Never claim it persists across a restart or arbitrary week-old session.`;
     ENV = (cwd, platform) => `Environment:
 - Working directory: ${cwd}
 - Platform: ${platform}
@@ -3372,7 +3399,7 @@ function requestApproval(toolName, toolInput, timeoutSec) {
   }
   postEvent(request2, { nodeterm_pending_id: pendingId });
   const deadline = Date.now() + wait * 1e3;
-  return new Promise((resolve7) => {
+  return new Promise((resolve8) => {
     const tick = () => {
       let answer = "";
       try {
@@ -3391,7 +3418,7 @@ function requestApproval(toolName, toolInput, timeoutSec) {
           { hook_event_name: "PostToolUse", tool_name: toolName, hookSpecificOutput: { hookEventName: "PostToolUse" } },
           { nodeterm_answered: answer }
         );
-        resolve7(answer);
+        resolve8(answer);
         return;
       }
       if (Date.now() >= deadline) {
@@ -3399,7 +3426,7 @@ function requestApproval(toolName, toolInput, timeoutSec) {
           fs.rmSync(requestFile, { force: true });
         } catch {
         }
-        resolve7("timeout");
+        resolve8("timeout");
         return;
       }
       setTimeout(tick, 500);
@@ -3422,17 +3449,145 @@ var init_nodeterm = __esm({
   }
 });
 
+// src/agent/workspace.ts
+import { execFileSync as execFileSync2 } from "node:child_process";
+import { createHash, randomUUID as randomUUID2 } from "node:crypto";
+import { lstatSync as lstatSync2, readFileSync as readFileSync8, realpathSync as realpathSync2 } from "node:fs";
+import { dirname as dirname4, join as join9, resolve as resolve3, sep } from "node:path";
+function digest(value) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+function git(cwd, args, maxBuffer = 2 * 1024 * 1024) {
+  try {
+    return execFileSync2("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3, maxBuffer }).trim();
+  } catch {
+    return void 0;
+  }
+}
+function safeRealpath(path2) {
+  try {
+    return realpathSync2(path2);
+  } catch {
+    return resolve3(path2);
+  }
+}
+function validRef(value) {
+  return typeof value === "string" && /^[0-9a-f]{7,64}$/i.test(value);
+}
+function workspaceScope(cwd) {
+  const root = git(cwd, ["rev-parse", "--show-toplevel"]);
+  if (!root) {
+    const directory = safeRealpath(cwd);
+    return { scope: `directory:${digest(directory)}`, root: directory, git: false };
+  }
+  const common = git(cwd, ["rev-parse", "--git-common-dir"]);
+  const shared = common ? safeRealpath(resolve3(cwd, common)) : safeRealpath(root);
+  return { scope: `git:${digest(shared)}`, root: safeRealpath(root), git: true };
+}
+function captureWorkspaceSnapshot(cwd) {
+  const identity = workspaceScope(cwd);
+  const head = identity.git ? git(cwd, ["rev-parse", "HEAD"]) : void 0;
+  const branch = identity.git ? git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]) : void 0;
+  const status2 = identity.git ? git(cwd, ["status", "--porcelain=v1", "--untracked-files=all"], 256 * 1024)?.split("\n").filter(Boolean).slice(0, 200) ?? [] : [];
+  const raw = identity.git ? git(cwd, ["diff", "--no-ext-diff", "--no-color", "--raw", "HEAD"], 512 * 1024) : void 0;
+  const state = identity.git ? digest(`${raw ?? ""}
+${status2.join("\n")}`) : void 0;
+  return { type: "workspace_snapshot", id: randomUUID2(), timestamp: Date.now(), scope: identity.scope, cwd: safeRealpath(cwd), root: identity.root, ...head ? { head } : {}, ...branch ? { branch } : {}, status: status2, ...state ? { state } : {} };
+}
+function sameWorkspaceState(a, b) {
+  return !!a && a.scope === b.scope && a.head === b.head && a.branch === b.branch && a.state === b.state && a.status.join("\n") === b.status.join("\n");
+}
+function sharedNotesRoot(cwd) {
+  try {
+    const commonRaw = git(cwd, ["rev-parse", "--git-common-dir"]);
+    if (!commonRaw) return safeRealpath(cwd);
+    const common = safeRealpath(resolve3(cwd, commonRaw));
+    if (common.endsWith(`${sep}.git`)) return dirname4(common);
+    const worktree = git(cwd, ["--git-dir", common, "config", "--path", "--get", "core.worktree"]);
+    return worktree ? safeRealpath(resolve3(common, worktree)) : common;
+  } catch {
+    return safeRealpath(cwd);
+  }
+}
+function sharedMemory(cwd, maxChars) {
+  const root = sharedNotesRoot(cwd);
+  const path2 = join9(root, ".pi", "notes", "MEMORY.md");
+  try {
+    for (const directory of [root, join9(root, ".pi"), join9(root, ".pi", "notes")]) {
+      const stat2 = lstatSync2(directory);
+      if (!stat2.isDirectory() || stat2.isSymbolicLink()) return void 0;
+    }
+    const stat = lstatSync2(path2);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1) return void 0;
+    const text = readFileSync8(path2, "utf8").trim();
+    return text ? text.slice(0, maxChars) : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function trimBlock(label, body, remaining) {
+  if (!body?.trim() || remaining < label.length + 64) return void 0;
+  const limit = Math.max(0, remaining - label.length - 48);
+  return `${label}
+${body.length > limit ? body.slice(0, limit) + "\n[truncated; inspect with git/history]" : body}`;
+}
+function diff(cwd, args) {
+  return git(cwd, args, 2 * 1024 * 1024);
+}
+function workspaceResumeOverlay(cwd, baseline, peers, maxChars) {
+  const current = captureWorkspaceSnapshot(cwd);
+  const lines = [
+    "[rein persistent workspace overlay \u2014 generated on resume]",
+    "This is current workspace evidence and overrides stale assumptions in the archived session. The prior transcript remains isolated in history; do not replay old tool calls. Verify live state before a stateful action.",
+    `workspace: ${current.root}`,
+    `head: ${current.head ?? "not a Git worktree"}${current.branch ? ` (${current.branch})` : ""}`,
+    `working tree: ${current.status.length ? `${current.status.length} changed path(s)` : "clean"}`
+  ];
+  if (baseline) lines.push(`archived-session checkpoint: ${baseline.head ?? "no Git HEAD"} at ${new Date(baseline.timestamp).toISOString()}`);
+  else lines.push("archived-session checkpoint: unavailable (this session predates persistent workspace snapshots)");
+  const newest = peers.filter((peer) => peer.snapshot.timestamp > (baseline?.timestamp ?? 0)).sort((a, b) => b.snapshot.timestamp - a.snapshot.timestamp)[0];
+  if (newest) lines.push(`newest peer checkpoint: ${newest.sessionId} at ${new Date(newest.snapshot.timestamp).toISOString()} (${newest.snapshot.head ?? "no Git HEAD"})`);
+  let text = lines.join("\n");
+  const add = (label, value) => {
+    const block = trimBlock(label, value, maxChars - text.length - 2);
+    if (block) text += `
+
+${block}`;
+  };
+  if (baseline && baseline.scope === current.scope && validRef(baseline.head) && validRef(current.head) && baseline.head !== current.head) {
+    add("Committed diff since archived-session checkpoint (squashed):", diff(cwd, ["diff", "--no-ext-diff", "--no-color", "--stat", baseline.head, current.head]));
+    add("Committed patch since archived-session checkpoint (squashed):", diff(cwd, ["diff", "--no-ext-diff", "--no-color", "--unified=3", baseline.head, current.head]));
+  }
+  if (current.status.length) {
+    add("Current uncommitted paths:", current.status.join("\n"));
+    add("Current uncommitted patch (squashed):", diff(cwd, ["diff", "--no-ext-diff", "--no-color", "--unified=3", "HEAD"]));
+  }
+  if (newest?.handoff) add(`Recent peer session handoff (${newest.sessionId}; recorded context, verify it):`, newest.handoff);
+  const memory = sharedMemory(cwd, Math.max(0, maxChars - text.length - 300));
+  if (memory) add("Durable shared memory (.pi/notes/MEMORY.md; verify it):", memory);
+  if (text.length > maxChars) text = text.slice(0, Math.max(0, maxChars - 42)) + "\n[overlay truncated; inspect git/history]";
+  return { snapshot: current, text };
+}
+function isWorkspaceSnapshot(entry) {
+  const item = entry;
+  return !!item && item.type === "workspace_snapshot" && typeof item.id === "string" && typeof item.timestamp === "number" && typeof item.scope === "string" && typeof item.cwd === "string" && typeof item.root === "string" && Array.isArray(item.status) && item.status.every((value) => typeof value === "string") && (item.head === void 0 || typeof item.head === "string") && (item.branch === void 0 || typeof item.branch === "string") && (item.state === void 0 || typeof item.state === "string");
+}
+var init_workspace = __esm({
+  "src/agent/workspace.ts"() {
+  }
+});
+
 // src/agent/session.ts
-import { appendFileSync, existsSync as existsSync7, mkdirSync as mkdirSync6, readFileSync as readFileSync8, readdirSync as readdirSync3, statSync as statSync3, writeFileSync as writeFileSync6 } from "node:fs";
+import { appendFileSync, existsSync as existsSync7, mkdirSync as mkdirSync6, readFileSync as readFileSync9, readdirSync as readdirSync3, statSync as statSync3, writeFileSync as writeFileSync6 } from "node:fs";
 import { homedir as homedir6 } from "node:os";
-import { join as join9 } from "node:path";
-import { randomUUID as randomUUID2, createHash } from "node:crypto";
+import { join as join10 } from "node:path";
+import { randomUUID as randomUUID3, createHash as createHash2 } from "node:crypto";
 function newSessionId() {
-  return `session-${Date.now()}-${randomUUID2().slice(0, 8)}`;
+  return `session-${Date.now()}-${randomUUID3().slice(0, 8)}`;
 }
 function sessionPath(id) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(id)) throw new Error("Invalid session id. Use the full id from /sessions.");
-  return join9(sessionsDir(), `${id}.jsonl`);
+  return join10(sessionsDir(), `${id}.jsonl`);
 }
 function createSession(opts) {
   mkdirSync6(sessionsDir(), { recursive: true });
@@ -3494,7 +3649,7 @@ function loadSession(sessionId) {
   const messages = [];
   const entries = [];
   let window;
-  for (const [index, line] of readFileSync8(path2, "utf8").split("\n").entries()) {
+  for (const [index, line] of readFileSync9(path2, "utf8").split("\n").entries()) {
     if (!line.trim()) continue;
     try {
       const obj = JSON.parse(line);
@@ -3503,21 +3658,40 @@ function loadSession(sessionId) {
         if (!header) header = obj;
         continue;
       }
-      const id = typeof obj.id === "string" ? obj.id : `legacy-${createHash("sha256").update(`${sessionId}:${index}:${line}`).digest("hex").slice(0, 24)}`;
+      const id = typeof obj.id === "string" ? obj.id : `legacy-${createHash2("sha256").update(`${sessionId}:${index}:${line}`).digest("hex").slice(0, 24)}`;
       if (["user", "assistant", "toolResult"].includes(obj.role)) {
         if (obj.role === "user" ? typeof obj.content !== "string" : !Array.isArray(obj.content)) continue;
         if (obj.role !== "user" && !obj.content.every((part) => part && typeof part === "object" && (part.type === "text" && typeof part.text === "string" || obj.role === "assistant" && part.type === "thinking" && typeof part.thinking === "string" || obj.role === "assistant" && part.type === "toolCall" && typeof part.id === "string" && typeof part.name === "string" && part.arguments && typeof part.arguments === "object" && !Array.isArray(part.arguments)))) continue;
         const message = { ...obj, id };
         messages.push(message);
         entries.push(message);
-      } else if (obj.type === "context_window" && validWindowStart(messages, obj.start) && obj.start >= (window?.start ?? 0) && (obj.handoff === void 0 || typeof obj.handoff === "string")) {
+      } else if (obj.type === "context_window" && validWindowStart(messages, obj.start) && obj.start >= (window?.start ?? 0) && (obj.handoff === void 0 || typeof obj.handoff === "string") && ["manual", "tool", "threshold", "overflow", "resume"].includes(obj.reason)) {
         window = { ...obj, id };
         entries.push(window);
       } else if (obj.type === "posthorse-reminder") entries.push({ ...obj, id });
+      else if (isWorkspaceSnapshot(obj)) entries.push(obj);
     } catch {
     }
   }
   return { header, messages, entries, window, activeMessages: providerMessages(window ? [windowMessage(window), ...messages.slice(window.start)] : [...messages]) };
+}
+function latestWorkspaceSnapshot(entries) {
+  return entries.filter(isWorkspaceSnapshot).at(-1);
+}
+function workspaceMemoryRecords(scope, excludeSessionId, limit = 8) {
+  const records = [];
+  for (const session of listSessions(Number.MAX_SAFE_INTEGER)) {
+    if (session.id === excludeSessionId) continue;
+    try {
+      const loaded = loadSession(session.id);
+      const snapshot = latestWorkspaceSnapshot(loaded.entries);
+      if (!snapshot || snapshot.scope !== scope) continue;
+      const handoff = loaded.entries.filter((entry) => "type" in entry && entry.type === "context_window").at(-1)?.handoff;
+      records.push({ sessionId: session.id, snapshot, ...handoff ? { handoff } : {} });
+    } catch {
+    }
+  }
+  return records.sort((a, b) => b.snapshot.timestamp - a.snapshot.timestamp).slice(0, limit);
 }
 function listSessions(limit = 20) {
   let files;
@@ -3552,12 +3726,13 @@ function branchSession(sourceId, upToMessageIndex, newId) {
 var sessionsDir;
 var init_session = __esm({
   "src/agent/session.ts"() {
-    sessionsDir = () => join9(process.env.REIN_HOME || join9(homedir6(), ".rein"), "sessions");
+    init_workspace();
+    sessionsDir = () => join10(process.env.REIN_HOME || join10(homedir6(), ".rein"), "sessions");
   }
 });
 
 // src/harness/posthorse.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 function messageText(message) {
   if (message.role === "user") return message.content;
   return message.content.map((part) => part.type === "text" ? part.text : part.type === "thinking" ? part.thinking : `${part.name} ${JSON.stringify(part.arguments)}`).join("\n");
@@ -3566,10 +3741,11 @@ var POSTHORSE_GUIDANCE, MAX_CHARS, MARGIN, estimateTokens, Posthorse;
 var init_posthorse = __esm({
   "src/harness/posthorse.ts"() {
     init_session();
+    init_workspace();
     POSTHORSE_GUIDANCE = `
 
-## Context windows (Posthorse)
-Use get_context_remaining when the context budget matters. Automatic rollover starts a fresh window without generating a summary. Before new_context, save durable goal, decisions, progress, and next steps with notes, or pass a concise handoff. The boundary commits only after the entire tool batch succeeds. Earlier conversation remains recoverable with history. After rollover, restore notes and inspect history. Recovery records preserve inputs, not proof of progress; verify live state before stateful or external actions.`;
+## Context windows and durable memory (Posthorse)
+Use get_context_remaining when the context budget matters. Automatic rollover starts a fresh window without generating a summary. Before new_context, save durable goal, decisions, progress, and next steps with notes, or pass a concise handoff. Put stable cross-session facts in .pi/notes/MEMORY.md; it is loaded when an archived session resumes. The boundary commits only after the entire tool batch succeeds. Earlier conversation remains recoverable with history. Reopening a non-empty session creates a fresh resume window with a current workspace overlay and squashed Git diff, so stale tool transcripts are not replayed. Recovery records are evidence, not proof of progress; verify live state before stateful or external actions.`;
     MAX_CHARS = 2e4;
     MARGIN = 512;
     estimateTokens = (value) => Math.ceil((typeof value === "string" ? value : JSON.stringify(value) ?? "").length / 3);
@@ -3587,10 +3763,13 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
       lastRequestCount = 0;
       lastOverflowCount = -1;
       pageTokensAllocated = 0;
+      cwd;
+      workspaceSnapshot;
       constructor(options) {
         this.model = options.model;
         this.prompt = options.prompt;
         this.tools = options.tools;
+        this.cwd = options.cwd;
         this.enabled = options.enabled !== false;
         this.reserveTokens = options.reserveTokens ?? Math.max(this.model.maxTokens, Math.min(4096, Math.floor(this.model.contextWindow / 5)));
         if (!Number.isSafeInteger(this.model.contextWindow) || this.model.contextWindow < 1024) throw new Error("contextWindow must be an integer of at least 1024 tokens");
@@ -3612,21 +3791,24 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
         this.messages = loaded.messages;
         this.entries = loaded.entries;
         this.window = loaded.window;
+        this.workspaceSnapshot = latestWorkspaceSnapshot(loaded.entries);
         this.usage = void 0;
         this.lastRequestCount = providerMessages(loaded.messages).length;
         this.lastOverflowCount = -1;
         this.pageTokensAllocated = 0;
+        if (this.cwd && this.messages.length > 0) this.resumeWorkspace();
+        this.captureWorkspace();
       }
       store(entry) {
         if (this.sessionId) appendSessionEntry(this.sessionId, entry);
         this.entries.push(entry);
       }
       record(message) {
-        const entry = { ...message, id: randomUUID3() };
+        const entry = { ...message, id: randomUUID4() };
         this.store(entry);
         this.messages.push(entry);
         if (message.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted" && Number.isFinite(message.usage?.totalTokens) && message.usage.totalTokens > 0) {
-          this.usage = { count: this.messages.length, tokens: message.usage.totalTokens, windowId: this.windowId };
+          this.usage = { count: this.messages.length, tokens: message.usage.totalTokens, ...message.usage.cached === void 0 ? {} : { cached: message.usage.cached }, windowId: this.windowId };
         }
       }
       active(messages = this.messages) {
@@ -3647,7 +3829,7 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
         return chars;
       }
       status() {
-        return JSON.stringify({ windowId: this.windowId, estimatedTokens: this.used(), contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens, untilRollover: Math.max(0, this.line - this.used()), untilHardLimit: Math.max(0, this.model.contextWindow - this.used()), automatic: this.enabled, estimate: true });
+        return JSON.stringify({ windowId: this.windowId, estimatedTokens: this.used(), contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens, untilRollover: Math.max(0, this.line - this.used()), untilHardLimit: Math.max(0, this.model.contextWindow - this.used()), ...this.usage?.cached === void 0 ? {} : { lastPromptCacheTokens: this.usage.cached }, automatic: this.enabled, estimate: true });
       }
       validateHandoff(handoff) {
         const limit = this.freshLimit();
@@ -3657,11 +3839,40 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
       rollover(handoff, reason = "manual", start = this.messages.length) {
         this.validateHandoff(handoff);
         if (!validWindowStart(this.messages, start) || start < (this.window?.start ?? 0)) throw new Error("Context boundary must follow a complete tool batch and advance within the transcript");
-        const window = { type: "context_window", id: randomUUID3(), timestamp: Date.now(), start, handoff: handoff?.trim() || void 0, reason };
+        const window = { type: "context_window", id: randomUUID4(), timestamp: Date.now(), start, handoff: handoff?.trim() || void 0, reason };
         this.store(window);
         this.window = window;
         this.usage = void 0;
         this.pageTokensAllocated = 0;
+      }
+      /** Persist only changed Git state; snapshots are metadata, never model-visible tool logs. */
+      captureWorkspace() {
+        if (!this.cwd) return;
+        try {
+          const current = captureWorkspaceSnapshot(this.cwd);
+          if (sameWorkspaceState(this.workspaceSnapshot, current)) return;
+          this.store(current);
+          this.workspaceSnapshot = current;
+        } catch {
+        }
+      }
+      /**
+       * Resume is a deterministic squash boundary, not a generated summary. It
+       * keeps the detailed prior window in history and places current Git state,
+       * peer checkpoint and durable note evidence in the next isolated window.
+       */
+      resumeWorkspace() {
+        if (!this.cwd) return;
+        try {
+          const overlay = workspaceResumeOverlay(this.cwd, this.workspaceSnapshot, workspaceMemoryRecords(captureWorkspaceSnapshot(this.cwd).scope, this.sessionId), this.freshLimit());
+          if (validWindowStart(this.messages, this.messages.length)) this.rollover(overlay.text, "resume", this.messages.length);
+          else {
+            this.record({ role: "user", timestamp: Date.now(), content: overlay.text });
+          }
+          if (!sameWorkspaceState(this.workspaceSnapshot, overlay.snapshot)) this.store(overlay.snapshot);
+          this.workspaceSnapshot = overlay.snapshot;
+        } catch {
+        }
       }
       afterBatch(info) {
         if (info.newContext) this.rollover(info.newContext.handoff, "tool");
@@ -3695,7 +3906,7 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
         if (this.enabled && used >= remindAt && used < this.line) {
           const seen = this.entries.some((e) => "type" in e && e.type === "posthorse-reminder" && e.windowId === this.windowId && e.contextWindow === this.model.contextWindow && e.reserveTokens === this.reserveTokens);
           if (!seen) {
-            this.store({ type: "posthorse-reminder", id: randomUUID3(), timestamp: Date.now(), windowId: this.windowId, contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens });
+            this.store({ type: "posthorse-reminder", id: randomUUID4(), timestamp: Date.now(), windowId: this.windowId, contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens });
             active2 = [...active2, { role: "user", timestamp: Date.now(), content: "[posthorse] Checkpoint now: save goal/progress/decisions/next steps in notes, then call new_context. This reminder is best-effort; automatic rollover may occur without it." }];
           }
         }
@@ -3732,23 +3943,23 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
 });
 
 // src/harness/tools/context.ts
-import { constants, closeSync, existsSync as existsSync8, fstatSync, lstatSync as lstatSync2, mkdirSync as mkdirSync7, openSync, readSync, readdirSync as readdirSync4, readFileSync as readFileSync9, realpathSync as realpathSync2, writeFileSync as writeFileSync7, renameSync, unlinkSync } from "node:fs";
-import { dirname as dirname4, isAbsolute as isAbsolute2, join as join10, relative, resolve as resolve3, sep } from "node:path";
-import { execFileSync as execFileSync2 } from "node:child_process";
-import { randomUUID as randomUUID4 } from "node:crypto";
+import { constants, closeSync, existsSync as existsSync8, fstatSync, lstatSync as lstatSync3, mkdirSync as mkdirSync7, openSync, readSync, readdirSync as readdirSync4, readFileSync as readFileSync10, realpathSync as realpathSync3, writeFileSync as writeFileSync7, renameSync, unlinkSync } from "node:fs";
+import { dirname as dirname5, isAbsolute as isAbsolute2, join as join11, relative, resolve as resolve4, sep as sep2 } from "node:path";
+import { execFileSync as execFileSync3 } from "node:child_process";
+import { randomUUID as randomUUID5 } from "node:crypto";
 function notesRoot(cwd) {
   try {
     const options = { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3, maxBuffer: 1024 * 1024 };
-    const common = realpathSync2(resolve3(cwd, execFileSync2("git", ["rev-parse", "--git-common-dir"], options).trim()));
-    if (common.endsWith(`${sep}.git`)) return dirname4(common);
+    const common = realpathSync3(resolve4(cwd, execFileSync3("git", ["rev-parse", "--git-common-dir"], options).trim()));
+    if (common.endsWith(`${sep2}.git`)) return dirname5(common);
     try {
-      const worktree = execFileSync2("git", ["--git-dir", common, "config", "--path", "--get", "core.worktree"], options).trim();
-      if (worktree) return realpathSync2(resolve3(common, worktree));
+      const worktree = execFileSync3("git", ["--git-dir", common, "config", "--path", "--get", "core.worktree"], options).trim();
+      if (worktree) return realpathSync3(resolve4(common, worktree));
     } catch {
     }
     return common;
   } catch {
-    return realpathSync2(cwd);
+    return realpathSync3(cwd);
   }
 }
 function required(value, name) {
@@ -3757,12 +3968,12 @@ function required(value, name) {
 }
 function safePath(root, note, checkLeaf = true) {
   if (isAbsolute2(note) || /^[A-Za-z]:/.test(note) || note.includes("\\") || note.includes("\0")) throw new Error("Note path must be relative to .pi/notes.");
-  const path2 = resolve3(root, note);
+  const path2 = resolve4(root, note);
   const rel = relative(root, path2);
-  if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute2(rel)) throw new Error("Note path must stay inside .pi/notes.");
-  for (const part of [dirname4(root), root, ...rel.split(sep).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join10(root, ...parts.slice(0, i + 1)))]) {
+  if (!rel || rel === ".." || rel.startsWith(`..${sep2}`) || isAbsolute2(rel)) throw new Error("Note path must stay inside .pi/notes.");
+  for (const part of [dirname5(root), root, ...rel.split(sep2).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join11(root, ...parts.slice(0, i + 1)))]) {
     try {
-      const stat = lstatSync2(part);
+      const stat = lstatSync3(part);
       if (stat.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
       if (part === path2 ? !stat.isFile() || stat.nlink > 1 : !stat.isDirectory()) throw new Error("Notes require regular files without hard links and ordinary directories.");
     } catch (err) {
@@ -3776,7 +3987,7 @@ function* noteFiles(root, dir = root) {
   if (!existsSync8(dir)) return;
   for (const file of readdirSync4(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (file.isSymbolicLink()) continue;
-    const path2 = join10(dir, file.name);
+    const path2 = join11(dir, file.name);
     if (file.isDirectory()) yield* noteFiles(root, path2);
     else if (file.isFile()) {
       safePath(root, relative(root, path2));
@@ -3799,7 +4010,7 @@ function offsetOf(args) {
   return offset;
 }
 function contextTools(state, cwd) {
-  const root = join10(notesRoot(cwd), ".pi", "notes");
+  const root = join11(notesRoot(cwd), ".pi", "notes");
   const notes = {
     name: "notes",
     description: "Durable .pi/notes shared by repository worktrees (main checkout; common Git directory for separate-git-dir without core.worktree). list/read/search are paged with offset; write replaces (empty content clears); append adds a newline-terminated record. Notes are plaintext and may be tracked by Git.",
@@ -3813,9 +4024,9 @@ function contextTools(state, cwd) {
       if (op === "write" || op === "append") {
         const path2 = safePath(root, required(args.path, "path"));
         if (typeof args.content !== "string") throw new Error('"content" is required; use "" to clear a note.');
-        mkdirSync7(dirname4(path2), { recursive: true });
+        mkdirSync7(dirname5(path2), { recursive: true });
         if (op === "write") {
-          const temp = `${path2}.${randomUUID4()}.tmp`;
+          const temp = `${path2}.${randomUUID5()}.tmp`;
           try {
             writeFileSync7(temp, args.content, { flag: "wx", mode: 384 });
             renameSync(temp, path2);
@@ -3840,13 +4051,13 @@ function contextTools(state, cwd) {
         return { content: `${op === "write" ? "Wrote" : "Appended to"} .pi/notes/${args.path}` };
       }
       const limit = state.pageLimit(offset);
-      if (op === "read") return { content: page(readFileSync9(safePath(root, required(args.path, "path")), "utf8"), offset, limit) };
+      if (op === "read") return { content: page(readFileSync10(safePath(root, required(args.path, "path")), "utf8"), offset, limit) };
       if (op === "list") return { content: page([...noteFiles(root)].map((p) => relative(root, p)).join("\n") || "(no notes yet)", offset, limit) };
       const query = required(args.query, "query").toLowerCase();
       const hits = [];
       for (const file of noteFiles(root)) {
         if (signal?.aborted) throw new Error("Operation aborted");
-        for (const [index, line] of readFileSync9(file, "utf8").split("\n").entries()) {
+        for (const [index, line] of readFileSync10(file, "utf8").split("\n").entries()) {
           const match = line.toLowerCase().indexOf(query);
           if (match >= 0) hits.push(`${relative(root, file)}:${index + 1}: ${line.slice(Math.max(0, match - 60), match + 240)}`);
           if (hits.length >= 200) break;
@@ -3882,7 +4093,7 @@ function contextTools(state, cwd) {
           if (!session.cwd) continue;
           try {
             if (!roots.has(session.cwd)) roots.set(session.cwd, notesRoot(session.cwd));
-            if (roots.get(session.cwd) === dirname4(dirname4(root))) sources.push({ id: session.id, entries: loadSession(session.id).entries });
+            if (roots.get(session.cwd) === dirname5(dirname5(root))) sources.push({ id: session.id, entries: loadSession(session.id).entries });
           } catch {
           }
         }
@@ -3973,7 +4184,7 @@ async function createRunner(opts) {
   const tools = [...opts.tools ?? toolsForCwd(opts.cwd)];
   let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
   const steering = [];
-  const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools });
+  const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
   if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd));
   const context = { systemPrompt, messages: posthorse.messages, tools };
   let running = false;
@@ -4063,6 +4274,7 @@ async function createRunner(opts) {
                 break;
               case "tool_execution_end":
                 status.toolEnd(event.toolName);
+                posthorse.captureWorkspace();
                 break;
               case "agent_end":
                 status.done();
@@ -4076,6 +4288,7 @@ async function createRunner(opts) {
           }
         );
       } finally {
+        posthorse.captureWorkspace();
         running = false;
       }
     }
@@ -4126,12 +4339,12 @@ __export(loop_exports, {
   requireCleanGit: () => requireCleanGit,
   runExperimentLoop: () => runExperimentLoop
 });
-import { execFileSync as execFileSync3 } from "node:child_process";
-import { existsSync as existsSync9, readFileSync as readFileSync10, appendFileSync as appendFileSync2, realpathSync as realpathSync3 } from "node:fs";
-import { join as join11, resolve as resolve4 } from "node:path";
-import { randomUUID as randomUUID5 } from "node:crypto";
+import { execFileSync as execFileSync4 } from "node:child_process";
+import { existsSync as existsSync9, readFileSync as readFileSync11, appendFileSync as appendFileSync2, realpathSync as realpathSync4 } from "node:fs";
+import { join as join12, resolve as resolve5 } from "node:path";
+import { randomUUID as randomUUID6 } from "node:crypto";
 function sh3(cmd, cwd) {
-  return execFileSync3("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
+  return execFileSync4("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function gitAvailable(cwd) {
   try {
@@ -4156,42 +4369,42 @@ function readMetricCommand(text) {
 function requireCleanGit(cwd) {
   let root;
   try {
-    root = execFileSync3("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-    execFileSync3("git", ["rev-parse", "--verify", "HEAD"], { cwd, stdio: "ignore" });
+    root = execFileSync4("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    execFileSync4("git", ["rev-parse", "--verify", "HEAD"], { cwd, stdio: "ignore" });
   } catch {
     throw new Error("Autonomous keep/discard requires a Git repository with an initial commit");
   }
-  if (realpathSync3(root) !== realpathSync3(resolve4(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
-  if (execFileSync3("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf8" }).trim()) {
+  if (realpathSync4(root) !== realpathSync4(resolve5(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
+  if (execFileSync4("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf8" }).trim()) {
     throw new Error("Working tree is dirty; commit or stash existing work before autonomous keep/discard");
   }
 }
 function discardIteration(cwd, expectedHead) {
   if (expectedHead && sh3("git rev-parse HEAD", cwd) !== expectedHead) throw new Error("Git HEAD changed; refusing to discard a different iteration");
-  execFileSync3("git", ["reset", "--hard", "HEAD"], { cwd, stdio: "ignore" });
-  execFileSync3("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
+  execFileSync4("git", ["reset", "--hard", "HEAD"], { cwd, stdio: "ignore" });
+  execFileSync4("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
 }
 function recordLesson(cwd, text, commitMessage) {
-  appendFileSync2(join11(cwd, "LESSONS.md"), `
+  appendFileSync2(join12(cwd, "LESSONS.md"), `
 ${text}
 `);
-  execFileSync3("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
-  execFileSync3("git", ["commit", "-m", commitMessage], { cwd, stdio: "ignore" });
+  execFileSync4("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
+  execFileSync4("git", ["commit", "-m", commitMessage], { cwd, stdio: "ignore" });
 }
 async function runExperimentLoop(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join11(cwd, taskFile);
-  const metricPath = join11(cwd, metricFile);
+  const taskPath = join12(cwd, taskFile);
+  const metricPath = join12(cwd, metricFile);
   if (!existsSync9(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
   if (!existsSync9(metricPath)) {
     throw new Error(`No ${metricFile} in ${cwd} \u2014 put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
   }
-  const task = readFileSync10(taskPath, "utf8");
-  const metricDoc = readFileSync10(metricPath, "utf8");
+  const task = readFileSync11(taskPath, "utf8");
+  const metricDoc = readFileSync11(metricPath, "utf8");
   const metricCmd = readMetricCommand(metricDoc);
   if (!metricCmd) throw new Error("METRIC.md has no metric command");
   requireCleanGit(cwd);
@@ -4199,7 +4412,7 @@ async function runExperimentLoop(opts) {
   const maxIters = opts.maxIterations ?? 10;
   const runMetric = () => {
     try {
-      const out = execFileSync3("bash", ["-c", metricCmd], { cwd, encoding: "utf8", timeout: 3e5 });
+      const out = execFileSync4("bash", ["-c", metricCmd], { cwd, encoding: "utf8", timeout: 3e5 });
       return readMetric(out);
     } catch (err) {
       console.log(dim(`metric run failed: ${err.stderr ?? err.message}`.slice(0, 300)));
@@ -4236,7 +4449,7 @@ Rules:
   let stale = 0;
   for (let i = 0; i < maxIters; i++) {
     const head = sh3("git rev-parse HEAD", cwd);
-    const tag = randomUUID5().slice(0, 8);
+    const tag = randomUUID6().slice(0, 8);
     console.log(`
 ${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
     try {
@@ -4292,22 +4505,22 @@ __export(improve_exports, {
   runHarnessTests: () => runHarnessTests,
   runImproveLoop: () => runImproveLoop
 });
-import { execFileSync as execFileSync4 } from "node:child_process";
-import { cpSync, existsSync as existsSync10, mkdtempSync as mkdtempSync2, readFileSync as readFileSync11, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
+import { execFileSync as execFileSync5 } from "node:child_process";
+import { cpSync, existsSync as existsSync10, mkdtempSync as mkdtempSync2, readFileSync as readFileSync12, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join12, dirname as dirname5, resolve as resolve5 } from "node:path";
+import { join as join13, dirname as dirname6, resolve as resolve6 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { randomUUID as randomUUID6 } from "node:crypto";
+import { randomUUID as randomUUID7 } from "node:crypto";
 function sh4(cmd, cwd) {
-  return execFileSync4("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
+  return execFileSync5("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function runHarnessTests(repoDir) {
-  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join12(tmpdir2(), "rein-validation-")) : repoDir;
+  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join13(tmpdir2(), "rein-validation-")) : repoDir;
   try {
     if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
-      if (existsSync10(join12(repoDir, name))) cpSync(join12(repoDir, name), join12(dir, name), { recursive: true });
+      if (existsSync10(join13(repoDir, name))) cpSync(join13(repoDir, name), join13(dir, name), { recursive: true });
     }
-    const output = execFileSync4(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
+    const output = execFileSync5(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
       cwd: dir,
       encoding: "utf8",
       timeout: 3e5,
@@ -4321,9 +4534,9 @@ function runHarnessTests(repoDir) {
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join12(repoDir, "LESSONS.md");
+  const path2 = join13(repoDir, "LESSONS.md");
   if (!existsSync10(path2)) return "";
-  const text = readFileSync11(path2, "utf8");
+  const text = readFileSync12(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
   return m?.[1]?.trim() ?? "";
 }
@@ -4362,7 +4575,7 @@ ${lessons}` : "(no harness lessons recorded yet \u2014 look for the weakest part
   while (iterations < maxIters) {
     iterations++;
     const head = sh4("git rev-parse HEAD", repoDir);
-    const tag = randomUUID6().slice(0, 8);
+    const tag = randomUUID7().slice(0, 8);
     console.log(`
 ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
     const prompt = iterations === 1 ? queueText + "\n\nDo not commit, reset, stage, or switch Git branches; the harness owns keep/discard. Pick the single most concrete weakness and fix it with the smallest change that works. Then run npm test and report the result as: RESULT: improved | no-change | failed" : "Continue: pick the next concrete weakness (not the one you just fixed). Same rules. Do not commit, reset, stage, or switch Git branches. Report as: RESULT: improved | no-change | failed";
@@ -4385,7 +4598,7 @@ ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
         const test = runHarnessTests(repoDir);
         if (sh4("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
         if (test.pass) {
-          appendFileSync3(join12(repoDir, "LESSONS.md"), `
+          appendFileSync3(join13(repoDir, "LESSONS.md"), `
 - [improve ${tag}] fixed: ${firstLine(report)}
 `);
           if (useGit) sh4(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
@@ -4426,8 +4639,8 @@ var init_improve = __esm({
     init_loop();
     init_runner();
     init_system_prompt();
-    here2 = dirname5(fileURLToPath2(import.meta.url));
-    REIN_REPO = [here2, resolve5(here2, ".."), resolve5(here2, "..", "..")].find((dir) => existsSync10(join12(dir, "test", "smoke.ts"))) ?? resolve5(here2, "..", "..");
+    here2 = dirname6(fileURLToPath2(import.meta.url));
+    REIN_REPO = [here2, resolve6(here2, ".."), resolve6(here2, "..", "..")].find((dir) => existsSync10(join13(dir, "test", "smoke.ts"))) ?? resolve6(here2, "..", "..");
   }
 });
 
@@ -4438,9 +4651,9 @@ __export(heartbeat_exports, {
   parseHeartbeat: () => parseHeartbeat,
   runHeartbeat: () => runHeartbeat
 });
-import { appendFileSync as appendFileSync4, existsSync as existsSync11, mkdirSync as mkdirSync8, readFileSync as readFileSync12, writeFileSync as writeFileSync8 } from "node:fs";
+import { appendFileSync as appendFileSync4, existsSync as existsSync11, mkdirSync as mkdirSync8, readFileSync as readFileSync13, writeFileSync as writeFileSync8 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
-import { isAbsolute as isAbsolute3, join as join13, resolve as resolve6 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join14, resolve as resolve7 } from "node:path";
 function parseHeartbeat(text) {
   const tasks = [];
   let improveGoal;
@@ -4457,15 +4670,15 @@ function parseHeartbeat(text) {
   return { tasks, improveGoal };
 }
 function resolveHeartbeatFile(explicit) {
-  if (explicit) return isAbsolute3(explicit) ? explicit : resolve6(explicit);
-  const local = resolve6(process.cwd(), "HEARTBEAT.md");
+  if (explicit) return isAbsolute3(explicit) ? explicit : resolve7(explicit);
+  const local = resolve7(process.cwd(), "HEARTBEAT.md");
   if (existsSync11(local)) return local;
-  return join13(homedir7(), ".rein", "HEARTBEAT.md");
+  return join14(homedir7(), ".rein", "HEARTBEAT.md");
 }
 function logBeat(result) {
-  const dir = join13(homedir7(), ".rein");
+  const dir = join14(homedir7(), ".rein");
   mkdirSync8(dir, { recursive: true });
-  const path2 = join13(dir, "heartbeat.log");
+  const path2 = join14(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     file: result.file,
@@ -4482,7 +4695,7 @@ async function runHeartbeat(opts = {}) {
     if (!opts.quiet) console.log(s);
   };
   if (opts.init) {
-    const path2 = opts.file ? isAbsolute3(opts.file) ? opts.file : resolve6(opts.file) : resolve6(process.cwd(), "HEARTBEAT.md");
+    const path2 = opts.file ? isAbsolute3(opts.file) ? opts.file : resolve7(opts.file) : resolve7(process.cwd(), "HEARTBEAT.md");
     writeFileSync8(path2, HEARTBEAT_TEMPLATE);
     say(green(`wrote ${path2} \u2014 edit it, then run: rein heartbeat`));
     return 0;
@@ -4493,7 +4706,7 @@ async function runHeartbeat(opts = {}) {
     say(dim(`create one: rein heartbeat --init --file ${file}`));
     return 1;
   }
-  const { tasks, improveGoal } = parseHeartbeat(readFileSync12(file, "utf8"));
+  const { tasks, improveGoal } = parseHeartbeat(readFileSync13(file, "utf8"));
   say(bold(`heartbeat \xB7 ${file}`) + dim(` \xB7 ${(/* @__PURE__ */ new Date()).toISOString()}`));
   say(`
 ${bold("1/4 self-heal")}`);
@@ -4504,7 +4717,7 @@ ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.model && !process.env.REIN_BASE_URL && !existsSync11(join13(homedir7(), ".rein", "config.json"))) {
+  } else if (!opts.model && !process.env.REIN_BASE_URL && !existsSync11(join14(homedir7(), ".rein", "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -4588,16 +4801,16 @@ __export(setup_exports, {
 });
 import { mkdirSync as mkdirSync9, renameSync as renameSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync9 } from "node:fs";
 import { homedir as homedir8 } from "node:os";
-import { dirname as dirname6, join as join14 } from "node:path";
-import { randomUUID as randomUUID7 } from "node:crypto";
+import { dirname as dirname7, join as join15 } from "node:path";
+import { randomUUID as randomUUID8 } from "node:crypto";
 import { execFile as execFile7 } from "node:child_process";
 import { promisify as promisify6 } from "node:util";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 function saveConfig(config) {
   const path2 = configPath();
-  mkdirSync9(dirname6(path2), { recursive: true, mode: 448 });
-  const temp = `${path2}.${randomUUID7()}.tmp`;
+  mkdirSync9(dirname7(path2), { recursive: true, mode: 448 });
+  const temp = `${path2}.${randomUUID8()}.tmp`;
   try {
     writeFileSync9(temp, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 384 });
     renameSync2(temp, path2);
@@ -4636,8 +4849,8 @@ function createSetupPrompt(input = process.stdin, output = process.stdout) {
     output.write(text);
     if (queue.length) return queue.shift().trim() || fallback;
     if (closed) throw eof();
-    const answer = await new Promise((resolve7, reject) => {
-      pending = { resolve: resolve7, reject };
+    const answer = await new Promise((resolve8, reject) => {
+      pending = { resolve: resolve8, reject };
     });
     return answer.trim() || fallback;
   };
@@ -4909,7 +5122,7 @@ var init_setup = __esm({
       huggingface: "https://huggingface.co/settings/tokens",
       gemini: "https://aistudio.google.com/apikey"
     };
-    configPath = () => join14(process.env.REIN_HOME || join14(homedir8(), ".rein"), "config.json");
+    configPath = () => join15(process.env.REIN_HOME || join15(homedir8(), ".rein"), "config.json");
   }
 });
 
@@ -5054,7 +5267,7 @@ async function startRepl(opts) {
             "  /tools <list>    show available tools",
             "  /ask [tools]    tools that need approval (y/N here, or canvas/phone)",
             "  /sessions        list recent sessions",
-            "  /resume <id>     continue a previous session (reloads its messages)",
+            "  /resume <id>     continue a previous session with current workspace overlay",
             "  /branch          branch the current session and continue there",
             "  /context         show context window usage",
             "  /new-context [handoff]  start a fresh window in this session",
@@ -5115,7 +5328,7 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
         }
         runner.setSession(arg);
         sessionId = arg;
-        console.log(gray(`resumed ${arg} with ${runner.context.messages.length} messages`));
+        console.log(gray(`resumed ${arg} with ${runner.context.messages.length} archived messages; next request starts from current workspace state`));
         return true;
       }
       case "branch": {
@@ -5188,8 +5401,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
       const s = JSON.stringify(args);
       process.stdout.write(`
 \u26A1 approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} \u2014 [y/N] `);
-      const line = await new Promise((resolve7) => {
-        approvalAnswer = resolve7;
+      const line = await new Promise((resolve8) => {
+        approvalAnswer = resolve8;
       });
       return /^y(es)?$/i.test(line.trim());
     });
@@ -5199,8 +5412,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
   const ask = () => {
     if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift());
     if (inputClosed) return Promise.resolve(null);
-    return new Promise((resolve7) => {
-      resolveLine = (line) => resolve7(line);
+    return new Promise((resolve8) => {
+      resolveLine = (line) => resolve8(line);
       if (!rl.closed && process.stdout.isTTY) rl.prompt();
     });
   };
@@ -5251,7 +5464,7 @@ var init_repl = __esm({
 
 // src/cli.ts
 init_models();
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync14 } from "node:fs";
 async function printHardwareSection() {
   try {
     const { summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
@@ -5271,7 +5484,7 @@ async function printHardwareSection() {
 }
 function cliVersion() {
   try {
-    return JSON.parse(readFileSync13(new URL("../package.json", import.meta.url), "utf8")).version;
+    return JSON.parse(readFileSync14(new URL("../package.json", import.meta.url), "utf8")).version;
   } catch {
     return "0.0.0";
   }

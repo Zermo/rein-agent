@@ -85,6 +85,18 @@ function modelIds(doc: any): string[] | undefined {
 	return [...new Set(ids)] as string[];
 }
 
+/** Some self-hosted servers advertise their implementation in the model list. */
+function serverProvider(doc: any, fallback: string): string {
+	if (fallback !== "custom" && fallback !== "openai-compatible") return fallback;
+	const values = Array.isArray(doc?.data) ? doc.data : Array.isArray(doc?.models) ? doc.models : [];
+	const owner = values.map((item: any) => `${item?.owned_by ?? ""} ${item?.object ?? ""}`).join(" ").toLowerCase();
+	if (/llama[._ -]?cpp|llama-server/.test(owner)) return "llamacpp";
+	if (/\bollama\b/.test(owner)) return "ollama";
+	if (/\bvllm\b/.test(owner)) return "vllm";
+	if (/lm[ _-]?studio/.test(owner)) return "lmstudio";
+	return fallback;
+}
+
 /** Probe a few path variants on the supplied origin; never scan hosts or ports. */
 export interface DetectEndpointOptions { provider?: string; apiKey?: string; timeoutMs?: number; sshHost?: string; }
 export async function detectEndpoint(input: string, options: DetectEndpointOptions = {}): Promise<DetectedEndpoint> {
@@ -151,7 +163,7 @@ async function detectEndpointDirect(input: string, options: DetectEndpointOption
 			if (!models) { error = `Invalid model list at ${probe.endpoint}: expected a data[] or models[] array of model IDs.`; continue; }
 			const rawDetectedBase = endpoint.endsWith("/models") ? endpoint.slice(0, -7) : probe.base;
 			const detectedBase = new URL(rawDetectedBase).pathname === "/" ? new URL(rawDetectedBase).origin + "/" : rawDetectedBase;
-			return { baseUrl: detectedBase, provider, models, ...(models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." }) };
+			return { baseUrl: detectedBase, provider: serverProvider(doc, provider), models, ...(models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." }) };
 		} catch (err) {
 			if (controller.signal.aborted || (err as Error).name === "AbortError") return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
 			const cause = (err as { cause?: { code?: string }; code?: string });
