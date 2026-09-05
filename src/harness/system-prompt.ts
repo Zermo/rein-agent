@@ -48,6 +48,11 @@ const SELF_IMPROVE = `Self-improvement (this is part of the job, not a bonus):
 - LESSONS.md is shared memory across sessions. Read it before starting non-trivial work.
 - If the rein harness itself did something clunky for you (a tool result that was hard to use, a confusing error, a missing flag), note it under a \"## harness\" section in LESSONS.md — the rein improve loop reads that file.`;
 
+const DURABLE_MEMORY = `Cross-session memory:
+- .pi/notes/MEMORY.md is the repository's durable operational memory. Read it when the task needs prior decisions; append concise, verified facts, decisions, constraints, and next steps when they will matter after this session. Do not put secrets or speculative claims there.
+- Reopening an archived session supplies a current workspace overlay and a bounded squashed Git diff in a fresh context window. It supersedes old transcript assumptions. Use history for exact prior tool calls; do not replay them blindly.
+- Provider KV cache is opportunistic and exists only while the server keeps a matching prompt slot. Never claim it persists across a restart or arbitrary week-old session.`;
+
 const ENV = (cwd: string, platform: string) => `Environment:
 - Working directory: ${cwd}
 - Platform: ${platform}
@@ -87,6 +92,8 @@ export function buildSystemPrompt(cwd: string): string {
 		GATES,
 		"",
 		SELF_IMPROVE,
+		"",
+		DURABLE_MEMORY,
 		"",
 		ENV(cwd, process.platform === "darwin" ? `macOS (${process.arch})` : `${process.platform} (${process.arch})`),
 	];

@@ -1,6 +1,6 @@
 /** Retry only rejected Chat Completions fields, never authentication or server failures. */
-type CompatibleField = "max_tokens" | "stream_options" | "temperature" | "top_p";
-const FIELD = /\b(max_tokens|max_completion_tokens|stream_options|temperature|top_p)\b/;
+type CompatibleField = "max_tokens" | "stream_options" | "temperature" | "top_p" | "cache_prompt";
+const FIELD = /\b(max_tokens|max_completion_tokens|stream_options|temperature|top_p|cache_prompt)\b/;
 const UNSUPPORTED = /unsupported|not supported|does not support|unrecognized|unknown (?:parameter|field|argument)|unexpected (?:keyword )?argument|extra inputs are not permitted/i;
 function rejectedField(detail: string): { field?: CompatibleField; message: string } {
 	let message = detail;
@@ -20,7 +20,7 @@ function rejectedField(detail: string): { field?: CompatibleField; message: stri
 	if (!UNSUPPORTED.test(`${code} ${message}`)) return { message };
 	const rejectedClause = message.split(/[.!?;\n]/).find(clause => UNSUPPORTED.test(clause));
 	const named = rejectedClause?.match(/(?:unsupported(?:[_ ](?:parameter|argument|field|value))?|unrecognized(?: request)?(?: argument)?(?: supplied)?|unknown(?: (?:parameter|field|argument))?|unexpected(?: keyword)?(?: argument)?)[\s:="'`]*([a-z_]+)/i)?.[1];
-	const before = rejectedClause?.match(/\b(max_tokens|stream_options|temperature|top_p)\b[\s"'`]*(?:is |does )?(?:not supported|not support|unsupported)/i)?.[1];
+	const before = rejectedClause?.match(/\b(max_tokens|stream_options|temperature|top_p|cache_prompt)\b[\s"'`]*(?:is |does )?(?:not supported|not support|unsupported)/i)?.[1];
 	const field = typeof parameter === "string" ? parameter.match(FIELD)?.[1] : named ? (named.match(FIELD)?.[0] === named ? named : undefined) : before;
 	return { field: field === "max_completion_tokens" ? undefined : field as CompatibleField | undefined, message };
 }
@@ -30,6 +30,7 @@ export async function postChatCompletion(
 	body: Record<string, unknown>,
 	init: Omit<RequestInit, "body" | "method"> = {},
 	fetchFn: typeof fetch = fetch,
+	onCompatibilityFallback?: (field: CompatibleField) => void,
 ): Promise<Response> {
 	const requestBody = { ...body };
 	const changed = new Set<CompatibleField>();
@@ -46,7 +47,8 @@ export async function postChatCompletion(
 			if (!Object.hasOwn(requestBody, "max_completion_tokens")) requestBody.max_completion_tokens = requestBody.max_tokens;
 		}
 		delete requestBody[field]; changed.add(field);
+		onCompatibilityFallback?.(field);
 		await response.body?.cancel();
-		// At most four field changes, hence five attempts; the same signal spans them all.
+		// At most five field changes, hence six attempts; the same signal spans them all.
 	}
 }

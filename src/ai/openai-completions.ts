@@ -93,6 +93,9 @@ Rules for tool blocks:
 `;
 
 const TOOL_BLOCK_RE = /<tool\s+name="([^"]+)"\s*>([\s\S]*?)<\/tool>/g;
+// A server that rejects cache_prompt should pay one compatibility retry at
+// most once per live harness process, rather than once per agent turn.
+const promptCacheUnsupported = new Set<string>();
 
 /** Parse <tool> blocks out of text (text tool-call mode). */
 export function parseTextToolCalls(text: string): { toolCalls: ToolCall[]; cleanText: string } {
@@ -115,7 +118,7 @@ export function parseTextToolCalls(text: string): { toolCalls: ToolCall[]; clean
 export function stream(
 	model: Model,
 	context: Context,
-	options: StreamOptions & { toolsMode?: "native" | "text" } = {},
+	options: StreamOptions & { toolsMode?: "native" | "text"; promptCacheKey?: string } = {},
 ): AssistantMessageEventStream {
 	const out = new AssistantMessageEventStream();
 	if (model.sshHost) {
@@ -123,7 +126,8 @@ export function stream(
 			try {
 				let final: AssistantMessageEvent | undefined;
 				await withSshTunnel(model.baseUrl, model.sshHost, async baseUrl => {
-					for await (const event of stream({ ...model, baseUrl, sshHost: undefined }, context, options)) {
+					const promptCacheKey = `${model.provider}\u0000ssh:${model.sshHost}\u0000${model.baseUrl}`;
+					for await (const event of stream({ ...model, baseUrl, sshHost: undefined }, context, { ...options, promptCacheKey })) {
 						if (event.type === "done" || event.type === "error") final = event;
 						else out.push(event);
 					}
@@ -181,6 +185,11 @@ export function stream(
 			if (typeof options.maxTokens === "number") body.max_tokens = options.maxTokens;
 			else body.max_tokens = model.maxTokens || 4096;
 			if (options.includeUsage !== false) body.stream_options = { include_usage: true };
+			// llama.cpp reuses the unchanged prompt prefix as KV cache. Probe local
+			// OpenAI-compatible HTTP servers once too; a rejection is remembered for
+			// this endpoint so compatibility does not add a retry to every turn.
+			const promptCacheKey = options.promptCacheKey ?? `${model.provider}\u0000${model.baseUrl}`;
+			if ((model.provider === "llamacpp" || model.baseUrl.startsWith("http://")) && !promptCacheUnsupported.has(promptCacheKey)) body.cache_prompt = true;
 			if (options.extra) Object.assign(body, options.extra);
 			if (toolsMode === "native" && hasTools) {
 				body.tools = (context.tools ?? []).map((t: Tool) => ({
@@ -197,7 +206,7 @@ export function stream(
 
 			const response = await postChatCompletion(`${model.baseUrl.replace(/\/$/, "")}/chat/completions`, body, {
 				headers, signal: options.signal, redirect: "error",
-			});
+			}, fetch, field => { if (field === "cache_prompt") promptCacheUnsupported.add(promptCacheKey); });
 
 			if (!response.ok) {
 				const text = await response.text().catch(() => "");
@@ -259,6 +268,7 @@ export function stream(
 
 				if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? JSON.stringify(chunk.error));
 
+				const cached = chunk.usage?.prompt_tokens_details?.cached_tokens ?? chunk.timings?.cache_n;
 				if (chunk.usage) {
 					const u: Usage = {
 						input: chunk.usage.prompt_tokens ?? 0,
@@ -268,7 +278,10 @@ export function stream(
 					if (typeof chunk.usage.completion_tokens_details?.reasoning_tokens === "number") {
 						u.reasoning = chunk.usage.completion_tokens_details.reasoning_tokens;
 					}
+					if (typeof cached === "number" && Number.isFinite(cached) && cached >= 0) u.cached = cached;
 					message.usage = u;
+				} else if (typeof cached === "number" && Number.isFinite(cached) && cached >= 0) {
+					message.usage.cached = cached;
 				}
 
 				const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
@@ -340,7 +353,7 @@ export function stream(
 			// Estimate usage if the server didn't report it
 			if (message.usage.totalTokens === 0) {
 				const chars = message.content.reduce((n, c) => n + ("text" in c ? c.text.length : "thinking" in c ? c.thinking.length : 0), 0);
-				message.usage = { input: 0, output: Math.ceil(chars / 4), totalTokens: Math.ceil(chars / 4) };
+				message.usage = { input: 0, output: Math.ceil(chars / 4), totalTokens: Math.ceil(chars / 4), ...(message.usage.cached === undefined ? {} : { cached: message.usage.cached }) };
 			}
 
 			// Stop reason: prefer the server's, else infer (some local servers omit finish_reason)

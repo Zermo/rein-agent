@@ -240,8 +240,15 @@ leave room for the prompt, tools, and recovery state. CLI overrides are
 Manual `/new-context [handoff]` and the `new_context` tool remain available when
 automatic rollover is disabled. `/context` prints the current budget.
 
-Sessions persist incrementally in the REPL and with `-p --save`. Resume and branch
-preserve window boundaries, and old Rein JSONL sessions remain readable. Print,
+Sessions persist incrementally in the REPL and with `-p --save`. Reopening a
+non-empty session creates a fresh resume window: it retains the full archived
+transcript in `history`, then layers the current Git checkpoint, a squashed diff
+since that session's checkpoint, the newest peer-session handoff, and
+`.pi/notes/MEMORY.md` over the next model request. This makes a week-old branch
+safe to continue after another session changed the repository without replaying
+all of its old tool calls. The overlay is factual workspace evidence, not a
+generated summary; verify live state before an external action. Branch preserves
+window boundaries, and old Rein JSONL sessions remain readable. Print,
 loop, and improve runs without a saved session retain history only for the lifetime
 of their runner. Supplying a custom `RunnerOptions.tools` array replaces the
 entire toolset and disables automatic rollover by default; `--no-tools` remains
@@ -255,6 +262,13 @@ add that ignore rule to other projects if their working notes should stay local.
 Notes survive session changes and package removal. History reads send the selected
 stored text to the active model provider. Pi's JSONL sessions and image/custom
 message types are not supported by this adaptation.
+
+For llama.cpp and compatible local HTTP servers, Rein sends `cache_prompt: true`.
+llama.cpp can reuse an unchanged live prompt prefix; `/context` shows
+`lastPromptCacheTokens` when the server reports it. Provider KV cache is
+opportunistic: a stopped server, evicted slot, or a week-old archived request
+cannot restore its transformer state. The durable resume overlay provides the
+cross-session continuity in that case.
 
 ### Web: TinyFish is the web layer
 

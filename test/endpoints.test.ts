@@ -207,3 +207,10 @@ test("protected local discovery uses scoped credentials and ignores malformed mo
 	assert.deepEqual(servers[0].models, ["protected-model"]);
 	assert.ok(requests.filter(r => !r.url.includes(":11434/")).every(r => !r.key));
 }));
+
+test("custom llama-server metadata selects the llama.cpp adapter", async (t) => isolated(async () => {
+	t.mock.method(globalThis, "fetch", async () => Response.json({ data: [{ id: "Qwen-DGX", owned_by: "llamacpp" }] }));
+	const detected = await detectEndpoint("10.250.158.81:18083", { provider: "custom" });
+	assert.equal(detected.provider, "llamacpp");
+	assert.deepEqual(detected.models, ["Qwen-DGX"]);
+}));

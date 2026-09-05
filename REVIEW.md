@@ -18,6 +18,12 @@ and covered by offline regressions.
   excludes failed provider responses, and limits overflow retries.
 - Notes and history share a per-request page budget. Notes reject traversal,
   symlinks, hardlinks, and nonregular paths; history stays within the repository.
+- Reopening a non-empty session creates a separate resume window with current
+  Git state, a bounded squashed diff, a newer peer-session handoff, and shared
+  `.pi/notes/MEMORY.md`. The full archived transcript remains recoverable but
+  does not inflate the next request. Completed tools capture their workspace
+  checkpoint immediately, so a concurrently resumed session sees the latest
+  durable state.
 
 ## Provider and CLI compatibility
 
@@ -27,6 +33,9 @@ and covered by offline regressions.
 - Parallel calls in plain JSON responses remain separate. SSE handles split
   frames, final unterminated frames, errors, and cancellation.
 - Servers explicitly rejecting `stream_options` retry once without that field.
+- llama.cpp is detected from its `/models` metadata and receives `cache_prompt`.
+  A compatible server that rejects the field is remembered for the live process;
+  reported prompt-cache tokens are visible in context status.
 - Explicit provider/endpoint/model settings take precedence and do not silently
   substitute a different local server. Effective output budgets fit small windows.
 - Approval timeout invokes a local fallback or denies the action; it cannot

@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import type { AgentMessage } from "./agent-loop.ts";
+import { isWorkspaceSnapshot } from "./workspace.ts";
+import type { WorkspaceSnapshotEntry, WorkspaceMemoryRecord } from "./workspace.ts";
 
 export interface SessionHeader {
 	type: "header";
@@ -22,7 +24,7 @@ export interface ContextWindowEntry {
 	/** Index into the complete message transcript where the active window starts. */
 	start: number;
 	handoff?: string;
-	reason: "manual" | "tool" | "threshold" | "overflow";
+	reason: "manual" | "tool" | "threshold" | "overflow" | "resume";
 }
 export interface ReminderEntry {
 	type: "posthorse-reminder";
@@ -32,7 +34,7 @@ export interface ReminderEntry {
 	contextWindow: number;
 	reserveTokens: number;
 }
-export type SessionEntry = StoredMessage | ContextWindowEntry | ReminderEntry;
+export type SessionEntry = StoredMessage | ContextWindowEntry | ReminderEntry | WorkspaceSnapshotEntry;
 export const sessionsDir = () => join(process.env.REIN_HOME || join(homedir(), ".rein"), "sessions");
 export function newSessionId(): string { return `session-${Date.now()}-${randomUUID().slice(0, 8)}`; }
 export function sessionPath(id: string): string {
@@ -121,12 +123,33 @@ export function loadSession(sessionId: string): { header: SessionHeader | null; 
 				))) continue;
 				const message = { ...obj, id } as StoredMessage;
 				messages.push(message); entries.push(message);
-			} else if (obj.type === "context_window" && validWindowStart(messages, obj.start) && obj.start >= (window?.start ?? 0) && (obj.handoff === undefined || typeof obj.handoff === "string")) {
+			} else if (obj.type === "context_window" && validWindowStart(messages, obj.start) && obj.start >= (window?.start ?? 0) && (obj.handoff === undefined || typeof obj.handoff === "string") && ["manual", "tool", "threshold", "overflow", "resume"].includes(obj.reason)) {
 				window = { ...obj, id }; entries.push(window!);
 			} else if (obj.type === "posthorse-reminder") entries.push({ ...obj, id });
+			else if (isWorkspaceSnapshot(obj)) entries.push(obj);
 		} catch { /* Ignore incomplete records from interrupted writes. */ }
 	}
 	return { header, messages, entries, window, activeMessages: providerMessages(window ? [windowMessage(window), ...messages.slice(window.start)] : [...messages]) };
+}
+
+export function latestWorkspaceSnapshot(entries: SessionEntry[]): WorkspaceSnapshotEntry | undefined {
+	return entries.filter(isWorkspaceSnapshot).at(-1);
+}
+
+/** Recent peer checkpoints and their explicit Posthorse handoffs for one repository. */
+export function workspaceMemoryRecords(scope: string, excludeSessionId?: string, limit = 8): WorkspaceMemoryRecord[] {
+	const records: WorkspaceMemoryRecord[] = [];
+	for (const session of listSessions(Number.MAX_SAFE_INTEGER)) {
+		if (session.id === excludeSessionId) continue;
+		try {
+			const loaded = loadSession(session.id);
+			const snapshot = latestWorkspaceSnapshot(loaded.entries);
+			if (!snapshot || snapshot.scope !== scope) continue;
+			const handoff = loaded.entries.filter((entry): entry is ContextWindowEntry => "type" in entry && entry.type === "context_window").at(-1)?.handoff;
+			records.push({ sessionId: session.id, snapshot, ...(handoff ? { handoff } : {}) });
+		} catch { /* One stale or corrupt peer must not block resume. */ }
+	}
+	return records.sort((a, b) => b.snapshot.timestamp - a.snapshot.timestamp).slice(0, limit);
 }
 export interface SessionSummary {
 	id: string; created: string; updated: string; provider?: string; model?: string; cwd?: string; messageCount: number;

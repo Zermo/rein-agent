@@ -56,3 +56,35 @@ test("setup probe and streaming adapter share reasoning-model token compatibilit
 	const result = await stream({ id: "reasoner", provider: "openai", baseUrl: "https://unused.invalid/v1", contextWindow: 10000, maxTokens: 512 }, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }).result();
 	assert.equal(result.stopReason, "stop"); assert.equal(bodies.length, 4); assert.equal(bodies[1].max_completion_tokens, 8); assert.equal(bodies[3].max_completion_tokens, 512);
 });
+
+test("local prompt caching retries only once when a compatible server rejects it", async t => {
+	const bodies: Record<string, unknown>[] = [];
+	t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+		const body = JSON.parse(init.body as string); bodies.push(body);
+		return body.cache_prompt ? unsupported("cache_prompt") : success();
+	});
+	const model = { id: "local", provider: "custom", baseUrl: "http://cache-retry.invalid/v1", contextWindow: 16_384, maxTokens: 512 };
+	const context = { messages: [{ role: "user" as const, content: "hi", timestamp: 1 }] };
+	assert.equal((await stream(model, context).result()).stopReason, "stop");
+	assert.equal((await stream(model, context).result()).stopReason, "stop");
+	assert.deepEqual(bodies.map(body => body.cache_prompt), [true, undefined, undefined]);
+});
+
+test("reported prompt-cache tokens appear in the completion usage", async t => {
+	t.mock.method(globalThis, "fetch", async () => Response.json({
+		choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+		usage: { prompt_tokens: 100, completion_tokens: 2, total_tokens: 102, prompt_tokens_details: { cached_tokens: 88 } },
+	}));
+	const result = await stream({ id: "cache", provider: "llamacpp", baseUrl: "http://cache-report.invalid/v1", contextWindow: 16_384, maxTokens: 512 }, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }).result();
+	assert.equal(result.usage.cached, 88);
+});
+
+test("llama.cpp timing cache survives a response without usage", async t => {
+	t.mock.method(globalThis, "fetch", async () => Response.json({
+		choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+		timings: { cache_n: 77 },
+	}));
+	const result = await stream({ id: "cache-timing", provider: "llamacpp", baseUrl: "http://cache-timing.invalid/v1", contextWindow: 16_384, maxTokens: 512 }, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }).result();
+	assert.equal(result.usage.cached, 77);
+	assert.ok(result.usage.totalTokens > 0, "content still receives an estimated usage record");
+});
