@@ -154,6 +154,7 @@ setInterval(() => {}, 1000);`);
 			child?.kill("SIGKILL");
 			for (const name of pidFiles) if (existsSync(join(f.root, name))) {
 				const pid = Number(readFileSync(join(f.root, name), "utf8"));
+				if (!Number.isSafeInteger(pid) || pid <= 1) continue;
 				try { process.kill(name === "parent.pid" ? -pid : pid, "SIGKILL"); } catch { /* Already gone. */ }
 			}
 			f.close();
