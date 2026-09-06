@@ -82,6 +82,22 @@ esac
 	return { root, home, run, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+test("doctor reports malformed config and invalid budgets in JSON without leaking credentials", async () => {
+	const f = fixture();
+	try {
+		const path = join(f.home, "config.json");
+		writeFileSync(path, '{"apiKey":"fixture-private-value",BROKEN');
+		let result = await f.run(["doctor", "--json"]);
+		assert.equal(result.code, 1);
+		assert.ok(JSON.parse(result.stdout).checks.some((check: any) => check.name === "config" && check.status === "fail"));
+		assert.doesNotMatch(result.stdout + result.stderr, /fixture-private-value/);
+		writeFileSync(path, JSON.stringify({ provider: "codex", auth: { type: "cli", provider: "codex" }, baseUrl: "cli://codex", model: "default", maxTurns: 0 }));
+		result = await f.run(["doctor", "--json"]);
+		assert.equal(result.code, 1);
+		assert.ok(JSON.parse(result.stdout).checks.some((check: any) => check.name === "task budgets" && check.status === "fail"));
+	} finally { f.close(); }
+});
+
 test("doctor CLI preserves JSON flags, accepts silent before the command, and still reports failures", { timeout: 20_000 }, async () => {
 	const f = fixture();
 	try {

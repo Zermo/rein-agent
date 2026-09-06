@@ -49,18 +49,18 @@ test("cancel or skip before saving leaves no operator files", async () => {
 });
 
 test("full walkthrough saves profile, tests connection, and leaves background work optional", async () => {
-	const f = fixture(["a", "a", "c", "a", "a", "a", "1", "1", "1", "3"]);
+	const f = fixture(["a", "a", "c", "a", "a", "a", "1", "1", "1", "1", "3"]);
 	let connectionCalls = 0, autonomyCalls = 0;
 	try {
 		const code = await runOnboarding({}, { ...f, setup: async () => { connectionCalls++; return 0; }, autonomy: async () => { autonomyCalls++; } });
 		assert.equal(code, 0); assert.equal(connectionCalls, 1); assert.equal(autonomyCalls, 0);
 		assert.equal(readOperatorProfile().profile?.enabled_pack, "ship");
-		assert.match(f.logs.join("\n"), /Setup complete/); assert.match(f.logs.join("\n"), /\[4\/4\]/);
+		assert.match(f.logs.join("\n"), /Setup complete/); assert.match(f.logs.join("\n"), /\[5\/5\]/);
 	} finally { f.close(); }
 });
 
 test("failed model setup keeps the saved profile and does not report a working connection", async () => {
-	const f = fixture(["a", "b", "b", "a", "a", "a", "3", "1", "1", "2", "3"]);
+	const f = fixture(["a", "b", "b", "a", "a", "a", "3", "1", "1", "1", "2", "3"]);
 	let autonomyCalls = 0;
 	try {
 		assert.equal(await runOnboarding({}, { ...f, setup: async () => 1, autonomy: async () => { autonomyCalls++; } }), 1);
@@ -71,7 +71,7 @@ test("failed model setup keeps the saved profile and does not report a working c
 });
 
 test("background enrollment requires a folder preview and supports changing that folder", async () => {
-	const f = fixture(["skip", "1", "2"]);
+	const f = fixture(["skip", "1", "1", "2"]);
 	const calls: any[] = [];
 	let askedFolder = 0, confirmations = 0;
 	const baseAsk = f.prompt.ask;
@@ -117,7 +117,7 @@ test("profile CLI can complete offline, change packs, and show saved scores", { 
 });
 
 test("background rules can be enabled without a main model and do not inspect or install a helper", async () => {
-	const answers = ["skip", "2", "2"];
+	const answers = ["skip", "1", "2", "2"];
 	const f = fixture(answers);
 	answers.push(f.home, "1", "1");
 	const calls: string[] = [];
@@ -140,7 +140,7 @@ test("optional helper setup discloses effects before explicit install or service
 		ram: { totalBytes: 8 * 1024 ** 3, availableBytes: 6 * 1024 ** 3 }, gpus: [], unifiedMemory: false });
 	assert.equal(plan.readyForLocal, true);
 	for (const action of ["1", "2", "3"]) {
-		const answers = ["skip", "1", "1"];
+		const answers = ["skip", "1", "1", "1"];
 		const f = fixture(answers);
 		answers.push(f.home, "1", "2", action, "1");
 		const installations: any[] = [];
@@ -166,7 +166,7 @@ test("optional helper setup discloses effects before explicit install or service
 
 test("personalized planning is enabled only after its account-usage preview is accepted", async () => {
 	for (const choice of ["1", "2"]) {
-		const answers = ["skip", "1", "2"];
+		const answers = ["skip", "1", "1", "2"];
 		const f = fixture(answers);
 		answers.push(f.home, "1", "1", choice);
 		const calls: string[][] = [];
@@ -187,7 +187,7 @@ test("canceling a helper installation aborts it and does not enable background w
 	const { guardianPlan } = await import("../src/harness/autonomy/guardian.ts");
 	const plan = guardianPlan({ os: "linux", arch: "x64", cpu: { name: "fixture CPU", cores: 4, physicalCores: 4, features: [] },
 		ram: { totalBytes: 8 * 1024 ** 3, availableBytes: 6 * 1024 ** 3 }, gpus: [], unifiedMemory: false });
-	const answers = ["skip", "1", "2"];
+	const answers = ["skip", "1", "1", "2"];
 	const f = fixture(answers);
 	answers.push(f.home, "1", "2", "3");
 	let autonomyCalls = 0;
@@ -212,7 +212,7 @@ test("canceling a helper installation aborts it and does not enable background w
 test("retained main planning is disclosed when connection testing is deferred", async () => {
 	const { updateState } = await import("../src/harness/autonomy/state.ts");
 	for (const selection of ["1", "2"]) {
-		const answers = ["skip", "2", "2"];
+		const answers = ["skip", "1", "2", "2"];
 		const f = fixture(answers); answers.push(f.home, "1", "1", selection);
 		const calls: string[][] = [];
 		try {
@@ -230,7 +230,7 @@ test("a failed helper runtime installation reports the exact retry without block
 	const { guardianPlan } = await import("../src/harness/autonomy/guardian.ts");
 	const plan = guardianPlan({ os: "linux", arch: "x64", cpu: { name: "fixture CPU", cores: 4, physicalCores: 4, features: [] },
 		ram: { totalBytes: 8 * 1024 ** 3, availableBytes: 6 * 1024 ** 3 }, gpus: [], unifiedMemory: false });
-	const answers = ["skip", "1", "1"];
+	const answers = ["skip", "1", "1", "1"];
 	const f = fixture(answers); answers.push(f.home, "1", "2", "3", "1");
 	try {
 		assert.equal(await runOnboarding({}, { ...f, setup: async () => 0, autonomy: async () => {}, guardian: {

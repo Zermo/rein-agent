@@ -1,8 +1,6 @@
 /** Interactive and unattended setup. Credentials are collected before discovery. */
-import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { configPath, saveConfig } from "../ai/config.ts";
+import { resolveRunBudgets } from "./run-budgets.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createInterface } from "node:readline";
@@ -33,6 +31,8 @@ export interface SetupOptions {
 	discoverNetwork?: boolean;
 	discoverHosts?: string[];
 	discoverPorts?: number[];
+	maxTurns?: number;
+	maxIterations?: number;
 }
 export interface SetupPrompt {
 	ask(prompt: string, fallback?: string): Promise<string>;
@@ -71,18 +71,6 @@ export const API_KEY_PAGES: Record<string, string> = {
 	huggingface: "https://huggingface.co/settings/tokens",
 	gemini: "https://aistudio.google.com/apikey",
 };
-const configPath = () => join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json");
-
-function saveConfig(config: Record<string, unknown>): void {
-	const path = configPath();
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-	const temp = `${path}.${randomUUID()}.tmp`;
-	try {
-		writeFileSync(temp, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 0o600 });
-		renameSync(temp, path);
-	} finally { try { unlinkSync(temp); } catch {} }
-}
-
 /** One interface per invocation: queued input, hidden secrets, explicit EOF, cleanup. */
 export function createSetupPrompt(input: Readable = process.stdin, output: Writable = process.stdout): SetupPrompt {
 	let hidden = false;
@@ -187,10 +175,17 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 	const connection = dependencies.connection ?? testConnection;
 	const cliStatus = dependencies.cliStatus ?? checkCliAuth;
 	try {
+		const budgets = resolveRunBudgets(config, opts);
+		const persist = (saved: Record<string, unknown>) => {
+			if (JSON.stringify(loadConfig()) !== JSON.stringify(config)) throw new Error("Rein config changed during connection setup. The newer settings were preserved. Rerun setup to test and save the latest configuration.");
+			saveConfig({ ...saved, ...budgets });
+		};
 		const requestedApi = opts.api ?? (process.env.REIN_API?.trim() || undefined);
 		if (requestedApi !== undefined) validateHttpApi(requestedApi);
 		if (opts.status) {
+			if (opts.maxTurns !== undefined || opts.maxIterations !== undefined) throw new Error("Connection status does not save task limits. Use rein setup budgets to change them.");
 			log(`config: ${configPath()}`);
+			log(`Task limits: ${budgets.maxTurns} model turns per prompt; ${budgets.maxIterations} loop/improve iterations. Change with rein setup budgets.`);
 			log(`provider: ${config.provider ?? "(unset)"}\nmodel: ${config.model ?? "(unset)"}\nauth: ${config.auth?.type ?? "api-key"}`);
 			if (config.auth?.type === "cli") {
 				if (requestedApi !== undefined) throw new Error("Chat Completions requires an HTTP API provider. CLI subscriptions manage their own transport.");
@@ -268,7 +263,7 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 			delete saved.apiKey;
 			delete saved.sshHost;
 			delete saved.api;
-			saveConfig(saved);
+			persist(saved);
 			log(`Saved ${info.label} configuration to ${configPath()}. Credentials remain with the official CLI.`);
 			log("For optional proactive task suggestions, run rein autonomy init, then rein autonomy scan and rein autonomy tui.");
 			return 0;
@@ -352,7 +347,7 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 		delete saved.sshHost;
 		if (sshHost) saved.sshHost = sshHost;
 		if (saveKey) saved.apiKey = saveKey;
-		saveConfig(saved);
+		persist(saved);
 		log(`Chat Completions connection passed: ${result.detail}\nPOST ${baseUrl.replace(/\/$/, "")}/chat/completions\nSaved ${provider}/${model} at ${baseUrl} to ${configPath()}.`);
 		if (key && !saveKey) log(`Using credentials from the environment; no API key was written to config.`);
 		log("For optional proactive task suggestions, run rein autonomy init, then rein autonomy scan and rein autonomy tui.");

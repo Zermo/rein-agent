@@ -12,9 +12,7 @@
  * Anything OpenAI-compatible works: set REIN_BASE_URL + REIN_MODEL and rein
  * will use it. Config file: ~/.rein/config.json
  */
-import { readFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { readConfig } from "./config.ts";
 import type { Model } from "./types.ts";
 import { discoverServers as probeServers, type DiscoverServersOptions, type DiscoveryDependencies, type DiscoveryEndpoint, type ServerDiscoveryReport } from "./discovery.ts";
 export type { DiscoverServersOptions, DiscoveredServer, ServerDiscoveryReport, DiscoveryStatus, DiscoverySource } from "./discovery.ts";
@@ -118,6 +116,10 @@ export interface ReinConfig {
 	model?: string;
 	temperature?: number;
 	maxTokens?: number;
+	/** Model calls per foreground prompt (including retries). */
+	maxTurns?: number;
+	/** Experiment/improve rounds; each round has its own turn budget. */
+	maxIterations?: number;
 	repeatToolLimit?: number;
 	toolsMode?: "native" | "text" | "auto";
 	contextWindow?: number;
@@ -164,16 +166,7 @@ function scopedApiKeyFor(provider?: string, baseUrl?: string, sshHost?: string, 
 }
 
 export function loadConfig(): ReinConfig {
-	const path = join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json");
-	try {
-		if (existsSync(path)) {
-			const parsed = JSON.parse(readFileSync(path, "utf8"));
-			return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ReinConfig : {};
-		}
-	} catch {
-		// bad config file: ignore (reported by `rein doctor` if we add one)
-	}
-	return {};
+	return readConfig() as ReinConfig;
 }
 
 /**

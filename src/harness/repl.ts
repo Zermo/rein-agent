@@ -11,6 +11,7 @@
 import * as readline from "node:readline";
 import { branchSession, createSession, listSessions } from "../agent/session.ts";
 import type { AgentEvent, AgentMessage } from "../agent/agent-loop.ts";
+import { DEFAULT_MAX_TURNS } from "../agent/budgets.ts";
 import { dim, gray, red, yellow, bold } from "../util/ansi.ts";
 import type { Runner } from "./runner.ts";
 import type { AgentTool } from "../agent/agent-loop.ts";
@@ -47,6 +48,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		console.log(gray("nodeterm node detected — status badges on; approvals can be answered from the canvas or the phone."));
 	}
 	console.log(gray("Replies, tools, approvals and activity stay here. /activity shows recent steps; /help lists commands."));
+	console.log(gray(`Turn budget: ${runner.maxTurns ?? DEFAULT_MAX_TURNS} model turns per request. At a pause, reply "continue". Change future launches with rein setup budgets or --max-turns <n>.`));
 
 	let lastProposalAlert = "";
 	const proposalAlert = () => {
@@ -113,6 +115,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 						"  /autonomy pause|resume  control background work",
 						"  /new-context [handoff]  start a fresh window in this session",
 						"  /quit            exit",
+						`  Turn budget: ${runner.maxTurns ?? DEFAULT_MAX_TURNS}. Paused work stays in this session; reply "continue" to resume.`,
+						"  rein setup budgets changes defaults for future launches; --max-turns <n> overrides one launch.",
 					].join("\n"),
 				);
 				return true;
@@ -123,7 +127,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 					"RESULT / OPINION / CHOICE / CHANGE / EDIT: explicitly agent-labeled purpose, not confidence or verification.",
 					"TOOL READ / WRITE / EDIT / EXEC / WEB / REVIEW / SKILL / CONTEXT / CHECK: known tool action; CALL means unclassified.",
 					"Matching call numbers connect tool starts and results. A done tool is not proof that the whole task succeeded.",
-					"COMPLETE: the reply ended. HANDOFF: tools requested. ERROR / CANCELED / LIMIT: the reply stopped early.",
+					"COMPLETE: the reply ended. HANDOFF: tools requested. PAUSED: turn budget reached; reply continue. ERROR / CANCELED / LIMIT: the reply stopped early.",
 					"REASONING: tokens reported by the provider, when available. Token count and run time do not measure thinking strength or confidence. Effort is not reported by this adapter.",
 				].join("\n"));
 				return true;

@@ -4,7 +4,7 @@
  *   fixed budget per iteration
  *   one metric, parsed from the metric command's output
  *   keep (better) / discard (not better) with git
- *   never stop — iterate until --max or the user hits Ctrl-C
+ *   iterate within the configured turn and iteration budgets
  *
  * Setup in the project:
  *   TASK.md    — what to improve, written so an agent can act on it
@@ -19,12 +19,36 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { dim, gray, green, red, yellow, bold } from "../util/ansi.ts";
 import { createRunner } from "./runner.ts";
-import type { RunnerOptions } from "./runner.ts";
+import type { Runner, RunnerOptions } from "./runner.ts";
+import type { Message } from "../ai/types.ts";
+import { loadConfig } from "../ai/models.ts";
+import { resolveRunBudgets } from "./run-budgets.ts";
 
 export interface LoopOptions extends RunnerOptions {
 	taskFile?: string;
 	metricFile?: string;
 	maxIterations?: number;
+}
+export type IterationRunner = Pick<Runner, "model" | "run"> & Partial<Pick<Runner, "saveSession">>;
+export interface LoopDependencies { createRunner?: (options: RunnerOptions) => Promise<IterationRunner> }
+
+/** A turn cap, truncated reply or missing result is never a verified iteration. */
+export function incompleteRunReason(messages: Message[]): string | undefined {
+	const last = messages.filter(message => message.role === "assistant").at(-1);
+	if (!last) return "no assistant result was returned";
+	if (last.stopReason !== "stop") return `${last.stopReason}: ${last.errorMessage || "the model did not finish this iteration"}`;
+	return undefined;
+}
+
+/** Save the full conversation before leaving incomplete edits for review. */
+export function checkpointIncompleteRun(runner: Pick<IterationRunner, "saveSession">): string {
+	if (!runner.saveSession) return "Review the current files before continuing.";
+	try {
+		const id = runner.saveSession();
+		return `Conversation saved. Run rein --resume ${id} from the target repository shown above to inspect unfinished work in chat before restarting the loop.`;
+	} catch (error) {
+		return `Conversation could not be saved: ${(error as Error).message}. Review the current files before continuing.`;
+	}
 }
 
 function sh(cmd: string, cwd: string): string {
@@ -80,8 +104,9 @@ export function recordLesson(cwd: string, text: string, commitMessage: string): 
 	execFileSync("git", ["commit", "-m", commitMessage], { cwd, stdio: "ignore" });
 }
 
-export async function runExperimentLoop(opts: LoopOptions): Promise<void> {
+export async function runExperimentLoop(opts: LoopOptions, dependencies: LoopDependencies = {}): Promise<void> {
 	const cwd = opts.cwd ?? process.cwd();
+	const { maxTurns, maxIterations: maxIters } = resolveRunBudgets(loadConfig(), opts);
 	const taskFile = opts.taskFile ?? "TASK.md";
 	const metricFile = opts.metricFile ?? "METRIC.md";
 	const taskPath = join(cwd, taskFile);
@@ -100,7 +125,6 @@ export async function runExperimentLoop(opts: LoopOptions): Promise<void> {
 	if (!metricCmd) throw new Error("METRIC.md has no metric command");
 	requireCleanGit(cwd);
 	const useGit = true;
-	const maxIters = opts.maxIterations ?? 10;
 
 	// Baseline metric
 	const runMetric = (): number | undefined => {
@@ -113,11 +137,11 @@ export async function runExperimentLoop(opts: LoopOptions): Promise<void> {
 		}
 	};
 
-	const runner = await createRunner({ ...opts, cwd, maxTurns: 40 });
+	const runner = await (dependencies.createRunner ?? createRunner)({ ...opts, cwd, maxTurns });
 	let best = runMetric();
 	console.log(
 		gray(
-			`rein loop · ${cwd}\nmodel: ${runner.model.provider}/${runner.model.id}\nbaseline METRIC=${best ?? "n/a"} · max ${maxIters} iterations · ${useGit ? "git keep/discard" : "no git"}\n`,
+			`rein loop · ${cwd}\nmodel: ${runner.model.provider}/${runner.model.id}\nbaseline METRIC=${best ?? "n/a"} · max ${maxIters} iterations, ${maxTurns} model turns per iteration · ${useGit ? "git keep/discard" : "no git"}\n`,
 		),
 	);
 
@@ -140,22 +164,29 @@ Rules:
 	let kept = 0;
 	let discarded = 0;
 	let stale = 0;
+	let stop = "iteration limit reached; goal completion is unverified";
+	let feedback = "";
 	for (let i = 0; i < maxIters; i++) {
 		const head = sh("git rev-parse HEAD", cwd);
 		const tag = randomUUID().slice(0, 8);
 		console.log(`\n${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
 		try {
-			await runner.run({ role: "user", content: i === 0 ? prompt : "Next iteration: one more improvement, different angle. If nothing better is plausible, say RESULT: no-change and stop.", timestamp: Date.now() });
+			const next = `${feedback}\nCurrent task: ${task.slice(0, 1000)}\nNext iteration: one concrete improvement, different angle. Inspect current files; discarded experiments are no longer in the tree. Do not change the metric or manipulate Git. If nothing better is plausible, say RESULT: no-change and stop.`;
+			const messages = await runner.run({ role: "user", content: i === 0 ? prompt : next, timestamp: Date.now() });
+			const incomplete = incompleteRunReason(messages);
+			if (incomplete) throw new Error(incomplete);
 		} catch (err) {
-			console.log(red(`run failed: ${(err as Error).message}`));
+			throw new Error(`Experiment paused: ${(err as Error).message}. Current work was preserved without keep/discard or a success commit. ${checkpointIncompleteRun(runner)}`);
 		}
 
 		if (sh("git rev-parse HEAD", cwd) !== head) throw new Error("Agent changed Git HEAD; stopping without discarding or committing additional work");
 		const dirty = useGit ? sh("git status --porcelain", cwd) : "";
 		if (!dirty) {
+			feedback = "Harness verification: the previous iteration made no file changes.";
 			console.log(gray(`${dim(tag)}: no changes made`));
 			if (++stale >= 3) {
 				console.log(gray("three iterations without changes — stopping"));
+				stop = "stopped after three iterations without changes; goal completion is unverified";
 				break;
 			}
 			continue;
@@ -165,6 +196,7 @@ Rules:
 		const metric = runMetric();
 		if (sh("git rev-parse HEAD", cwd) !== head) throw new Error("Metric command changed Git HEAD; stopping without further changes");
 		if (metric === undefined) {
+			feedback = "Harness verification: the metric failed or was invalid; the previous experiment was discarded and its edits are absent.";
 			console.log(yellow(`${dim(tag)}: metric could not be parsed — discarding`));
 			if (useGit) discardIteration(cwd, head);
 			discarded++;
@@ -172,18 +204,20 @@ Rules:
 		}
 
 		if (best === undefined || metric > best) {
+			feedback = `Harness verification: METRIC=${metric}; the previous experiment was kept and committed.`;
 			best = metric;
 			if (useGit) sh(`git add -A && git commit -m "loop: ${tag} METRIC=${metric}"`, cwd);
 			kept++;
 			console.log(green(`${dim(tag)}: METRIC ${metric} (new best) — kept${useGit ? " · committed" : ""}`));
 		} else {
+			feedback = `Harness verification: METRIC=${metric} did not improve on ${best}; the previous experiment was discarded and its edits are absent.`;
 			if (useGit) discardIteration(cwd, head);
 			discarded++;
 			console.log(gray(`${dim(tag)}: METRIC ${metric} (best was ${best}) — discarded`));
 		}
 	}
 
-	const summary = `\nloop complete: best METRIC=${best ?? "n/a"} · ${kept} kept · ${discarded} discarded`;
+	const summary = `\nloop stopped: ${stop} · best METRIC=${best ?? "n/a"} · ${kept} kept · ${discarded} discarded`;
 	console.log(bold(summary));
 	recordLesson(cwd, `- [loop ${new Date().toISOString().slice(0, 10)}] ${summary.trim()}`, "loop: record experiment results");
 }

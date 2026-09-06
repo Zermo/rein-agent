@@ -21,10 +21,13 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { dim, gray, green, red, yellow, bold } from "../util/ansi.ts";
-import { requireCleanGit, discardIteration, recordLesson } from "./loop.ts";
+import { requireCleanGit, discardIteration, recordLesson, incompleteRunReason, checkpointIncompleteRun } from "./loop.ts";
+import type { IterationRunner } from "./loop.ts";
 import { createRunner } from "./runner.ts";
 import { buildImprovePrompt } from "./system-prompt.ts";
 import type { RunnerOptions } from "./runner.ts";
+import { loadConfig } from "../ai/models.ts";
+import { resolveRunBudgets } from "./run-budgets.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Layout-agnostic repo root: <root>/src/harness when run from source, <root>/dist
@@ -37,6 +40,12 @@ export interface ImproveOptions extends RunnerOptions {
 	goal?: string;
 	maxIterations?: number;
 	dryRun?: boolean;
+}
+export interface ImproveDependencies {
+	/** Test-only target override; never read from configuration or CLI flags. */
+	repoDir?: string;
+	createRunner?: (options: RunnerOptions) => Promise<IterationRunner>;
+	runTests?: typeof runHarnessTests;
 }
 
 function sh(cmd: string, cwd: string): string {
@@ -70,24 +79,24 @@ function harnessLessons(repoDir: string): string {
 	return m?.[1]?.trim() ?? "";
 }
 
-export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
-	const repoDir = REIN_REPO;
-	const maxIters = opts.maxIterations ?? 5;
+export async function runImproveLoop(opts: ImproveOptions, dependencies: ImproveDependencies = {}): Promise<void> {
+	const repoDir = dependencies.repoDir ?? REIN_REPO;
+	const { maxTurns, maxIterations: maxIters } = resolveRunBudgets(loadConfig(), opts);
 	const goal = opts.goal ?? "";
-	if (opts.dryRun) { console.log(`rein improve dry run: target ${repoDir}, up to ${maxIters} iterations; no changes made`); return; }
+	if (opts.dryRun) { console.log(`rein improve dry run: target ${repoDir}, up to ${maxIters} iterations and ${maxTurns} model turns per iteration; no changes made`); return; }
 	requireCleanGit(repoDir);
 	const useGit = true;
 
-	const runner = await createRunner({
+	const runner = await (dependencies.createRunner ?? createRunner)({
 		...opts,
 		cwd: repoDir,
 		systemPrompt: buildImprovePrompt(repoDir),
-		maxTurns: 40,
+		maxTurns,
 	});
 
 	console.log(
 		gray(
-			`rein improve · target: ${repoDir}\nmodel: ${runner.model.provider}/${runner.model.id} · max ${maxIters} iterations · ${useGit ? "git keep/discard" : "no git"}\n`,
+			`rein improve · target: ${repoDir}\nmodel: ${runner.model.provider}/${runner.model.id} · max ${maxIters} iterations, ${maxTurns} model turns per iteration · ${useGit ? "git keep/discard" : "no git"}\n`,
 		),
 	);
 
@@ -100,6 +109,8 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 
 	let iterations = 0;
 	let improved = 0;
+	let stop = "iteration limit reached; goal completion is unverified";
+	let feedback = "";
 
 	while (iterations < maxIters) {
 		iterations++;
@@ -110,12 +121,14 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 		const prompt =
 			iterations === 1
 				? queueText + "\n\nDo not commit, reset, stage, or switch Git branches; the harness owns keep/discard. Pick the single most concrete weakness and fix it with the smallest change that works. Then run npm test and report the result as: RESULT: improved | no-change | failed"
-				: "Continue: pick the next concrete weakness (not the one you just fixed). Same rules. Do not commit, reset, stage, or switch Git branches. Report as: RESULT: improved | no-change | failed";
+				: `${feedback}\nCurrent goal: ${goal.slice(0, 1000) || "Work through concrete harness weaknesses in LESSONS.md."}\nContinue: pick the next concrete weakness. Inspect current files; discarded edits are no longer present. Do not commit, reset, stage, or switch Git branches. Report as: RESULT: improved | no-change | failed`;
 
 		let outcome: "improved" | "no-change" | "failed" = "failed";
 		let report = "";
 		try {
 			const messages = await runner.run({ role: "user", content: prompt, timestamp: Date.now() });
+			const incomplete = incompleteRunReason(messages);
+			if (incomplete) throw new Error(incomplete);
 			const lastText = messages
 				.filter((m) => m.role === "assistant")
 				.at(-1)
@@ -126,8 +139,7 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 			if (/RESULT:\s*improved/i.test(report)) outcome = "improved";
 			else if (/RESULT:\s*no-change/i.test(report)) outcome = "no-change";
 		} catch (err) {
-			console.log(red(`run failed: ${(err as Error).message}`));
-			outcome = "failed";
+			throw new Error(`Improvement paused: ${(err as Error).message}. Current work was preserved without keep/discard or a success commit. ${checkpointIncompleteRun(runner)}`);
 		}
 
 		// Verify independently of what the model claims (autoresearch's rule:
@@ -136,14 +148,16 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 		const dirty = useGit ? sh("git status --porcelain", repoDir) : "unknown";
 		if (outcome === "improved") {
 			if (!useGit || (dirty && dirty.length > 0)) {
-				const test = runHarnessTests(repoDir);
+				const test = (dependencies.runTests ?? runHarnessTests)(repoDir);
 				if (sh("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
 				if (test.pass) {
 					appendFileSync(join(repoDir, "LESSONS.md"), `\n- [improve ${tag}] fixed: ${firstLine(report)}\n`);
 					if (useGit) sh(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
 					improved++;
+					feedback = "Harness verification: the complete test suite passed; the previous improvement was kept and committed.";
 					console.log(green(`kept ${dim(tag)} — test suite passed${useGit ? " · committed" : ""}`));
 				} else {
+					feedback = `Harness verification: the complete test suite failed; the previous experiment was discarded and its edits are absent. Last test output: ${test.output.slice(-600)}`;
 					if (useGit) discardIteration(repoDir, head);
 					console.log(red(`discarded ${dim(tag)} — test suite failed`));
 					console.log(dim(test.output.slice(-600)));
@@ -154,20 +168,23 @@ export async function runImproveLoop(opts: ImproveOptions): Promise<void> {
 				outcome = "no-change";
 			}
 		} else if (outcome === "no-change") {
+			feedback = "Harness verification: no change was kept.";
 			if (useGit && dirty) discardIteration(repoDir, head);
 			console.log(gray(`${dim(tag)}: no change worth making — ${firstLine(report) || "no report"}`));
 		} else {
+			feedback = "Harness verification: the previous experiment failed and was discarded; its edits are absent.";
 			if (useGit) discardIteration(repoDir, head);
 			console.log(red(`${dim(tag)}: failed — ${firstLine(report) || (report ? report.slice(0, 120) : "no report")}`));
 		}
 
 		if (outcome === "no-change") {
 			console.log(gray("agent found nothing more to improve — stopping"));
+			stop = "agent reported no further improvement; goal completion is unverified";
 			break;
 		}
 	}
 
-	console.log(`\n${bold("done")}: ${improved} improvement(s) kept out of ${iterations} iteration(s)`);
+	console.log(`\n${bold("improve stopped")}: ${stop}; ${improved} improvement(s) kept out of ${iterations} iteration(s)`);
 }
 
 function firstLine(text: string): string {

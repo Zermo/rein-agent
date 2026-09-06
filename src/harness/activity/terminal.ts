@@ -12,7 +12,7 @@ export function renderActivity(snapshot: ActivitySnapshot | undefined, selected?
 	const count = Math.max(2, Math.floor((rows - 9) / 2));
 	const first = Math.max(0, index - count + 1);
 	for (const node of nodes.slice(first, first + count)) {
-		const mark = node.status === "running" ? "●" : node.status === "done" ? "✓" : "!";
+		const mark = node.status === "running" ? "●" : node.status === "done" ? "✓" : node.status === "paused" ? "Ⅱ" : "!";
 		lines.push(`${node.id === nodes[index]?.id ? "›" : " "} ${node.kind === "tool" ? "  ├─" : "└─"} ${mark} #${node.id} ${node.kind === "tool" ? "TOOL " : node.kind === "request" ? "OPERATOR " : "REIN "}${node.title}${node.path ? " · " + node.path : ""}`);
 	}
 	const node = nodes[index];

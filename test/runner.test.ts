@@ -183,6 +183,37 @@ test("provider overflow retries one fresh window and never resends failed assist
 	assert.equal(loadSession(id).messages.filter(m => m.role === "assistant" && m.stopReason === "error").length, 1);
 }));
 
+test("final-turn overflow pause carries the completed batch through a fresh runner resume", async (t) => isolated(async directory => {
+	const bodies: any[] = [];
+	t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+		bodies.push(JSON.parse(init.body as string));
+		if (bodies.length === 1) return call("completed_step");
+		if (bodies.length === 2) return Response.json({ error: { message: "context_length_exceeded: maximum context reached" } }, { status: 400 });
+		return reply("Resumed after the saved result.");
+	});
+	let executions = 0;
+	const tools = [{ name: "completed_step", description: "fixture", parameters: { type: "object" }, execute: async () => { executions++; return { content: "COMPLETED_RESULT_BEFORE_OVERFLOW" }; } }];
+	const options = { ...defaults, cwd: directory, contextWindow: 8000, toolsMode: "native" as const, tools, autoContext: true, maxTurns: 2 };
+	const id = createSession({ cwd: directory }), first = await createRunner({ ...options, sessionId: id });
+	const messages = await first.run(user("ORIGINAL_BUDGET_TASK"));
+	assert.equal((messages.at(-1) as any).stopReason, "budget"); assert.equal(executions, 1);
+	const repaired = loadSession(id);
+	assert.equal(repaired.window?.reason, "overflow"); assert.match(repaired.window?.handoff ?? "", /COMPLETED_RESULT_BEFORE_OVERFLOW/);
+	const resultRecord = repaired.messages.find(message => message.role === "toolResult")!;
+	// Reopening twice also must not replace original evidence with a nested
+	// recovery window or lose it because the first resume advanced the boundary.
+	await createRunner({ ...options, sessionId: id });
+	const resumed = await createRunner({ ...options, sessionId: id });
+	const handoff = loadSession(id).window?.handoff ?? "";
+	assert.match(handoff, /ORIGINAL_BUDGET_TASK/); assert.match(handoff, /COMPLETED_RESULT_BEFORE_OVERFLOW/);
+	assert.ok(handoff.includes(resultRecord.id)); assert.equal(handoff.split("Automatic context rollover recovery record").length - 1, 1); assert.ok(handoff.length <= 20_000);
+	await resumed.run(user("continue"));
+	assert.equal(executions, 1, "resumption must not replay the completed tool");
+	assert.match(JSON.stringify(bodies.at(-1).messages), /COMPLETED_RESULT_BEFORE_OVERFLOW/);
+	assert.doesNotMatch(JSON.stringify(bodies.at(-1).messages), /context_length_exceeded/);
+	assert.equal(bodies.at(-1).messages.at(-1).content, "continue");
+}));
+
 test("automatic tool fallback still activates for missing required arguments", async (t) => isolated(async () => {
 	const bodies: any[] = [];
 	t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {

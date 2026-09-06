@@ -73,7 +73,8 @@ Usage:
   rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
-  rein setup                    work style → model → follow-ups → first task
+  rein setup                    work style → limits → model → follow-ups → first task
+  rein setup budgets            turn/iteration limits, offline; --status or --json shows effective settings
   rein setup profile            communication preferences and optional workflows, offline
   rein setup --connection-only  provider → login/key → model → connection test
                                 saves $REIN_HOME/config.json (default ~/.rein)
@@ -107,12 +108,12 @@ Options:
   --activity <id>                record a private activity view under a fresh UUID
   --device-auth=false             login/setup: browser callback instead of device code
   --tools <auto|native|text>       tool protocol (auto = capability table + runtime fallback)
-  --max-turns <n>                  safety cap per prompt (default 60)
+  --max-turns <n>                  model calls per prompt (saved config, default 300; maximum 10000)
   --temperature <t>                sampling temperature
   --context-window <n>             model context window in tokens
   --reserve-tokens <n>             tokens reserved before rollover
   --no-auto-context                disable automatic context rollover
-  --max-iterations <n>             loop/improve: max iterations
+  --max-iterations <n>             loop/improve rounds (saved config, default 25; maximum 1000)
   --task-file <f>                  loop: task file (default TASK.md)
   --metric-file <f>                loop: metric file (default METRIC.md)
   --resume <id>                    resume a session (REPL)
@@ -216,6 +217,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	if (_[0] === "profile" || _[0] === "setup" && _[1] === "profile") {
 		const { profileCommand } = await import("./harness/onboarding.ts");
 		await profileCommand(_[0] === "profile" ? _.slice(1) : ["setup", ..._.slice(2)], flags); return;
+	}
+
+	if (_[0] === "setup" && _[1] === "budgets") {
+		const allowed = new Set(["yes", "status", "json", "max-turns", "max-iterations"]);
+		if (_.length !== 2 || Object.keys(flags).some(key => !allowed.has(key))) throw new Error("Usage: rein setup budgets [--status|--json|--yes] [--max-turns <n>] [--max-iterations <n>]");
+		const { runBudgetSetup } = await import("./harness/budget-setup.ts");
+		await runBudgetSetup({ yes: flags.yes === true, status: flags.status === true, json: flags.json === true,
+			maxTurns: numberFlag(flags, "max-turns", 1), maxIterations: numberFlag(flags, "max-iterations", 1) });
+		return;
 	}
 
 	if (flags.tools !== undefined && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
@@ -358,6 +368,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 			...common,
 			file: typeof flags.file === "string" ? flags.file : undefined,
 			improve: "improve" in flags && flags.improve !== "false",
+			maxIterations,
 			improveGoal: typeof flags.improve === "string" ? flags.improve : undefined,
 			init: flags.init === true || _[1] === "init",
 			silent: flags.silent !== false,
@@ -378,7 +389,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	}
 
 	if (_[0] === "setup") {
-		if (_.length !== 1) throw new Error("Usage: rein setup [profile] [--connection-only|--yes|--status]");
+		if (_.length !== 1) throw new Error("Usage: rein setup [profile|budgets] [--connection-only|--yes|--status]");
 		const auth = stringFlag(flags, "auth");
 		if (auth !== undefined && auth !== "api-key" && auth !== "cli") throw new Error("--auth must be api-key or cli");
 		const cliProvider = stringFlag(flags, "cli-provider");
@@ -387,7 +398,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		const { runOnboarding } = await import("./harness/onboarding.ts");
 		const setup = flags["connection-only"] === true || flags.yes === true || flags.status === true ? runSetup : runOnboarding;
 		const code = await setup({ ...discoveryFlags(flags), yes: flags.yes === true, status: flags.status === true,
-			api: common.api,
+			api: common.api, maxTurns: common.maxTurns, maxIterations,
 			provider: common.providerOverride, baseUrl: common.baseUrlOverride, model: common.modelOverride,
 			sshHost: common.sshHostOverride, auth, cliProvider, deviceAuth: flags["device-auth"] !== false, noBrowser: flags["no-browser"] === true });
 		process.exitCode = code;
@@ -420,7 +431,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		await runImproveLoop({
 			...common,
 			goal: goal || undefined,
-			maxIterations: maxIterations ?? 5,
+			maxIterations: maxIterations,
 		});
 		return;
 	}

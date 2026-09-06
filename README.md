@@ -197,6 +197,43 @@ be installed explicitly; approved tasks use the main model with their own
 budgets. See [background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
 and the [operator-profile walkthrough](https://github.com/Zermo/rein-agent/wiki/Operator-profile).
 
+### Give tasks enough room to finish
+
+Guided setup now runs through work preferences, task limits, model connection,
+optional follow-ups, and a first task. The default limits are 300 model turns
+per prompt and 25 iterations for `rein loop` or `rein improve`. One turn is one
+model call, including retries. One iteration is a loop round that can use
+several turns. Ordinary chat uses only the turn limit.
+
+```sh
+rein setup budgets                  # offline wizard; review, change, or skip
+rein setup budgets --status         # current limits and actual config path
+rein setup budgets --json           # the same read-only report as JSON
+rein setup budgets --yes --max-turns 750 --max-iterations 40
+rein --max-turns 1000                # override for this launch
+```
+
+The wizard offers standard 300/25, extended 1000/100, short 100/10, or exact
+limits. Existing settings appear as the keep-current choice. Saved top-level
+`maxTurns` and `maxIterations` values live in `~/.rein/config.json`, or your
+custom `$REIN_HOME`. Launch flags take priority over saved values. Valid ranges
+are 1 to 10,000 turns and 1 to 1,000 iterations. Longer runs can use more model
+resources or cloud allowance; they do not increase the context window or the
+per-response output limit.
+
+At the turn limit, Rein marks the task `PAUSED` and preserves completed tool
+results. Review the progress, then reply `continue` for another turn budget.
+One-shot `-p` mode saves a resumable session even without `--save`, prints the
+resume command, and exits with code 3. This pause does not mean the task is
+finished. Foreground chat has no fixed overall time cutoff. Background autonomy
+retains its separate execution budgets.
+
+Posthorse can roll a long task into fresh context windows while keeping notes
+and exact history available. The agent still needs to verify live state and
+test its work. More turns cannot guarantee correctness. See
+[task limits](https://github.com/Zermo/rein-agent/wiki/Task-limits) for presets,
+resuming work, and the distinction between turns, context, and output tokens.
+
 ## Usage
 
 ```
@@ -209,15 +246,16 @@ rein-agent models             what rein can see: local servers + provider preset
 rein skills [name]            bundled workflows and enabled profile-pack skills
 rein debug <folder> [--json]  offline exported-session diagnostics (counts only)
 rein update                   download and install the latest published build
-rein --visual                 split chat and live activity; press c in the activity pane for the canvas
+rein --visual                 explicitly split chat and live activity in tmux
 rein meat --working-tree      review tracked changes with the embedded Meat engine
 rein tmux start               start a persistent bash shell
 rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
 rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
 rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
-rein setup                    guided work profile, model connection, and first task
+rein setup                    work preferences, task limits, model, follow-ups, first task
 rein setup --connection-only  change only the model connection
 rein setup profile            offline work-style wizard; review and choose a pack
+rein setup budgets            offline task limits; also --status or --json
 rein profile                  view your profile (also: --json, setup, pack <name>)
 rein login codex|copilot       official browser/device account sign-in
 rein --version                print version
@@ -578,7 +616,8 @@ leave room for the prompt, tools, and recovery state. CLI overrides are
 Manual `/new-context [handoff]` and the `new_context` tool remain available when
 automatic rollover is disabled. `/context` prints the current budget.
 
-Sessions persist incrementally in the REPL and with `-p --save`. Reopening a
+Sessions persist incrementally in the REPL and with `-p --save`. A one-shot run
+that reaches its turn budget also saves a session automatically. Reopening a
 non-empty session creates a fresh resume window: it retains the full archived
 transcript in `history`, then layers the current Git checkpoint, a squashed diff
 since that session's checkpoint, the newest peer-session handoff, and
@@ -692,7 +731,7 @@ The loop (autoresearch's keep/discard, pointed at rein's own source):
 2. one concrete weakness → smallest fix
 3. run `npm test`, including the smoke and regression suites
 4. pass → commit the change and lesson · fail → discard the experiment and commit its lesson
-5. repeat until `--max-iterations` (default 5) or the agent says no-change
+5. repeat until `--max-iterations` (saved setting, default 25) or the agent says no-change
 
 Two things make it a *system* rather than a one-off: the system prompt tells
 every agent to append durable learnings to `LESSONS.md` (shared memory across

@@ -54,6 +54,16 @@ test("activity bounds history and terminal output, and marks interrupted nodes c
 	assert.throws(() => activityFile("../../secret"), /activity ID/);
 }));
 
+test("activity retains an explicit paused state until the next run", async () => isolated(async cwd => {
+	const id = newActivityId(), journal = new ActivityJournal(id, cwd);
+	const message: any = { role: "assistant", content: [], stopReason: "budget", budget: { kind: "turns", limit: 300, used: 300 }, model: "fixture", provider: "fixture", usage: { input: 0, output: 0, totalTokens: 0 }, timestamp: Date.now() };
+	journal.event({ type: "agent_start" }); journal.event({ type: "message_start", message }); journal.event({ type: "message_end", message }); journal.event({ type: "agent_pause", reason: "turn-budget", limit: 300, used: 300 }); journal.event({ type: "agent_end", messages: [message] }); journal.end();
+	const snapshot = readActivity(id)!;
+	assert.equal(snapshot.state, "paused"); assert.equal(snapshot.nodes.at(-1)?.status, "paused");
+	assert.match(renderActivity(snapshot), /paused/); assert.match(snapshot.nodes.at(-1)!.detail, /Reply "continue"/);
+	journal.event({ type: "agent_start" }); journal.flush(); assert.equal(readActivity(id)!.state, "working"); journal.end(true);
+}));
+
 test("canvas serves only this activity with a local capability token and same-origin checks", async () => isolated(async cwd => {
 	const journal = new ActivityJournal(newActivityId(), cwd);
 	journal.event({ type: "message_end", message: { role: "user", content: "<script>malicious()</script>", timestamp: Date.now() } }); journal.flush();

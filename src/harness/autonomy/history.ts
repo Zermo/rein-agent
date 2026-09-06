@@ -132,7 +132,7 @@ export function collectAutonomyEvidence(workspaces: string[], options: { maxChar
 		const created = Number.isFinite(parsedCreated) ? parsedCreated : 0;
 		for (const entry of session.entries) {
 			if (entry.role !== "user" && entry.role !== "assistant") continue;
-			if (entry.role === "assistant" && (entry.stopReason === "error" || entry.stopReason === "aborted")) continue;
+			if (entry.role === "assistant" && ["error", "aborted", "budget"].includes(entry.stopReason)) continue;
 			const raw = entry.role === "user" ? entry.content : Array.isArray(entry.content) ? entry.content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n") : undefined;
 			if (typeof raw !== "string" || /^\s*\[(?:posthorse|rein persistent workspace overlay)/i.test(raw)) continue;
 			const text = redact(raw).slice(0, 1400);

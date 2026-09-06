@@ -65,6 +65,17 @@ try {
   const help = await runCli(["--help"]);
   assert.match(help.stdout, /--provider grok/); assert.match(help.stdout, /--provider xai/);
   assert.match(help.stdout, /--discover-network/);
+  const budgetHome = join(dir, "budget-settings");
+  const initialBudgets = await runCli(["setup", "budgets", "--json"], { REIN_HOME: budgetHome });
+  assert.equal(initialBudgets.code, 0, initialBudgets.stdout + initialBudgets.stderr);
+  assert.equal(JSON.parse(initialBudgets.stdout).maxTurns, 300);
+  assert.equal(JSON.parse(initialBudgets.stdout).maxIterations, 25);
+  const budgetSetup = await runCli(["setup", "budgets"], { REIN_HOME: budgetHome }, "4\n450\n35\n");
+  assert.equal(budgetSetup.code, 0, budgetSetup.stdout + budgetSetup.stderr);
+  const savedBudgets = JSON.parse((await runCli(["setup", "budgets", "--json"], { REIN_HOME: budgetHome })).stdout);
+  assert.equal(savedBudgets.maxTurns, 450); assert.equal(savedBudgets.maxIterations, 35);
+  assert.equal(savedBudgets.source.maxTurns, "saved");
+  assert.equal(requests, 2, "The budget wizard runs offline without a model account or discovery.");
   const invalidPort = await runCli(["models", "--discover-ports", "70000"]);
   assert.equal(invalidPort.code, 1); assert.match(invalidPort.stderr, /1 to 65535/);
   const hardware = await runCli(["hardware", "--focus", "everyday", "--json"]);

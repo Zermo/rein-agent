@@ -62,6 +62,14 @@ test("empty, canceled, error, and truncated replies remain visible and labeled",
 	assert.match(f.output(), /reply 04 ◒\]\n\[MESSAGE\]\nunfinished\n\[LIMIT\] Reply reached the output limit/);
 });
 
+test("budget pause is labeled and offers continuation without claiming an error or completion", () => {
+	const f = fixture(); f.view.startRun(); f.start();
+	f.end({ stopReason: "budget", budget: { kind: "turns", limit: 300, used: 300 } }); f.view.finish();
+	assert.match(f.output(), /\[PAUSED\] Paused after 300 model turns/);
+	assert.match(f.output(), /Reply "continue" to resume/);
+	assert.doesNotMatch(f.output(), /\[ERROR\]|\[COMPLETE\]|No text reply/);
+});
+
 test("cancellation before streaming gets an identity and the next reply rotates", () => {
 	const f = fixture();
 	f.view.startRun(); f.view.finish(undefined, true);

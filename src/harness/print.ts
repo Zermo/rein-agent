@@ -7,6 +7,7 @@ import type { AssistantMessage } from "../ai/types.ts";
 import { dim, red } from "../util/ansi.ts";
 import { createRunner } from "./runner.ts";
 import type { RunnerOptions } from "./runner.ts";
+import { budgetPauseText } from "./budget-presentation.ts";
 
 export interface PrintOptions extends RunnerOptions {
 	query?: string;
@@ -42,15 +43,21 @@ export async function runPrint(opts: PrintOptions): Promise<number> {
 		});
 		const last = messages.filter((m) => m.role === "assistant").at(-1) as AssistantMessage | undefined;
 		if (!opts.json) {
-			const text = last?.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
+			const visible = last?.stopReason === "budget" ? messages.filter((m): m is AssistantMessage => m.role === "assistant" && m.content.some(c => c.type === "text" && c.text.trim().length > 0)).at(-1) : last;
+			const text = visible?.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
 			if (text) console.log(text);
 		}
 		if (controller.signal.aborted || last?.stopReason === "aborted") return cancelledCode;
+		if (last?.stopReason === "budget") {
+			const sessionId = runner.saveSession();
+			console.error(`[PAUSED] ${budgetPauseText(last)}\nSession saved. Run: rein --resume ${sessionId}\nSet future defaults with rein setup budgets, or override with --max-turns <n>.`);
+			return 3;
+		}
 		if (last?.stopReason === "error") {
 			console.error(red(last.errorMessage ?? "error"));
 			return 1;
 		}
-		if (!last || last.stopReason === "length" || last.stopReason === "toolUse") {
+		if (!last || last.stopReason !== "stop") {
 			console.error(red("The response ended before completion. Work may be incomplete; check the output budget and last results."));
 			return 1;
 		}

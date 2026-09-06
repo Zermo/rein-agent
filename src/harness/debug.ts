@@ -5,7 +5,7 @@ import { initialDoomLoopState, observeDoomLoop } from "../../vendor/fold/StopCon
 
 export interface DebugCounts {
 	users: number; assistants: number; toolResults: number; toolErrors: number;
-	providerErrors: number; harnessStops: number; aborted: number; emptyReplies: number; lengthStops: number;
+	providerErrors: number; harnessStops: number; budgetPauses: number; aborted: number; emptyReplies: number; lengthStops: number;
 	unauthorizedErrors: number; transportErrors: number; contextWindows: number;
 	nestedRecoveryWindows: number; maxRecoveryDepth: number; repeatedBatches: number;
 	notesPathErrors: number; homePathErrors: number; oversizedToolResults: number;
@@ -15,7 +15,7 @@ export interface DebugCounts {
 export interface DebugReport { version: 1; sessions: number; totals: DebugCounts; perSession: Array<DebugCounts & { session: number }>; }
 
 function emptyCounts(): DebugCounts {
-	return { users: 0, assistants: 0, toolResults: 0, toolErrors: 0, providerErrors: 0, harnessStops: 0, aborted: 0,
+	return { users: 0, assistants: 0, toolResults: 0, toolErrors: 0, providerErrors: 0, harnessStops: 0, budgetPauses: 0, aborted: 0,
 		emptyReplies: 0, lengthStops: 0, unauthorizedErrors: 0, transportErrors: 0, contextWindows: 0,
 		nestedRecoveryWindows: 0, maxRecoveryDepth: 0, repeatedBatches: 0, notesPathErrors: 0,
 		homePathErrors: 0, oversizedToolResults: 0, maxToolResultBytes: 0, maxTurnsPerRequest: 0,
@@ -91,6 +91,7 @@ async function readExport(folder: string): Promise<DebugReport> {
 					}
 				} else if (entry.role === "assistant") {
 					if (!Array.isArray(entry.content)) { counts.malformedRecords++; continue; }
+					if (entry.stopReason === "budget") { counts.budgetPauses++; continue; }
 					counts.assistants++;
 					const error = typeof entry.errorMessage === "string" ? entry.errorMessage : "";
 					if (entry.stopReason === "error" && error.startsWith("Harness stopped:")) { counts.harnessStops++; continue; }
@@ -137,7 +138,7 @@ export function formatDebugReport(report: DebugReport): string {
 		`Rein offline debug report: ${report.sessions} sessions`,
 		"Counts only. No transcript text, paths, credentials, or embedded instructions are emitted or executed.",
 		`Messages: ${c.users} user, ${c.assistants} assistant, ${c.toolResults} tool results (${c.toolErrors} failed).`,
-		`Responses: ${c.providerErrors} provider errors (${c.unauthorizedErrors} HTTP 401, ${c.transportErrors} transport), ${c.harnessStops} harness stops, ${c.aborted} aborted, ${c.emptyReplies} empty successes, ${c.lengthStops} output-limit stops.`,
+		`Responses: ${c.providerErrors} provider errors (${c.unauthorizedErrors} HTTP 401, ${c.transportErrors} transport), ${c.harnessStops} harness stops, ${c.budgetPauses} budget pauses, ${c.aborted} aborted, ${c.emptyReplies} empty successes, ${c.lengthStops} output-limit stops.`,
 		`Recovery: ${c.contextWindows} windows, ${c.nestedRecoveryWindows} nested recovery records, maximum depth ${c.maxRecoveryDepth}.`,
 		`Paths: ${c.notesPathErrors} doubled notes prefixes, ${c.homePathErrors} unexpanded home shortcuts in failed tools.`,
 		`Output: ${c.oversizedToolResults} tool results above 20 KB, largest ${c.maxToolResultBytes} bytes.`,

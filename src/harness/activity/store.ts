@@ -5,15 +5,16 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentEvent } from "../../agent/agent-loop.ts";
 import { terminalText } from "../autonomy/tui.ts";
+import { budgetPauseText } from "../budget-presentation.ts";
 
 export interface ActivityNode {
 	id: string; parent?: string; kind: "request" | "response" | "tool" | "status";
-	title: string; detail: string; status: "running" | "done" | "error" | "cancelled";
+	title: string; detail: string; status: "running" | "done" | "error" | "cancelled" | "paused";
 	started: number; ended?: number; path?: string; input?: string;
 }
 export interface ActivitySnapshot {
 	id: string; cwd: string; sessionId?: string; model?: string; updated: number;
-	state: "working" | "idle" | "error" | "cancelled"; nodes: ActivityNode[]; omitted: number;
+	state: "working" | "idle" | "error" | "cancelled" | "paused"; nodes: ActivityNode[]; omitted: number;
 }
 export const newActivityId = () => randomUUID();
 export function activityFile(id: string): string {
@@ -80,9 +81,9 @@ export class ActivityJournal {
 				const message = event.message;
 				if (message.role === "user") this.finish(this.add("request", "User request", message.content));
 				if (message.role === "assistant" && this.response) {
-					this.response.title = message.stopReason === "toolUse" ? "Tool plan" : "Response";
-					this.response.detail = visible(message.content.filter(part => part.type === "text").map(part => part.text).join("") || (message.stopReason === "toolUse" ? "Requested: " + message.content.filter(part => part.type === "toolCall").map(part => part.name).join(", ") : message.errorMessage ?? "No visible response text."));
-					const status = message.stopReason === "aborted" ? "cancelled" : ["error", "length"].includes(message.stopReason) ? "error" : "done";
+					this.response.title = message.stopReason === "budget" ? "Turn budget paused" : message.stopReason === "toolUse" ? "Tool plan" : "Response";
+					this.response.detail = visible(message.stopReason === "budget" ? budgetPauseText(message) : message.content.filter(part => part.type === "text").map(part => part.text).join("") || (message.stopReason === "toolUse" ? "Requested: " + message.content.filter(part => part.type === "toolCall").map(part => part.name).join(", ") : message.errorMessage ?? "No visible response text."));
+					const status = message.stopReason === "budget" ? "paused" : message.stopReason === "aborted" ? "cancelled" : ["error", "length"].includes(message.stopReason) ? "error" : "done";
 					this.finish(this.response, status);
 					if (status !== "done") this.snapshot.state = status;
 				}

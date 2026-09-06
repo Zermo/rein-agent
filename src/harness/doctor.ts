@@ -16,6 +16,8 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { dim, green, red, yellow } from "../util/ansi.ts";
 import { loadConfig, apiKeyFor, detectEndpoint, guessProvider, normalizeBaseUrl } from "../ai/models.ts";
+import { configPath } from "../ai/config.ts";
+import { resolveRunBudgets } from "./run-budgets.ts";
 import type { ReinConfig } from "../ai/models.ts";
 import { checkCliAuth } from "./auth.ts";
 import { matchCatalog } from "../hardware/catalog.ts";
@@ -164,7 +166,9 @@ export async function checkConfiguredProvider(config: ReinConfig): Promise<Docto
 export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?: boolean } = {}): Promise<DoctorResult> {
 	const checks: DoctorCheck[] = [];
 	const say = (s: string) => { if (!opts.quiet) console.log(s); };
-	const config = loadConfig();
+	let config: ReinConfig = {};
+	let configError: string | undefined;
+	try { config = loadConfig(); } catch (error) { configError = (error as Error).message; }
 
 	// 1. node runtime
 	checks.push(checkNodeRuntime());
@@ -243,9 +247,15 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 	checks.push({
 		name: "config",
 		status: hasConfig ? "ok" : "fail",
-		detail: hasConfig ? `model=${config.model} base=${config.baseUrl}` : "~/.rein/config.json missing or incomplete",
-		fix: hasConfig ? undefined : "rein setup",
+		detail: configError ?? (hasConfig ? `model=${config.model} base=${config.baseUrl}` : `${configPath()} missing or incomplete`),
+		fix: hasConfig ? undefined : configError ? "Repair the config file shown above; it has not been overwritten" : "rein setup",
 	});
+	if (!configError) {
+		try {
+			const budgets = resolveRunBudgets(config);
+			checks.push({ name: "task budgets", status: "ok", detail: `${budgets.maxTurns} model turns per prompt; ${budgets.maxIterations} loop/improve iterations. Settings: ${configPath()}` });
+		} catch (error) { checks.push({ name: "task budgets", status: "fail", detail: (error as Error).message, fix: "rein setup budgets --yes --max-turns 300 --max-iterations 25" }); }
+	}
 
 	// 6. Probe the selected endpoint, including protected APIs and SSH tunnels.
 	if (hasConfig) checks.push(await checkConfiguredProvider(config));
@@ -277,8 +287,8 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 	}
 
 	// 8. config perms
-	const cfgPath = join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json");
-	if (existsSync(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
+	const cfgPath = configPath();
+	if (!configError && existsSync(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
 		const mode = lstatSync(cfgPath).mode & 0o777;
 		checks.push({
 			name: "perms",

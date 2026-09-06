@@ -43,7 +43,7 @@ export interface Usage {
 	reasoning?: number;
 }
 
-export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
+export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "budget";
 
 export interface UserMessage {
 	role: "user";
@@ -58,6 +58,8 @@ export interface AssistantMessage {
 	model: string;
 	usage: Usage;
 	stopReason: StopReason;
+	/** Harness pause metadata; never a provider-generated completion or error. */
+	budget?: { kind: "turns"; limit: number; used: number };
 	errorMessage?: string;
 	timestamp: number;
 }

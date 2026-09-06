@@ -3,6 +3,7 @@
 - [Install](https://github.com/Zermo/rein-agent/wiki/Install)
 - [Background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
 - [Your operator profile](https://github.com/Zermo/rein-agent/wiki/Operator-profile)
+- [Task limits](https://github.com/Zermo/rein-agent/wiki/Task-limits)
 - [Self-hosted models](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models)
 - [Cloud connections](https://github.com/Zermo/rein-agent/wiki/Cloud-connections)
 - [Deploy the field guide](https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide)

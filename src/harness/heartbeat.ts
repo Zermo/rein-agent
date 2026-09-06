@@ -19,8 +19,10 @@ import { bold, cyan, dim, green, red, yellow } from "../util/ansi.ts";
 import { runDoctor } from "./doctor.ts";
 import type { DoctorResult } from "./doctor.ts";
 import { createRunner } from "./runner.ts";
-import type { RunnerOptions } from "./runner.ts";
+import type { Runner, RunnerOptions } from "./runner.ts";
 import { runImproveLoop } from "./improve.ts";
+import { incompleteRunReason } from "./loop.ts";
+import { resolveRunBudgets } from "./run-budgets.ts";
 
 export interface HeartbeatOptions extends RunnerOptions {
 	file?: string;
@@ -29,6 +31,12 @@ export interface HeartbeatOptions extends RunnerOptions {
 	init?: boolean;
 	quiet?: boolean;
 	silent?: boolean;
+	maxIterations?: number;
+}
+export interface HeartbeatDependencies {
+	doctor?: typeof runDoctor;
+	createRunner?: (options: RunnerOptions) => Promise<Pick<Runner, "model" | "run">>;
+	improve?: typeof runImproveLoop;
 }
 
 export const HEARTBEAT_TEMPLATE = `# HEARTBEAT.md — what the agent does on every \`rein heartbeat\`.
@@ -99,8 +107,10 @@ function logBeat(result: HeartbeatResult): string {
 	return path;
 }
 
-export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number> {
+export async function runHeartbeat(opts: HeartbeatOptions = {}, dependencies: HeartbeatDependencies = {}): Promise<number> {
 	const started = Date.now();
+	// Foreground defaults must not silently expand scheduled background work.
+	const budgets = resolveRunBudgets({}, { maxTurns: opts.maxTurns ?? 40, maxIterations: opts.maxIterations ?? 1 });
 	const say = (s: string) => { if (!opts.quiet) console.log(s); };
 
 	// --init: seed a template and stop (always a concrete file — cwd or --file)
@@ -122,7 +132,7 @@ export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number>
 
 	// 1. SELF-HEAL — detect & repair before doing any work
 	say(`\n${bold("1/4 self-heal")}`);
-	const doctor = await runDoctor({ fix: true, quiet: opts.quiet, silent: opts.silent });
+	const doctor = await (dependencies.doctor ?? runDoctor)({ fix: true, quiet: opts.quiet, silent: opts.silent });
 	say(dim(`   doctor: ${doctor.healthy}/${doctor.total} healthy${doctor.fixed.length ? ` (${doctor.fixed.length} repaired)` : ""}`));
 
 	// 2. TASKS — the periodic work
@@ -134,7 +144,7 @@ export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number>
 		say(red(`   ${tasks.length} task(s) queued but no model configured — run: rein setup`));
 		for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
 	} else {
-		const runner = await createRunner({ ...opts, cwd: process.cwd() });
+		const runner = await (dependencies.createRunner ?? createRunner)({ ...opts, cwd: opts.cwd ?? process.cwd(), maxTurns: budgets.maxTurns });
 		for (let i = 0; i < tasks.length; i++) {
 			const line = tasks[i];
 			say(`   ${i + 1}/${tasks.length} ${dim(line.slice(0, 80))}`);
@@ -142,9 +152,9 @@ export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number>
 				const messages = await runner.run({ role: "user", content: line, timestamp: Date.now() });
 				const last = messages.filter((m) => m.role === "assistant").at(-1) as any;
 				const text = (last?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("").trim();
-				const ok = !last || last.stopReason !== "error";
-				results.push({ line, ok, text: text.slice(0, 500), error: last?.stopReason === "error" ? last.errorMessage : undefined });
-				say(ok ? green(`   ✓ ${text.slice(0, 100)}`) : red(`   ✗ ${last?.errorMessage ?? "error"}`));
+				const error = incompleteRunReason(messages), ok = error === undefined;
+				results.push({ line, ok, text: text.slice(0, 500), error });
+				say(ok ? green(`   ✓ ${text.slice(0, 100)}`) : red(`   ✗ ${error}`));
 			} catch (e: any) {
 				results.push({ line, ok: false, text: "", error: e.message?.slice(0, 200) });
 				say(red(`   ✗ ${e.message?.slice(0, 100)}`));
@@ -156,12 +166,14 @@ export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number>
 	say(`\n${bold("3/4 self-advance")}`);
 	const goal = opts.improveGoal ?? (opts.improve ? "pick the weakest part of the harness and improve it" : improveGoal);
 	let improveNote: string | null = null;
+	let improveFailed = false;
 	if (goal) {
 		say(dim(`   goal: ${goal}`));
 		try {
-			await runImproveLoop({ ...opts, cwd: process.cwd(), goal, maxIterations: 1, dryRun: false });
-			improveNote = goal;
+			await (dependencies.improve ?? runImproveLoop)({ ...opts, cwd: opts.cwd ?? process.cwd(), goal, maxTurns: budgets.maxTurns, maxIterations: budgets.maxIterations, dryRun: false });
+			improveNote = `${goal} (bounded improvement pass finished; goal completion not asserted)`;
 		} catch (e: any) {
+			improveFailed = true;
 			improveNote = `${goal} (failed: ${e.message?.slice(0, 80)})`;
 			say(red(`   self-advance failed: ${e.message?.slice(0, 100)}`));
 		}
@@ -179,7 +191,7 @@ export async function runHeartbeat(opts: HeartbeatOptions = {}): Promise<number>
 	});
 	say(`\n${bold("4/4 memory")}` + dim(`   beat logged → ${logPath}`));
 
-	const failed = results.filter((t) => !t.ok).length;
+	const failed = results.filter((t) => !t.ok).length + Number(improveFailed);
 	say(`\n${failed === 0 ? green("beat complete") : red(`beat complete — ${failed} task(s) failed`)} ${dim(`(${((Date.now() - started) / 1000).toFixed(1)}s)`)}`);
 	return failed === 0 ? 0 : 1;
 }

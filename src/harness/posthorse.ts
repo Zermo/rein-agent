@@ -64,7 +64,7 @@ export class Posthorse {
 	record(message: AgentMessage): void {
 		const entry: StoredMessage = { ...message, id: randomUUID() };
 		this.store(entry); this.messages.push(entry);
-		if (message.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted" && Number.isFinite(message.usage?.totalTokens) && message.usage.totalTokens > 0) {
+		if (message.role === "assistant" && !["error", "aborted", "budget"].includes(message.stopReason) && Number.isFinite(message.usage?.totalTokens) && message.usage.totalTokens > 0) {
 			this.usage = { count: this.messages.length, tokens: message.usage.totalTokens, ...(message.usage.cached === undefined ? {} : { cached: message.usage.cached }), windowId: this.windowId };
 		}
 	}
@@ -73,7 +73,7 @@ export class Posthorse {
 	}
 	used(messages: AgentMessage[] = this.messages): number {
 		const estimated = this.overhead() + estimateTokens(this.active(messages));
-		const measured = this.usage?.windowId === this.windowId ? this.usage.tokens + estimateTokens(messages.slice(this.usage.count).filter(message => message.role !== "assistant" || (message.stopReason !== "error" && message.stopReason !== "aborted"))) : 0;
+		const measured = this.usage?.windowId === this.windowId ? this.usage.tokens + estimateTokens(messages.slice(this.usage.count).filter(message => message.role !== "assistant" || !["error", "aborted", "budget"].includes(message.stopReason))) : 0;
 		return Math.max(estimated, measured);
 	}
 	freshLimit(pending: AgentMessage[] = []): number {
@@ -118,12 +118,23 @@ export class Posthorse {
 	private resumeWorkspace(): void {
 		if (!this.cwd) return;
 		try {
-			const overlay = workspaceResumeOverlay(this.cwd, this.workspaceSnapshot, workspaceMemoryRecords(captureWorkspaceSnapshot(this.cwd).scope, this.sessionId), this.freshLimit());
-			if (validWindowStart(this.messages, this.messages.length)) this.rollover(overlay.text, "resume", this.messages.length);
+			const limit = this.freshLimit(), last = this.messages.at(-1);
+			const paused = last?.role === "assistant" && last.stopReason === "budget";
+			// An overlay without a usable continuation would discard the task.
+			// Keep the existing active window when this small context cannot fit both.
+			if (paused && limit < 1024) return;
+			// A budget pause is unfinished work. Carry its recorded request,
+			// checkpoint and pending results into the fresh workspace overlay,
+			// so a plain "continue" has an actual task to resume.
+			const continuation = paused
+				? this.recovery(this.messages, this.messages.length, Math.min(6000, Math.floor(limit / 2)), true) : "";
+			const overlay = workspaceResumeOverlay(this.cwd, this.workspaceSnapshot, workspaceMemoryRecords(captureWorkspaceSnapshot(this.cwd).scope, this.sessionId), limit - continuation.length - (continuation ? 2 : 0));
+			const handoff = overlay.text + (continuation ? `\n\n${continuation}` : "");
+			if (validWindowStart(this.messages, this.messages.length)) this.rollover(handoff, "resume", this.messages.length);
 			else {
 				// Preserve an interrupted tool batch exactly; providerMessages will
 				// make missing results explicit before this overlay is sent.
-				this.record({ role: "user", timestamp: Date.now(), content: overlay.text });
+				this.record({ role: "user", timestamp: Date.now(), content: handoff });
 			}
 			if (!sameWorkspaceState(this.workspaceSnapshot, overlay.snapshot)) this.store(overlay.snapshot);
 			this.workspaceSnapshot = overlay.snapshot;
@@ -133,8 +144,8 @@ export class Posthorse {
 		if (info.newContext) this.rollover(info.newContext.handoff, "tool");
 	}
 	/** A bounded input record, never a generated summary or claim of completed work. */
-	private recovery(messages: AgentMessage[], end: number, limit: number): string {
-		const start = this.window?.start ?? 0;
+	private recovery(messages: AgentMessage[], end: number, limit: number, budgetResume = false): string {
+		const start = budgetResume ? 0 : this.window?.start ?? 0;
 		const candidates: { label: string; text: string }[] = [];
 		// Rebuild from original records, never recursively wrap an automatic
 		// recovery block. Old checkpoints otherwise crowd out current intent.
@@ -144,10 +155,27 @@ export class Posthorse {
 		const checkpoint = this.entries.filter((e): e is ContextWindowEntry => "type" in e && e.type === "context_window" && (e.reason === "tool" || e.reason === "manual") && !!e.handoff).at(-1);
 		if (checkpoint?.handoff) candidates.push({ label: `Explicit checkpoint [${checkpoint.id}], verify before reuse`, text: checkpoint.handoff });
 		// Preserve the latest complete tool batch that no model has yet consumed.
-		let batchStart = end;
-		while (batchStart > start && messages[batchStart - 1].role === "toolResult") batchStart--;
-		if (batchStart < end && batchStart > start && messages[batchStart - 1].role === "assistant") {
-			for (let i = batchStart - 1; i < end; i++) candidates.push({ label: `Unconsumed ${messages[i].role} [${this.messages[i]?.id ?? i}]`, text: messageText(messages[i]) });
+		// A final failed model call can repair its context before a budget pause.
+		// Rebuild across that boundary from original records, skipping failed turns;
+		// copying the automatic window handoff would recursively nest recovery text.
+		let batchEnd = end;
+		while (batchEnd > start) {
+			const last = messages[batchEnd - 1];
+			if (last.role === "user" || last.role === "assistant" && (last.stopReason === "budget" || budgetResume && ["error", "aborted"].includes(last.stopReason))) { batchEnd--; continue; }
+			let batchStart = batchEnd;
+			while (batchStart > start && messages[batchStart - 1].role === "toolResult") batchStart--;
+			const assistant = batchStart > start ? messages[batchStart - 1] : undefined;
+			if (batchStart === batchEnd || assistant?.role !== "assistant") break;
+			if (["error", "aborted", "budget", "pending"].includes(assistant.stopReason)) {
+				if (budgetResume) { batchEnd = batchStart - 1; continue; }
+				break;
+			}
+			const calls = assistant.content.filter(part => part.type === "toolCall");
+			const results = messages.slice(batchStart, batchEnd) as ToolResultMessage[];
+			const complete = calls.length > 0 && calls.length === results.length && new Set(calls.map(call => call.id)).size === calls.length
+				&& calls.every(call => results.some(result => result.toolCallId === call.id && result.toolName === call.name));
+			if (complete) for (let i = batchStart - 1; i < batchEnd; i++) candidates.push({ label: `Unconsumed ${messages[i].role} [${this.messages[i]?.id ?? i}]`, text: messageText(messages[i]) });
+			break;
 		}
 		const preamble = "Automatic context rollover recovery record. These are recorded inputs, not proof of progress. The newest direct user input defines current scope and overrides older plans. Restore notes and use history to recover omitted or truncated entries. Verify live state before stateful or external work.\n";
 		const selected = candidates.slice(0, 20);

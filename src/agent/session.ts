@@ -65,13 +65,13 @@ export function appendEntries(sessionId: string, messages: AgentMessage[]): void
 export function windowMessage(window: ContextWindowEntry): AgentMessage {
 	return { role: "user", timestamp: window.timestamp, content: `[posthorse] Fresh context window ${window.id}. Earlier conversation is in history. Restore notes and verify live state before acting.\n${window.handoff ?? "No handoff supplied. Recover the task from notes and history before continuing."}` };
 }
-/** Failed responses remain in history, but never become provider input. */
+/** Failures and harness pause markers remain in history, but never become provider input. */
 export function providerMessages(messages: AgentMessage[]): AgentMessage[] {
 	const out: AgentMessage[] = [];
 	for (let index = 0; index < messages.length; index++) {
 		const message = messages[index];
 		if (message.role === "toolResult") continue; // Orphaned results cannot be replayed.
-		if (message.role === "assistant" && (message.stopReason === "error" || message.stopReason === "aborted")) continue;
+		if (message.role === "assistant" && ["error", "aborted", "budget"].includes(message.stopReason)) continue;
 		out.push(message);
 		if (message.role !== "assistant") continue;
 		const calls = message.content.filter(part => part.type === "toolCall");
@@ -95,7 +95,7 @@ export function validWindowStart(messages: AgentMessage[], start: number): boole
 	for (const message of messages.slice(0, start)) {
 		// A resumed turn closes an earlier interrupted batch in provider replay.
 		if (message.role !== "toolResult") pending.clear();
-		if (message.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted") {
+		if (message.role === "assistant" && !["error", "aborted", "budget"].includes(message.stopReason)) {
 			for (const part of message.content) if (part.type === "toolCall") pending.add(part.id);
 		} else if (message.role === "toolResult") pending.delete(message.toolCallId);
 	}

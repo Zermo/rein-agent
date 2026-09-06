@@ -53,6 +53,48 @@ test("first oversized completed tool batch rolls safely and keeps recovery refer
 	assert.ok(horse.used() < horse.line);
 });
 
+test("a budget pause preserves the latest complete tool batch through rollover and resume", () => isolated(() => {
+	const horse = controller(), id = createSession({}); horse.setSession(id); horse.record(user("finish the existing task"));
+	const message = assistant(); message.content = [{ type: "toolCall", id: "saved", name: "read", arguments: {} }]; message.stopReason = "toolUse";
+	horse.record(message); horse.record({ role: "toolResult", toolCallId: "saved", toolName: "read", content: [{ type: "text", text: "FINAL_TOOL_RESULT_MARKER " + "x".repeat(40_000) }], isError: false, timestamp: Date.now() });
+	horse.record(user("STEERING_AT_BUDGET_BOUNDARY"));
+	horse.record({ ...assistant(""), content: [], stopReason: "budget", budget: { kind: "turns", limit: 1, used: 1 } });
+	const loaded = loadSession(id);
+	assert.equal(loaded.messages.at(-1)?.stopReason, "budget"); assert.equal(loaded.activeMessages.some(message => message.role === "assistant" && message.stopReason === "budget"), false);
+	const resumed = controller(); resumed.setSession(id); resumed.record(user("continue"));
+	const active = resumed.prepare(resumed.messages);
+	assert.match(String(active[0].content), /Unconsumed toolResult/);
+	assert.match(String(active[0].content), /FINAL_TOOL_RESULT_MARKER/);
+	assert.match(String(active[0].content), /STEERING_AT_BUDGET_BOUNDARY/);
+	assert.equal(active.at(-1)?.content, "continue");
+}));
+
+test("a small budget-resume window preserves task context when an overlay cannot fit a continuation", () => isolated(() => {
+	const id = createSession({}), small = { ...model, contextWindow: 1536, maxTokens: 256 };
+	const horse = controller({ model: small }); horse.setSession(id); horse.record(user("SMALL_CONTEXT_TASK"));
+	const message = assistant(); message.stopReason = "toolUse"; message.content = [{ type: "toolCall", id: "small", name: "read", arguments: {} }];
+	horse.record(message); horse.record({ role: "toolResult", toolCallId: "small", toolName: "read", content: [{ type: "text", text: "SMALL_CONTEXT_RESULT" }], isError: false, timestamp: Date.now() });
+	horse.record({ ...assistant(""), content: [], stopReason: "budget", budget: { kind: "turns", limit: 1, used: 1 } });
+	assert.ok(horse.freshLimit() < 1024);
+	const resumed = controller({ model: small, cwd: process.env.REIN_HOME }); resumed.setSession(id);
+	assert.equal(resumed.window, undefined, "do not replace usable context with a taskless overlay");
+	assert.match(JSON.stringify(resumed.active()), /SMALL_CONTEXT_TASK/); assert.match(JSON.stringify(resumed.active()), /SMALL_CONTEXT_RESULT/);
+	assert.equal(resumed.active().some(message => message.role === "assistant" && message.stopReason === "budget"), false);
+}));
+
+test("budget resume skips a failed assistant tool batch when restoring earlier completed results", () => isolated(() => {
+	const id = createSession({}), horse = controller(); horse.setSession(id); horse.record(user("Restore the unfinished task"));
+	const completed = { ...assistant(""), stopReason: "toolUse" as const, content: [{ type: "toolCall" as const, id: "complete", name: "read", arguments: {} }] };
+	horse.record(completed); horse.record({ role: "toolResult", toolCallId: "complete", toolName: "read", content: [{ type: "text", text: "EARLIER_COMPLETED_RESULT" }], isError: false, timestamp: 1 }); horse.prepare(horse.messages);
+	const failed = assistant("FAILED_ASSISTANT_SENTINEL", "context_length_exceeded"); failed.content.push({ type: "toolCall", id: "failed", name: "read", arguments: {} });
+	horse.record(failed); horse.record({ role: "toolResult", toolCallId: "failed", toolName: "read", content: [{ type: "text", text: "FAILED_PAIR_SENTINEL" }], isError: true, timestamp: 2 });
+	assert.equal(horse.recover(failed, horse.messages), true);
+	horse.record({ ...assistant(""), content: [], stopReason: "budget", budget: { kind: "turns", limit: 2, used: 2 } });
+	const resumed = controller({ cwd: process.env.REIN_HOME }); resumed.setSession(id);
+	assert.match(resumed.window?.handoff ?? "", /EARLIER_COMPLETED_RESULT/);
+	assert.doesNotMatch(resumed.window?.handoff ?? "", /FAILED_ASSISTANT_SENTINEL|FAILED_PAIR_SENTINEL/);
+}));
+
 test("oversized fresh request stays intact and does not create rollover churn", () => {
 	const horse = controller(); const request = user("x".repeat(50000)); horse.record(request);
 	assert.equal(horse.prepare(horse.messages)[0].content, request.content);

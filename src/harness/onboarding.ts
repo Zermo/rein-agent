@@ -1,6 +1,7 @@
 /** Guided setup uses fixed work-style choices; no model calls score the operator. */
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { runBudgetSetup } from "./budget-setup.ts";
 import { loadConfig } from "../ai/models.ts";
 import { createSetupPrompt, runSetup } from "./setup.ts";
 import type { SetupOptions, SetupPrompt } from "./setup.ts";
@@ -149,7 +150,7 @@ async function setupProactivity(getPrompt: () => SetupPrompt, releasePrompt: () 
 		log(`Proactivity is already configured for ${state.workspaces.length} folder(s) and is ${state.paused ? "paused" : "enabled"}. Keeping those settings. Planning: ${state.planner === "main" ? "main model (explicitly enabled; account usage applies)" : "rules (no cloud inference)"}. Review here with /autonomy after setup, or rein autonomy tui; inspect the local helper with rein autonomy guardian status or select personalized planning with rein autonomy planner main.`);
 		return true;
 	}
-	log("\n[3/4] Follow up on useful work");
+	log("\n[4/5] Follow up on useful work");
 	log("Rein can check recent task history for unfinished work and suggest follow-ups. You review proposals before they run.");
 	log(`${state.planner === "main" ? "Previously enabled main-model planning may use your cloud account" : "Background checks use no cloud model"}: every ${state.intervalMinutes} minutes, with unchanged history skipped. An optional local helper can filter suggestions. Executing an approved task uses your selected main model/account, limited to ${state.maxRunsPerDay} operations per day, ${state.maxTurns} turns and ${state.timeoutSeconds} seconds per operation.`);
 	const choice = await menu(prompt, log, "When should Rein look for follow-ups?", [
@@ -205,12 +206,14 @@ export async function runOnboarding(options: SetupOptions = {}, dependencies: On
 	const getPrompt = () => prompt ??= dependencies.prompt ?? createSetupPrompt();
 	const release = () => { if (!dependencies.prompt) prompt?.close(); prompt = undefined; };
 	try {
-		log("\nREIN · First steps\nWork style → model connection → follow-ups → your first task\nNo model is needed for the work-style questions. You can revise any choice later.");
-		log("\n[1/4] Work with Rein your way");
+		log("\nREIN · First steps\nWork style → task limits → model connection → follow-ups → your first task\nNo model is needed for the work-style questions. You can revise any choice later.");
+		log("\n[1/5] Work with Rein your way");
 		const current = readOperatorProfile();
 		const keep = current.profile && await menu(getPrompt(), log, profileSummary(current.profile), ["Keep my operator profile", "Change it"]) === 1;
 		if (!keep) await runProfileWizard({ ...dependencies, prompt: getPrompt(), log });
-		log("\n[2/4] Give Rein a model");
+		log("\n[2/5] Give tasks enough room to finish");
+		await runBudgetSetup({ maxTurns: options.maxTurns, maxIterations: options.maxIterations }, { prompt: getPrompt(), log });
+		log("\n[3/5] Give Rein a model");
 		log("A model is the engine that answers and uses tools. Run one on your hardware, or connect a cloud account.");
 		log("Connection setup checks this machine's model fit and known LAN/mesh servers. Choose hosting recipes if you need to install LM Studio, Ollama, llama.cpp, or vLLM. For cloud access, choose an API key or an official subscription CLI, including Grok for SuperGrok / X Premium+.");
 		const config = loadConfig() ?? {};
@@ -223,7 +226,7 @@ export async function runOnboarding(options: SetupOptions = {}, dependencies: On
 		} else if (!explicit) connectLater = await menu(getPrompt(), log, "Ready to connect a model?", ["Connect a local server or cloud account", "Finish connecting later"]) === 2;
 		let connected = false;
 		while (!connectLater) {
-			const code = await (dependencies.setup ?? runSetup)({ ...options, status: !!reuse }, {
+			const code = await (dependencies.setup ?? runSetup)({ ...options, maxTurns: undefined, maxIterations: undefined, status: !!reuse }, {
 				prompt: getPrompt(), log, keepPromptOpen: true,
 				// Official subscription login needs exclusive control of the terminal.
 				onPromptReleased: () => { prompt = undefined; },
@@ -234,12 +237,12 @@ export async function runOnboarding(options: SetupOptions = {}, dependencies: On
 			reuse = false;
 		}
 		const proactivityReady = await setupProactivity(getPrompt, () => { if (!dependencies.prompt) release(); }, log, connected, dependencies);
-		log("\n[4/4] Start with one real task");
+		log("\n[5/5] Start with one real task");
 		const profile = readOperatorProfile().profile;
 		log(`Continue in this terminal. Workspace: ${terminalText(process.cwd())}\nTry: ${firstTasks[profile?.operator_profile.focus ?? "everyday"]}`);
 		log("Your messages say OPERATOR; Rein replies and tool activity have separate labels. Use /activity for a tool timeline, /help for controls, /sessions for saved conversations, and /skills for workflows.");
 		log("Rein keeps workspace notes and lessons across sessions. It checks current workspace changes when you resume. Save preferences in your private profile; keep passwords and keys out of notes.");
-		log("Change your profile: rein setup profile\nCheck the connection: rein setup --status\nUpdate Rein: rein update");
+		log("Change your profile: rein setup profile\nTask limits: rein setup budgets\nCheck the connection: rein setup --status\nUpdate Rein: rein update");
 		log(connected ? proactivityReady ? "\nSetup complete. Your connection is ready for a first task." : "\nYour connection is ready. Proactivity setup still needs attention; use the recovery command above." : "\nProfile setup finished. The model connection is still incomplete. Run rein setup --connection-only when your model is ready.");
 		return connected && proactivityReady ? 0 : 1;
 	} catch (error) { log(`Setup stopped: ${(error as Error).message}\nRun rein setup to continue; saved settings are kept.`); return 1; }

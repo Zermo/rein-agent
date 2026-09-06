@@ -1,7 +1,8 @@
 # Install Rein
 
-The first-run wizard helps you choose how Rein works with you, connect a model,
-and make a first request. You can revise every work preference later.
+The first-run wizard has five stages: work preferences, task limits, model
+connection, optional follow-ups, and a first request. You can revise these
+choices later.
 
 ## Before you begin
 
@@ -70,6 +71,29 @@ The default location is `~/.rein`, or your custom `REIN_HOME`. Project
 [operator-profile guide](https://github.com/Zermo/rein-agent/wiki/Operator-profile)
 for pack contents and controls.
 
+## Give tasks enough room to finish
+
+The next stage sets task limits without contacting a model. Standard settings
+allow 300 model turns per prompt and 25 rounds for `rein loop` or `rein improve`.
+A turn is one model call, including retries. A loop round can use several turns.
+Ordinary chat uses the turn limit only.
+
+Keep the standard or your existing settings, choose extended 1000/100 or short
+100/10, enter exact values, or skip without saving. Larger limits allow more
+work and more model usage. They do not enlarge the model's context window or
+output limit, and background work keeps its own budgets.
+
+```sh
+rein setup budgets
+rein setup budgets --status
+```
+
+At the turn limit, Rein marks the task `PAUSED`. Review the saved progress and
+reply `continue` to give it another turn budget. One-shot `-p` mode saves the
+session, prints a resume command, and exits with code 3. See
+[task limits](https://github.com/Zermo/rein-agent/wiki/Task-limits) for exact
+settings and how long runs preserve context.
+
 ## Connect a model
 
 Continue in the wizard. Reuse a saved connection or choose where your model
@@ -104,7 +128,7 @@ rein setup --connection-only
 
 ## Choose whether Rein should suggest work
 
-The final setup stage offers proactive suggestions for a folder you choose.
+The follow-up stage offers proactive suggestions for a folder you choose.
 Choose manual scans for that folder, enroll it and start the background service,
 or skip this and use ordinary chat.
 
@@ -182,11 +206,13 @@ split view; ordinary chat and `/activity` do not need tmux.
 ```sh
 rein profile
 rein setup profile
+rein setup budgets
 rein profile pack none
 rein update && rein --version
 ```
 
-`rein setup profile` edits only your work profile, without contacting a model.
+`rein setup profile` edits only your work profile. `rein setup budgets` changes
+task limits. Both work without contacting a model.
 `rein profile pack none` disables profile-pack skills. Updates preserve your
 profile, settings, notes, and sessions, and your model can be offline. Restart
 running Rein sessions afterward.

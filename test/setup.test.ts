@@ -25,6 +25,18 @@ async function isolated(run: (home: string, configFile: string) => Promise<void>
 function forbiddenPrompt(): SetupPrompt {
 	return { ask: async () => { throw new Error("Unexpected interactive prompt"); }, secret: async () => { throw new Error("Unexpected secret prompt"); }, close() {} };
 }
+
+test("connection setup refuses to overwrite budgets or credentials edited while its probe runs", async () => isolated(async (_home, path) => {
+	const original = { provider: "custom", baseUrl: "http://fixture.invalid/v1", model: "fixture", maxTurns: 300, maxIterations: 25 };
+	const newer = { ...original, maxTurns: 500, maxIterations: 80, apiKey: "concurrent-fixture-secret", extension: { keep: true } };
+	writeFileSync(path, JSON.stringify(original));
+	const logs: string[] = [];
+	const code = await runSetup({ yes: true }, { ...deps(logs), connection: async () => { writeFileSync(path, JSON.stringify(newer)); return { ok: true, detail: "fixture passed" }; } });
+	assert.equal(code, 1);
+	assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), newer);
+	assert.match(logs.join("\n"), /changed during connection setup/);
+	assert.doesNotMatch(logs.join("\n"), /concurrent-fixture-secret/);
+}));
 function deps(logs: string[]): SetupDependencies {
 	return { log: text => logs.push(text), prompt: forbiddenPrompt(), discover: async () => [], servingAdvice: async () => {}, keyFor: () => undefined,
 		detect: async baseUrl => ({ baseUrl, provider: "custom", models: ["remote-model"] }),
@@ -298,7 +310,7 @@ test("newly identified server implementation retains credentials and model for t
 		detect: async (baseUrl, options) => { assert.equal(options?.apiKey, saved.apiKey); assert.equal(options?.sshHost, saved.sshHost); return { baseUrl, provider: "llamacpp", models: ["saved-fixture"] }; },
 		connection: async (_url, model, key, options) => { assert.equal(model, saved.model); assert.equal(key, saved.apiKey); assert.equal(options?.sshHost, saved.sshHost); return { ok: true, detail: "Fixture connection passed" }; },
 	}), 0, logs.join("\n"));
-	assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { ...saved, provider: "llamacpp", api: "chat-completions", auth: { type: "api-key" } });
+	assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { ...saved, provider: "llamacpp", api: "chat-completions", auth: { type: "api-key" }, maxTurns: 300, maxIterations: 25 });
 	assert.doesNotMatch(logs.join("\n"), /saved-fixture-secret/);
 }));
 

@@ -47,12 +47,12 @@ test("queued answers survive profile, real HTTP setup, and follow-up choices on 
 		res.end(req.method === "GET" ? JSON.stringify({ data: [{ id: "queued-input-model" }] }) : JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }));
 	});
 	await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-	const io = queuedPrompt(["a", "a", "c", "a", "a", "a", "3", "1", "", "3", "caller-still-owns-this-prompt"]);
+	const io = queuedPrompt(["a", "a", "c", "a", "a", "a", "3", "1", "4", "750", "40", "", "3", "caller-still-owns-this-prompt"]);
 	const logs: string[] = [];
 	let autonomyCalls = 0;
 	try {
 		const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
-		const code = await runOnboarding({ provider: "custom", baseUrl, model: "queued-input-model", noBrowser: true }, {
+		const code = await runOnboarding({ provider: "custom", baseUrl, model: "queued-input-model", noBrowser: true, maxTurns: 500 }, {
 			prompt: io.prompt, log: text => logs.push(text),
 			autonomy: async () => { autonomyCalls++; throw new Error("A skipped follow-up must not invoke autonomy."); },
 		});
@@ -62,6 +62,7 @@ test("queued answers survive profile, real HTTP setup, and follow-up choices on 
 		assert.equal(JSON.parse(requests[1].body).model, "queued-input-model");
 		const config = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
 		assert.equal(config.baseUrl, baseUrl); assert.equal(config.model, "queued-input-model");
+		assert.equal(config.maxTurns, 750); assert.equal(config.maxIterations, 40);
 		assert.equal(config.api, "chat-completions"); assert.equal(config.apiKey, undefined);
 		assert.equal(readOperatorProfile(home).profile!.enabled_pack, null);
 		assert.equal(autonomyCalls, 0);
@@ -118,7 +119,7 @@ test("full noninteractive CLI setup rejects before creating a profile or connect
 
 test("manual onboarding pauses a previously resumed state with no enrolled folders", { timeout: 5000 }, async () => isolated(async home => {
 	await updateState(state => { state.paused = false; state.workspaces = []; });
-	const io = queuedPrompt(["skip", "1", home, "1", "1", "1"]);
+	const io = queuedPrompt(["skip", "1", "1", home, "1", "1", "1"]);
 	const logs: string[] = [], autonomyCommands: string[] = [];
 	try {
 		const code = await runOnboarding({ provider: "custom", baseUrl: "http://fixture.invalid/v1", model: "manual-state-fixture", noBrowser: true }, {

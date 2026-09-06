@@ -1,5 +1,39 @@
 # Posthorse and harness review
 
+## 0.14.0 Task limits and resumable pauses
+
+Foreground prompts now allow 300 model turns by default; experiment and improve
+loops allow 25 iterations. Saved maxTurns/maxIterations and explicit launch
+flags are honored, replacing the hidden 60/40-turn caps. The offline terminal
+budget wizard is part of onboarding and can be reopened with `rein setup budgets`.
+It previews standard, extended, short or custom limits, explains their combined
+model-call ceiling, and writes private, readable settings without changing the
+connection. Background autonomy and heartbeat retain their separate limits.
+
+A turn limit produces a typed budget pause after completed tool results are
+recorded. Exact-boundary completion still succeeds. Pause markers stay out of
+provider input; print exits 3 and saves exact session entries, including context
+boundaries. Loop/improve preserve unfinished files and save recovery sessions
+without committing or discarding them. Verification still controls which
+completed experiments are kept, with measured feedback carried into later rounds.
+
+Independent review fixed lost context handoffs on resumed pauses, recovery of
+tool results across a final-turn overflow boundary, and small-context resumes
+that could discard the unfinished task. Setup now refuses concurrent config
+replacement; the budget wizard repairs invalid saved limits after a preview.
+Malformed JSON is preserved with a redacted error and a structured doctor check.
+
+Regression coverage includes 72 consecutive tool turns plus completion across
+multiple bounded context windows, current notes and archived history recovery,
+43 model calls in a real loop runner, exact-boundary completion, queued steering,
+final-turn overflow, and source CLI pause/save/resume. Model responses and
+network endpoints in these checks are synthetic. This validates harness behavior,
+not long-duration answer quality or guaranteed provider KV-cache retention.
+
+Release checks passed: 528 source tests with no failures or skips; Node
+18.20.8 bundle smoke including the offline budget wizard; native provenance;
+public-text privacy; package contents; and the staged field guide.
+
 ## 0.13.0 Terminal setup and personal assistance
 
 The installer now finishes interactive setup by replacing itself with Rein in

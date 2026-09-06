@@ -26,6 +26,7 @@ import type {
 import { initialDoomLoopState, observeDoomLoop } from "../../vendor/fold/StopConditions.ts";
 import type { StopConditionConfig } from "../../vendor/fold/StopConditions.ts";
 import { validateArgs } from "../util/schema.ts";
+import { DEFAULT_MAX_TURNS, validateMaxTurns } from "./budgets.ts";
 
 export type AgentMessage = Message;
 
@@ -58,6 +59,7 @@ export interface AgentToolResult {
 export type AgentEvent =
 	| { type: "agent_start" }
 	| { type: "agent_end"; messages: AgentMessage[] }
+	| { type: "agent_pause"; reason: "turn-budget"; limit: number; used: number }
 	| { type: "turn_start" }
 	| { type: "turn_end"; message: AssistantMessage; toolResults: ToolResultMessage[] }
 	| { type: "message_start"; message: AgentMessage }
@@ -104,7 +106,7 @@ export interface AgentLoopConfig {
 	getSteeringMessages?: () => AgentMessage[] | Promise<AgentMessage[]>;
 	getFollowUpMessages?: () => AgentMessage[] | Promise<AgentMessage[]>;
 	toolExecution?: "parallel" | "sequential";
-	/** Hard safety cap on assistant turns per run. Default: 60. */
+	/** Finite assistant-turn budget per run (1..10000). Default: 300. Exhaustion pauses for continuation. */
 	maxTurns?: number;
 	/** Fold's per-run repeat detector; hosts explicitly choose the policy. */
 	stopConditions?: StopConditionConfig;
@@ -129,6 +131,7 @@ export async function agentLoop(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 ): Promise<AgentMessage[]> {
+	const maxTurns = validateMaxTurns(config.maxTurns === undefined ? DEFAULT_MAX_TURNS : config.maxTurns);
 	const newMessages: AgentMessage[] = [...prompts];
 	// systemPrompt is a live getter on the caller's context object, so a
 	// mid-loop change (e.g. the tool-protocol fallback) is visible next turn.
@@ -147,7 +150,6 @@ export async function agentLoop(
 		await emit({ type: "message_end", message: prompt });
 	}
 
-	const maxTurns = config.maxTurns ?? 60;
 	let repeatState = initialDoomLoopState;
 	const stopIncomplete = async (reason: string) => {
 		const stopped: AssistantMessage = { role: "assistant", content: [], stopReason: "error", errorMessage: `Harness stopped: ${reason}. Work may be incomplete. Review the last results before continuing.`, model: config.model.id, provider: config.model.provider, usage: { input: 0, output: 0, totalTokens: 0 }, timestamp: Date.now() };
@@ -156,18 +158,30 @@ export async function agentLoop(
 		await emit({ type: "message_end", message: stopped });
 	};
 	let pending: AgentMessage[] = [];
+	const recordPending = async () => {
+		for (const message of pending) {
+			await emit({ type: "message_start", message });
+			await emit({ type: "message_end", message });
+			ctx.messages.push(message); newMessages.push(message);
+		}
+		pending = [];
+	};
+	const pauseBudget = async () => {
+		// Persist drained steering/followups too; they must remain visible on
+		// continuation even when no additional model call is allowed this run.
+		await recordPending();
+		const paused: AssistantMessage = { role: "assistant", content: [], stopReason: "budget", budget: { kind: "turns", limit: maxTurns, used: maxTurns }, model: config.model.id, provider: config.model.provider, usage: { input: 0, output: 0, totalTokens: 0 }, timestamp: Date.now() };
+		ctx.messages.push(paused); newMessages.push(paused);
+		await emit({ type: "message_start", message: paused });
+		await emit({ type: "message_end", message: paused });
+		await emit({ type: "agent_pause", reason: "turn-budget", limit: maxTurns, used: maxTurns });
+	};
 	for (let turns = 0; turns < maxTurns && !signal?.aborted; turns++) {
 		if (turns > 0) await emit({ type: "turn_start" });
 		pending.push(...((await config.getSteeringMessages?.()) ?? []));
 		if (signal?.aborted) break;
 		if (pending.length) repeatState = initialDoomLoopState;
-		for (const message of pending) {
-			await emit({ type: "message_start", message });
-			await emit({ type: "message_end", message });
-			ctx.messages.push(message);
-			newMessages.push(message);
-		}
-		pending = [];
+		await recordPending();
 
 		let message: AssistantMessage;
 		let assistantStarted = false;
@@ -208,21 +222,25 @@ export async function agentLoop(
 		await emit({ type: "turn_end", message, toolResults: batch.messages });
 		if (signal?.aborted || message.stopReason === "aborted") break;
 		if (failed) {
-			if (turns + 1 < maxTurns && await config.recoverFromError?.({ message, context: ctx })) continue;
-			break;
-		}
-		if (turns + 1 >= maxTurns) {
-			if (toolCalls.length && !batch.terminate) await stopIncomplete(`turn budget reached (${maxTurns} model turns)`);
+			if (await config.recoverFromError?.({ message, context: ctx })) {
+				if (signal?.aborted) break;
+				if (turns + 1 < maxTurns) continue;
+				pending = (await config.getSteeringMessages?.()) ?? [];
+				if (signal?.aborted) break;
+				await pauseBudget();
+			}
 			break;
 		}
 		if (config.shouldStopAfterTurn?.({ message, context: ctx })) break;
 		pending = (await config.getSteeringMessages?.()) ?? [];
+		if (signal?.aborted) break;
 		const observed = observeDoomLoop(config.stopConditions ?? {}, repeatState, toolCalls.map(call => ({ name: call.name, params: call.arguments })));
 		repeatState = observed.state;
 		if (observed.reason && !batch.terminate && !pending.length) { await stopIncomplete(observed.reason); break; }
-		if (pending.length > 0 || (toolCalls.length > 0 && !batch.terminate)) continue;
-		pending = (await config.getFollowUpMessages?.()) ?? [];
-		if (pending.length === 0) break;
+		if (pending.length === 0 && (toolCalls.length === 0 || batch.terminate)) pending = (await config.getFollowUpMessages?.()) ?? [];
+		if (signal?.aborted) break;
+		if (pending.length === 0 && (toolCalls.length === 0 || batch.terminate)) break;
+		if (turns + 1 >= maxTurns) { await pauseBudget(); break; }
 	}
 
 	await emit({ type: "agent_end", messages: newMessages });
@@ -238,7 +256,7 @@ async function streamAssistantResponse(
 	let messages = ctx.messages;
 	if (config.transformContext) messages = (await config.transformContext(messages, signal)) ?? messages;
 
-	const llmMessages = (config.convertToLlm ?? defaultConvertToLlm)(messages);
+	const llmMessages = (config.convertToLlm ?? defaultConvertToLlm)(messages.filter(message => message.role !== "assistant" || message.stopReason !== "budget"));
 	const llmContext: Context = {
 		systemPrompt: ctx.systemPrompt,
 		messages: llmMessages,

@@ -29,10 +29,11 @@ test("CLI setup forwards flags, discovers authenticated model, and saves a runna
 		child.on("error", reject); child.on("close", code => resolve({ code, stdout, stderr })); child.stdin.end();
 	});
 	try {
-		const result = await cli(["setup", "--yes", "--provider", "custom", "--base-url", `127.0.0.1:${(server.address() as any).port}`, "--auth", "api-key"]);
+		const result = await cli(["setup", "--yes", "--provider", "custom", "--base-url", `127.0.0.1:${(server.address() as any).port}`, "--auth", "api-key", "--max-turns", "720", "--max-iterations", "35"]);
 		assert.equal(result.code, 0, result.stdout + result.stderr);
 		assert.deepEqual(paths, ["/v1/models", "/v1/chat/completions"]);
 		const config = JSON.parse(readFileSync(join(directory, "config.json"), "utf8"));
+		assert.equal(config.maxTurns, 720); assert.equal(config.maxIterations, 35);
 		assert.equal(config.model, "actual-model-id"); assert.equal(config.apiKey, undefined);
 		assert.doesNotMatch(result.stdout + result.stderr, /fixture-key/);
 		const print = await cli(["--no-tools", "-p", "hello"]);

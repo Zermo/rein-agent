@@ -3,6 +3,9 @@
  * compatibility layer, wired together. Shared by REPL, print, improve, and
  * experiment-loop modes.
  */
+import { resolveRunBudgets } from "./run-budgets.ts";
+import { unlinkSync } from "node:fs";
+import { createSession, appendSessionEntry, sessionPath } from "../agent/session.ts";
 import { agentLoop } from "../agent/agent-loop.ts";
 import type { AgentContext, AgentMessage, AgentTool, AgentEvent } from "../agent/agent-loop.ts";
 import { stream as openaiStream, TEXT_TOOL_INSTRUCTIONS } from "../ai/openai-completions.ts";
@@ -51,6 +54,7 @@ export interface RunnerOptions {
 
 export interface Runner {
 	model: Model;
+	readonly maxTurns: number;
 	apiKey?: string;
 	toolsMode: "native" | "text";
 	toolsModeSource: string;
@@ -65,6 +69,8 @@ export interface Runner {
 	/** Present only when the optional private activity view initialized. */
 	readonly activityId?: string;
 	setSession(id: string): void;
+	/** Save a previously unsaved run with its exact context boundaries. */
+	saveSession(): string;
 	contextStatus(): string;
 	newContext(handoff?: string): void;
 	/** Queue a message to be injected after the current tool batch. */
@@ -76,6 +82,8 @@ export interface Runner {
 export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	// Bad identifiers are input errors, not optional storage failures.
 	const requestedActivityFile = opts.activityId !== undefined ? activityFile(opts.activityId) : undefined;
+	const config = loadConfig();
+	const budgets = resolveRunBudgets(config, opts);
 	const model = await resolveModel({
 		model: opts.modelOverride,
 		baseUrl: opts.baseUrlOverride,
@@ -85,7 +93,6 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	});
 	if (opts.contextWindow !== undefined) model.contextWindow = opts.contextWindow;
 	const apiKey = apiKeyFor(model.provider, model.baseUrl, model.sshHost);
-	const config = loadConfig();
 	const repeatToolLimit = config.repeatToolLimit ?? 3;
 	if (!Number.isSafeInteger(repeatToolLimit) || repeatToolLimit < 0 || repeatToolLimit === 1 || repeatToolLimit > 50) throw new Error("repeatToolLimit must be 0 (disabled) or an integer from 2 to 50.");
 	const reserveTokens = opts.reserveTokens ?? config.posthorse?.reserveTokens;
@@ -132,6 +139,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 
 	const runner: Runner = {
 		model,
+		maxTurns: budgets.maxTurns,
 		activityId: activity?.snapshot.id,
 		apiKey,
 		toolsMode: decision.mode,
@@ -155,6 +163,16 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 			context.messages = posthorse.messages;
 			steering.length = 0;
 		},
+		saveSession() {
+			if (running) throw new Error("Cannot save an unsaved session during an active run");
+			if (posthorse.sessionId) return posthorse.sessionId;
+			const id = createSession({ model: model.id, provider: model.provider, cwd: opts.cwd });
+			try { for (const entry of posthorse.entries) appendSessionEntry(id, entry); }
+			catch (error) { try { unlinkSync(sessionPath(id)); } catch {} throw error; }
+			posthorse.sessionId = id;
+			activity?.setSession(id);
+			return id;
+		},
 		contextStatus() { return posthorse.status(); },
 		newContext(handoff) {
 			if (running) throw new Error("Cannot manually reset context during an active run");
@@ -177,7 +195,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					afterToolBatch: (info) => posthorse.afterBatch(info),
 					recoverFromError: ({ message, context: loopContext }) => posthorse.recover(message, loopContext.messages),
 					streamFn: (m, ctx, o) => cliProvider ? streamCli(m, ctx, o) : openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
-					maxTurns: opts.maxTurns ?? 60,
+					maxTurns: budgets.maxTurns,
 					stopConditions: { doomLoop: repeatToolLimit ? { enabled: true, repeatedToolCalls: repeatToolLimit } : { enabled: false } },
 					getSteeringMessages: () => steering.splice(0, steering.length),
 					beforeToolCall: async (info) => {

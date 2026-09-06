@@ -1,6 +1,7 @@
 /** Streaming transcript labels. Rotation advances per reply, never on a timer. */
 import type { AgentEvent } from "../agent/agent-loop.ts";
 import type { AssistantMessage } from "../ai/types.ts";
+import { budgetPauseText } from "./budget-presentation.ts";
 
 interface PresentationOptions {
 	write: (text: string) => void;
@@ -173,6 +174,7 @@ export function createReplyPresentation(options: PresentationOptions) {
 					const reasoning = reasoningUsageLabel(message);
 					if (reasoning) status("REASONING", reasoning);
 					if (message.stopReason === "error") status("ERROR", `Error: ${message.errorMessage ?? "model error"}`, 31);
+					else if (message.stopReason === "budget") status("PAUSED", budgetPauseText(message), 33);
 					else if (message.stopReason === "aborted") { status("CANCELED", "Reply canceled.", 33); canceledShown = true; }
 					else if (message.stopReason === "length") status("LIMIT", "Reply reached the output limit.", 33);
 					else if (message.content.some(part => part.type === "toolCall")) status("HANDOFF", "Tool calls requested.");
