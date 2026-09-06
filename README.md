@@ -45,6 +45,13 @@ readable over clever, with explicit limits on context and tool output.
 
 ## Install
 
+For a visual walkthrough with copyable commands, open the
+[retro installation field guide](docs/install.html). It covers NodeTerm, a model-host
+over SSH, local models, and supported cloud connections. Download the HTML and
+open it in a browser, or open `docs/install.html` from a local checkout.
+
+[![Retro Rein installation guide](docs/assets/install-guide-preview.png)](docs/install.html)
+
 One-liner (macOS / Linux / WSL) — installs the harness and walks you through
 model setup (the openclaw / hermes style onboarding):
 

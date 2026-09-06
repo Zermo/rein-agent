@@ -54,7 +54,9 @@ test("setup probe and streaming adapter share reasoning-model token compatibilit
 	});
 	assert.equal((await testConnection("https://unused.invalid/v1", "reasoner")).ok, true);
 	const result = await stream({ id: "reasoner", provider: "openai", baseUrl: "https://unused.invalid/v1", contextWindow: 10000, maxTokens: 512 }, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }).result();
-	assert.equal(result.stopReason, "stop"); assert.equal(bodies.length, 4); assert.equal(bodies[1].max_completion_tokens, 8); assert.equal(bodies[3].max_completion_tokens, 512);
+	assert.equal(result.stopReason, "stop"); assert.equal(bodies.length, 4);
+	assert.equal(bodies[0].max_tokens, 128); assert.equal(bodies[1].max_completion_tokens, bodies[0].max_tokens);
+	assert.equal(bodies[3].max_completion_tokens, 512);
 });
 
 test("local prompt caching retries only once when a compatible server rejects it", async t => {

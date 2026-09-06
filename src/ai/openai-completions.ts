@@ -53,6 +53,14 @@ export function chatCompletionText(message: { content?: unknown; refusal?: unkno
 	return text + (text.trim() && refusal ? "\n" : "") + refusal;
 }
 
+/** Local reasoning models use these aliases in both JSON messages and SSE deltas. */
+export function chatCompletionReasoning(message: { reasoning_content?: unknown; reasoning?: unknown; thinking?: unknown }): string {
+	for (const value of [message.reasoning_content, message.reasoning, message.thinking]) {
+		if (typeof value === "string" && value.length) return value;
+	}
+	return "";
+}
+
 /** The same completion shapes are accepted during setup and normal inference. */
 export async function* chatCompletionChunks(response: Response): AsyncGenerator<any> {
 	if ((response.headers.get("content-type") ?? "").toLowerCase().includes("json")) {
@@ -299,14 +307,7 @@ export function stream(
 					block.text += visible;
 					emit({ type: "text_delta", contentIndex: message.content.indexOf(block), delta: visible, partial: message });
 				}
-				const reasoning =
-					typeof delta.reasoning_content === "string"
-						? delta.reasoning_content
-						: typeof delta.reasoning === "string"
-							? delta.reasoning
-							: typeof delta.thinking === "string"
-								? delta.thinking
-								: "";
+				const reasoning = chatCompletionReasoning(delta);
 				if (reasoning) {
 					const block = ensureThinkingBlock();
 					block.thinking += reasoning;

@@ -2691,6 +2691,12 @@ function chatCompletionText(message) {
   const refusal = typeof message.refusal === "string" ? message.refusal : "";
   return text + (text.trim() && refusal ? "\n" : "") + refusal;
 }
+function chatCompletionReasoning(message) {
+  for (const value of [message.reasoning_content, message.reasoning, message.thinking]) {
+    if (typeof value === "string" && value.length) return value;
+  }
+  return "";
+}
 async function* chatCompletionChunks(response) {
   if ((response.headers.get("content-type") ?? "").toLowerCase().includes("json")) {
     const body = await response.json();
@@ -2900,7 +2906,7 @@ Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
           block.text += visible2;
           emit({ type: "text_delta", contentIndex: message.content.indexOf(block), delta: visible2, partial: message });
         }
-        const reasoning = typeof delta.reasoning_content === "string" ? delta.reasoning_content : typeof delta.reasoning === "string" ? delta.reasoning : typeof delta.thinking === "string" ? delta.thinking : "";
+        const reasoning = chatCompletionReasoning(delta);
         if (reasoning) {
           const block = ensureThinkingBlock();
           block.thinking += reasoning;
@@ -8424,7 +8430,7 @@ async function testConnection(baseUrl, model, apiKey, options = {}) {
   }
   const started = Date.now();
   try {
-    const response = await postChatCompletion(`${baseUrl.replace(/\/$/, "")}/chat/completions`, { model, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 8 }, {
+    const response = await postChatCompletion(`${baseUrl.replace(/\/$/, "")}/chat/completions`, { model, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 128 }, {
       signal: AbortSignal.timeout(2e4),
       redirect: "error",
       headers: { "content-type": "application/json", ...apiKey ? { authorization: `Bearer ${apiKey}` } : {} }
@@ -8433,19 +8439,23 @@ async function testConnection(baseUrl, model, apiKey, options = {}) {
       const detail = redactKey(await response.text().catch(() => ""), apiKey).slice(0, 300);
       return { ok: false, detail: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
     }
-    let usable = false;
+    let usable = false, reasoning = false;
     for await (const chunk of chatCompletionChunks(response)) {
       if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? "The provider returned an error.");
-      const choice = chunk.choices?.[0];
+      const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : void 0;
+      if (choice?.finish_reason === "content_filter") return { ok: false, detail: "The provider blocked this response (content_filter)." };
+      if (choice?.finish_reason === "aborted") return { ok: false, detail: "The provider aborted this response (aborted)." };
       const message = choice?.delta ?? choice?.message;
       if (message && (chatCompletionText(message).trim() || Array.isArray(message.tool_calls) && message.tool_calls.length)) usable = true;
+      if (message && chatCompletionReasoning(message).trim()) reasoning = true;
     }
-    if (!usable) {
+    if (!usable && !reasoning) {
       return { ok: false, detail: "Endpoint returned no valid chat completion. Check the API server URL and selected model." };
     }
+    if (!usable) return { ok: true, detail: `valid chat completion in ${Date.now() - started}ms; the probe returned reasoning rather than a final answer` };
     return { ok: true, detail: `valid chat completion in ${Date.now() - started}ms` };
   } catch (error) {
-    return { ok: false, detail: `${redactKey(error instanceof Error ? error.message : String(error), apiKey)}. For a remote server, check its listening port, bind to 0.0.0.0, and verify NetBird/firewall reachability.` };
+    return { ok: false, detail: `${redactKey(error instanceof Error ? error.message : String(error), apiKey)}. For direct remote access, check the server's listening address, port, and NetBird/firewall reachability. For a loopback-only server, use --ssh <host>.` };
   }
 }
 async function choose(prompt, log, label, choices, defaultIndex = 0) {

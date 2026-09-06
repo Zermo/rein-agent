@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="A hands-on Rein installation guide for NodeTerm, local models, model-host over SSH, and cloud accounts.">
+<title>Rein field guide · Install, connect, run</title>
+<style>
+:root{--paper:#f5eddc;--ink:#252a25;--muted:#555d50;--red:#b54229;--green:#284d3d;--gold:#ebbc5c;--line:#c6baa3;--white:#fffaf0;--mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;--sans:Arial,Helvetica,sans-serif}
+*{box-sizing:border-box}html{scroll-padding-top:24px}body{margin:0;background:#e2d7c1;color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.55}button,input,select{font:inherit}button,a,input,summary{touch-action:manipulation}button,a,summary,input{outline-offset:5px}button{cursor:pointer}a{color:var(--red);text-underline-offset:4px}a:hover{text-decoration-thickness:2px}button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible{outline:3px solid var(--red)}button:disabled{cursor:default}main{max-width:1160px;margin:30px auto;background:var(--paper);padding:32px 52px 24px;border:1px solid var(--ink);box-shadow:8px 8px 0 #bdb39e}p{margin:0 0 16px}h1,h2,h3{margin:0;line-height:1.05}h2{font-size:36px;letter-spacing:-1.4px}h3{font-size:22px;letter-spacing:-.5px;line-height:1.2}code,.mono{font-family:var(--mono)}p code,li code,dd code{font-size:.9em;background:#e5ddca;padding:2px 4px;overflow-wrap:anywhere}.small{font-size:14px;color:var(--muted)}.eyebrow{font:700 12px/1.5 var(--mono);letter-spacing:1.5px;text-transform:uppercase}.masthead{display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:7px solid var(--ink);border-bottom:1px solid var(--ink);padding:15px 0}.brand{text-decoration:none;font:bold 28px/1 var(--mono);letter-spacing:-2px;color:var(--red);display:flex;align-items:center;gap:10px}.brand-mark{width:21px;height:21px;background:var(--red);clip-path:polygon(0 0,100% 0,100% 33%,66% 33%,66% 66%,33% 66%,33% 100%,0 100%)}.masthead .right{display:flex;align-items:center;gap:24px}.masthead .right a{font:12px var(--mono);color:var(--ink)}.hero{display:grid;grid-template-columns:1fr 1.05fr;align-items:center;gap:30px;padding:44px 0 36px}.hero .eyebrow{color:var(--red);margin-bottom:15px}h1{font-family:Impact,"Arial Narrow",var(--sans);font-size:clamp(62px,7.8vw,99px);font-weight:900;letter-spacing:-2px;text-transform:uppercase;line-height:.94}.hero .intro{max-width:380px;margin:22px 0 0;font-size:18px;line-height:1.5}.hero-art{position:relative;border:2px solid var(--ink);background:var(--gold);padding:12px 12px 0;box-shadow:6px 6px 0 var(--ink)}.hero-art svg{width:100%;height:auto;display:block}.art-caption{border-top:2px solid var(--ink);display:flex;justify-content:space-between;gap:10px;padding:9px 0;font:11px/1.4 var(--mono)}.route{display:flex;flex-wrap:wrap;gap:0;border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);margin:10px 0 28px}.route a{flex:1;padding:14px 8px;text-decoration:none;color:var(--ink);font:700 13px/1.3 var(--mono);white-space:nowrap}.route a span{color:var(--red);margin-right:8px}.route a:hover{background:#e7dcc6}.notice{display:grid;grid-template-columns:180px 1fr;gap:24px;background:#e6e1c9;border-left:6px solid var(--green);padding:20px 24px;margin-bottom:8px}.notice .stamp{font:700 13px/1.5 var(--mono);color:var(--green)}.notice p{margin:0;font-size:15px}.notice strong{font-weight:700}.step{display:grid;grid-template-columns:180px minmax(0,1fr);gap:24px;padding:42px 0;border-bottom:1px solid var(--ink)}.step-number{font-family:Impact,"Arial Narrow",var(--sans);font-size:72px;line-height:1;color:var(--red);letter-spacing:-2px}.step-title{font:700 13px var(--mono);text-transform:uppercase;letter-spacing:1px;margin-top:10px}.step aside p{font-size:13px;line-height:1.6;color:var(--muted);margin-top:14px;max-width:155px}.step h2{margin-bottom:20px}.step .lead{max-width:640px}.checks{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0}.checks span{border:1px solid var(--ink);padding:4px 9px;font:12px/1.5 var(--mono)}.command{background:var(--ink);color:var(--white);margin:18px 0}.command-header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:8px 14px;border-bottom:1px solid #67705c;font:11px/1.3 var(--mono);letter-spacing:.6px;color:#d5d1bb}.copy{color:var(--white);background:none;border:1px solid #aaa98f;padding:6px 10px;font:11px var(--mono);min-width:66px}.copy:hover{background:#424b3e}.copy:focus-visible{outline-color:var(--gold)}pre{margin:0;padding:18px;font:13px/1.75 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;tab-size:2}pre code{font:inherit}.expected{font:13px/1.6 var(--mono);padding-left:16px;border-left:3px solid var(--green);color:var(--green);margin:15px 0 0}.expected span{display:block;font-size:11px;letter-spacing:1px;margin-bottom:4px}.tabs{display:flex;flex-wrap:wrap;border-bottom:2px solid var(--ink);margin:24px 0}.tab{padding:10px 14px;min-height:44px;border:1px solid var(--line);border-bottom:0;background:transparent;color:var(--ink);font:700 12px var(--mono);margin:0 4px 0 0}.tab[aria-selected=true]{background:var(--ink);border-color:var(--ink);color:var(--white)}.tab:hover:not([aria-selected=true]){background:#e5dcc7}[hidden]{display:none!important}.panel h3{margin:0 0 12px}.network{display:grid;grid-template-columns:1fr 36px 1fr;align-items:center;margin:20px 0;background:#eae2d0;padding:16px;gap:10px}.network-node{font:700 13px/1.5 var(--mono)}.network-node small{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:5px}.network .arrow{font:28px var(--mono);color:var(--red);text-align:center}.network-note{font-size:14px;margin:0 0 18px}.network-note strong{color:var(--green)}details{border-top:1px dashed #948a77;margin-top:18px;padding-top:14px}summary{cursor:pointer;font-size:14px;font-weight:700;line-height:1.5;min-height:32px}details p{margin:12px 0;font-size:14px}details pre{background:#e8dfcc;color:var(--ink);margin:12px 0}.subtle-list{padding-left:20px;margin:14px 0;font-size:15px}.subtle-list li{margin-bottom:9px}.finish{display:flex;align-items:center;gap:8px;margin-top:22px;color:var(--muted);font-size:13px}.finish input{width:18px;height:18px;accent-color:var(--green)}.trouble{margin-top:32px;display:grid;grid-template-columns:180px 1fr;gap:24px}.trouble h2{font:700 13px/1.5 var(--mono);letter-spacing:.8px;text-transform:uppercase}.trouble details:first-child{margin-top:0}.trouble strong{color:var(--red)}.footer{border-top:6px solid var(--ink);margin-top:38px;padding-top:18px;display:flex;justify-content:space-between;align-items:flex-start;gap:24px}.progress-label{font:700 12px var(--mono);color:var(--green)}.progress-track{display:flex;gap:5px;margin-top:8px}.progress-track i{display:block;width:28px;height:7px;background:#cbbfa8}.progress-track i.done{background:var(--green)}.print{background:transparent;border:1px solid var(--ink);padding:9px 12px;min-height:42px;font:12px var(--mono);color:var(--ink)}.print:hover{background:var(--ink);color:var(--paper)}.colophon{margin-top:20px;font:11px/1.8 var(--mono);color:var(--muted);display:flex;justify-content:space-between;gap:24px}.colophon a{color:var(--muted)}.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.skip{position:absolute;top:-100px;left:12px;background:var(--paper);z-index:2;padding:10px}.skip:focus{top:8px}.js-only{display:none}.js .js-only{display:inline-flex}noscript p{padding:12px;background:#eae2d0}
+@media(min-width:1500px){main{margin-top:44px}}@media(max-width:850px){main{margin:0;padding:25px 28px;border:0;box-shadow:none}.hero{gap:22px}h1{font-size:74px}.hero .intro{font-size:16px}.masthead .right .eyebrow{display:none}.step,.notice,.trouble{grid-template-columns:115px minmax(0,1fr);gap:20px}.step aside p{max-width:112px}.route a{font-size:12px}.art-caption{font-size:10px}.colophon{flex-direction:column;gap:5px}}
+@media(max-width:600px){body{font-size:15px}main{padding:20px}.hero{grid-template-columns:1fr;padding:32px 0 28px}.hero-art{max-width:450px;margin:0 6px 3px 0}.hero .intro{max-width:340px;font-size:17px}h1{font-size:82px}.masthead{padding:13px 0}.masthead .right{gap:0}.route a{flex-basis:50%;padding:12px 7px}.notice{grid-template-columns:1fr;gap:8px;padding:17px}.step{grid-template-columns:1fr;gap:20px;padding:32px 0}.step aside{display:flex;gap:14px;align-items:center}.step-number{font-size:42px;letter-spacing:-1px}.step-title{margin:0}.step aside p{display:none}h2{font-size:32px}.tabs{gap:5px;border:0}.tab{flex-basis:calc(50% - 3px);margin:0;border:1px solid var(--ink);text-align:left}.network{grid-template-columns:1fr 22px 1fr;padding:12px;gap:8px}.network-node{font-size:12px}.network-node small{font-size:11px;overflow-wrap:anywhere}pre{padding:15px;font-size:12px}.copy{min-height:34px}.trouble{grid-template-columns:1fr;gap:20px}.footer{gap:18px}.print{font-size:11px}.colophon{font-size:11px}.command-header{padding:8px 12px}.finish{min-height:32px}}
+@media(max-width:360px){h1{font-size:70px}.masthead .right a{font-size:11px}.brand{font-size:25px}.network{grid-template-columns:1fr}.network .arrow{transform:rotate(90deg)}.footer{flex-direction:column}}
+@media(pointer:coarse){.copy,summary,.finish{min-height:44px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{@page{margin:14mm}body{background:#fff;color:#000}main{max-width:none;margin:0;padding:0;border:0;box-shadow:none}.hero{padding:22px 0}.hero-art{max-width:350px;box-shadow:none}h1{font-size:62px}.route,.copy,.print,.finish,.footer,.skip,.tabs{display:none!important}.step{padding:24px 0;grid-template-columns:100px 1fr;break-inside:avoid}.step-number{font-size:48px}.step aside p{display:none}.notice,.trouble{grid-template-columns:100px 1fr}.command,details pre{color:#000;background:#f1f1f1;border:1px solid #bbb}.command-header{color:#333;border-color:#bbb}.hero-art,.notice,.network{-webkit-print-color-adjust:exact;print-color-adjust:exact}.panel[hidden]{display:none!important}.trouble details{break-inside:avoid}.colophon{font-size:9px}.eyebrow{font-size:10px}a{color:#000}pre{font-size:10px}}
+</style>
+</head>
+<body>
+<a class="skip" href="#install">Skip to installation</a>
+<main id="top">
+<header class="masthead"><a class="brand" href="#top" aria-label="Back to top"><span class="brand-mark" aria-hidden="true"></span>REIN</a><div class="right"><span class="eyebrow">Operator's field guide / 01</span><a href="https://github.com/Zermo/rein-agent">View source ↗</a></div></header>
+<section class="hero" aria-labelledby="title">
+  <div><p class="eyebrow">NodeTerm · macOS · Linux · WSL</p><h1 id="title">Boot up.<br>Take rein.</h1><p class="intro">A terminal on your desk.<br>A model wherever you want it.<br>Let's get them talking.</p></div>
+  <div class="hero-art">
+    <svg viewBox="0 0 440 292" role="img" aria-labelledby="art-title art-desc" xmlns="http://www.w3.org/2000/svg">
+      <title id="art-title">A terminal connected to a remote model server</title><desc id="art-desc">A retro computer and a server tower stand on a printed grid, joined by a red cable.</desc>
+      <defs><pattern id="dot" width="7" height="7" patternUnits="userSpaceOnUse"><rect width="1.2" height="1.2" fill="#252a25" opacity=".2"/></pattern><clipPath id="sun"><circle cx="382" cy="49" r="31"/></clipPath></defs>
+      <rect x="0" y="0" width="440" height="270" fill="url(#dot)"/>
+      <g clip-path="url(#sun)" fill="#b54229"><rect x="350" y="15" width="65" height="30"/><rect x="350" y="49" width="65" height="7"/><rect x="350" y="60" width="65" height="5"/><rect x="350" y="70" width="65" height="4"/><rect x="350" y="79" width="65" height="3"/></g>
+      <g stroke="#776e45" stroke-width="1" opacity=".5"><path d="M0 208 150 137 440 213M0 239 186 153M0 271 221 172M59 281 257 189M125 288 291 206M191 292 325 223M257 292 360 240M320 292 394 257M382 292 430 276M0 208 310 290M40 189 397 285M82 171 440 266M127 151 440 233" fill="none"/></g>
+      <path d="M43 240 135 276 249 240 153 207Z" fill="#8c8751"/>
+      <path d="M268 242 326 264 411 231 346 213Z" fill="#8c8751"/>
+      <path d="M119 238 180 260 240 241 239 220 287 204" fill="none" stroke="#252a25" stroke-width="10" stroke-linejoin="miter"/>
+      <path d="M119 235 180 257 240 238 239 217 287 201" fill="none" stroke="#b54229" stroke-width="6" stroke-linejoin="miter"/>
+      <g stroke="#252a25" stroke-width="4" stroke-linejoin="miter">
+        <path d="M276 77 311 60 389 77 354 94Z" fill="#f5eddc"/><path d="M354 94 389 77 389 226 354 243Z" fill="#b6b08d"/><path d="M276 77 354 94 354 243 276 225Z" fill="#f5eddc"/>
+        <path d="M286 95 343 107 343 141 286 129Z" fill="#284d3d"/>
+        <path d="M286 150 342 162M286 161 342 173M286 172 342 184M286 183 342 195" fill="none"/>
+        <path d="M293 208 322 214"/><path d="M368 100 368 211" stroke-width="2"/>
+        <path d="M48 118 75 102 195 128 169 144Z" fill="#fffaf0"/><path d="M169 144 195 128 195 210 169 227Z" fill="#b6b08d"/><path d="M48 118 169 144 169 227 48 202Z" fill="#f5eddc"/>
+        <path d="M59 134 157 155 157 202 59 182Z" fill="#284d3d"/>
+        <path d="M93 213 116 218 116 239 93 234Z" fill="#b6b08d"/><path d="M49 228 91 214 159 229 116 245Z" fill="#f5eddc"/>
+        <path d="M41 241 77 226 132 239 97 255Z" fill="#f5eddc"/>
+      </g>
+      <g fill="#ebbc5c"><path d="M71 149 78 151 78 157 71 156Z"/><path d="M86 153 109 158 109 161 86 156Z"/><path d="M71 164 132 178 132 181 71 167Z"/><path d="M294 108 312 112 312 116 294 112Z"/><path d="M294 118 331 127 331 130 294 121Z"/></g>
+      <g fill="#b54229"><path d="M143 212 149 213 149 218 143 217Z"/><path d="M331 213 337 214 337 220 331 219Z"/></g>
+      <g stroke="#252a25" stroke-width="1.5"><path d="M61 241 99 249M71 236 110 245M74 236 65 245M87 239 78 248M100 242 91 251"/></g>
+      <g fill="#252a25" font-family="monospace" font-weight="bold"><text x="15" y="28" font-size="12" letter-spacing="1.5">FRESH CONTEXT.</text><text x="15" y="44" font-size="12" letter-spacing="1.5">SAME JOURNEY.</text><text x="18" y="92" font-size="10">YOUR TERMINAL</text><text x="280" y="48" font-size="10">YOUR MODEL</text></g>
+      <path d="M206 73h20m-10-10v20M403 134h12m-6-6v12M219 180h10m-5-5v10" stroke="#b54229" stroke-width="3"/>
+    </svg>
+    <div class="art-caption"><span>FIG. 01 / TWO MACHINES, ONE SESSION</span><span>REIN SYSTEMS</span></div>
+  </div>
+</section>
+<nav class="route" aria-label="Installation steps"><a href="#install"><span>01</span>Install</a><a href="#connect"><span>02</span>Connect</a><a href="#run"><span>03</span>First run</a><a href="#update"><span>04</span>Keep current</a></nav>
+<div class="notice"><div class="stamp">ALREADY RAN CURL?<br>START HERE.</div><p><strong>"Existing config found" is normal.</strong> It means Rein kept your saved settings. A failed connection check is a separate result. If a reasoning model reports "no valid chat completion", <a href="#update">update Rein</a>, then run <code>rein setup --status</code>. The short-probe fix is in v0.9.3.</p></div>
+
+<section class="step" id="install" aria-labelledby="install-title">
+  <aside><div class="step-number">01</div><div class="step-title">Install the CLI</div><p>Run these commands in a normal NodeTerm shell tab.</p></aside>
+  <div><h2 id="install-title">Put Rein in your terminal.</h2><p class="lead">NodeTerm hosts the terminal. Rein is the command you install inside it. Start with a working Node.js installation and these command-line tools.</p>
+    <div class="checks" aria-label="Prerequisites"><span>Node.js 18+</span><span>npm</span><span>git</span><span>curl + Bash</span></div>
+    <div class="command"><div class="command-header"><span>CHECK YOUR TOOLS</span><button class="copy js-only" type="button" data-copy="prereqs" aria-label="Copy prerequisite checks">Copy</button></div><pre><code id="prereqs">node --version
+npm --version
+git --version
+curl --version</code></pre></div>
+    <p class="small">If one is missing, install it before continuing. Node includes npm. <a href="https://nodejs.org/en/download">Get Node.js from its official site.</a> The Bash installer supports macOS, Linux, and WSL.</p>
+    <div class="command"><div class="command-header"><span>INSTALL / LEAVE MODEL SETUP FOR STEP 02</span><button class="copy js-only" type="button" data-copy="install-command" aria-label="Copy installation command">Copy</button></div><pre><code id="install-command">curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh \
+  | bash -s -- --skip-setup</code></pre></div>
+    <p><code>--skip-setup</code> installs the latest build without checking a saved model connection. Your settings and session history stay in place.</p>
+    <div class="expected"><span>LOOK FOR</span>installed · rein &lt;version&gt; · setup skipped</div>
+    <details><summary>"rein: command not found" after installing?</summary><p>Open a fresh NodeTerm shell. If it still cannot find Rein, check the global npm location:</p><pre><code>npm prefix -g</code></pre><p>On macOS and Linux, its <code>bin</code> directory must be on your shell's <code>PATH</code>. The installer prints the exact path when it detects this problem.</p></details>
+    <label class="finish js-only"><input type="checkbox" data-step="1">I can run <code>rein --version</code></label>
+  </div>
+</section>
+
+<section class="step" id="connect" aria-labelledby="connect-title">
+  <aside><div class="step-number">02</div><div class="step-title">Choose a model</div><p>Same Rein. Pick the connection that matches where your model runs.</p></aside>
+  <div><h2 id="connect-title">Make the connection.</h2><p>You can use a local server, your model-host, a supported subscription CLI, or a cloud API key. Choose your route below.</p>
+    <div class="tabs js-only" role="tablist" aria-label="Model connection"><button class="tab" type="button" id="tab-model-host" role="tab" aria-controls="panel-model-host" aria-selected="true">model-host / SSH</button><button class="tab" type="button" id="tab-local" role="tab" aria-controls="panel-local" aria-selected="false" tabindex="-1">Local server</button><button class="tab" type="button" id="tab-login" role="tab" aria-controls="panel-login" aria-selected="false" tabindex="-1">Cloud login</button><button class="tab" type="button" id="tab-key" role="tab" aria-controls="panel-key" aria-selected="false" tabindex="-1">Cloud API key</button></div>
+    <noscript><p>Connection routes are all shown below. Pick the one that matches your setup.</p></noscript>
+    <div class="panel" id="panel-model-host" role="tabpanel" aria-labelledby="tab-model-host">
+      <h3>Your model-host, over SSH.</h3><p>Keep the model server running on the model-host. Make sure NetBird is connected and your <code>model-host</code> SSH alias works.</p>
+      <div class="network" role="img" aria-label="Rein on your Mac connects through SSH over NetBird to the model server at 127.0.0.1 port 8123 on the model-host"><div class="network-node">MAC / NODETERM<small>Rein opens the tunnel</small></div><div class="arrow" aria-hidden="true">→</div><div class="network-node">model-host / MODEL SERVER<small>127.0.0.1:8123 on the model-host</small></div></div>
+      <p class="network-note"><strong>Localhost belongs to the model-host here.</strong> With <code>--ssh model-host</code>, Rein forwards to the remote machine's loopback address. You can keep the server bound to <code>127.0.0.1</code>.</p>
+      <div class="command"><div class="command-header"><span>CHECK SSH, THEN CONFIGURE REIN</span><button class="copy js-only" type="button" data-copy="model-host-command" aria-label="Copy model-host setup commands">Copy</button></div><pre><code id="model-host-command">ssh -o BatchMode=yes model-host true &amp;&amp;
+rein setup --ssh model-host --base-url 127.0.0.1:8123 \
+  --api chat-completions</code></pre></div>
+      <p>Choose a loaded model when asked. If the local server does not require a key, leave the API-key prompt blank. <code>API key: not saved</code> is expected for a server that accepts unauthenticated requests.</p>
+      <details><summary>Why not use the model-host's NetBird IP as the base URL?</summary><p>A server bound only to <code>127.0.0.1</code> is reachable from that server itself. Its NetBird IP identifies the machine, but does not make the loopback-only API listen on the network. The SSH tunnel connects those two pieces.</p><p>If your API already listens on its NetBird interface, a direct HTTP connection is also possible. Use that actual listening address and port in setup.</p></details>
+      <details><summary>The SSH check fails or says "Could not resolve hostname model-host".</summary><p>The <code>model-host</code> name must be a working SSH alias or a resolvable host. Add an entry to <code>~/.ssh/config</code> using your actual NetBird address and model-host username:</p><pre><code>Host model-host
+    HostName YOUR_NETBIRD_IP
+    User YOUR_model-host_USER</code></pre><p>Replace both placeholders. First connect with <code>ssh model-host</code> to verify the host and set up your normal key-based login. Rein opens tunnels non-interactively, so the <code>BatchMode=yes</code> check must pass.</p></details>
+    </div>
+    <div class="panel" id="panel-local" role="tabpanel" aria-labelledby="tab-local">
+      <h3>A model on this computer.</h3><p>Start your model server and load a model. Then open the setup wizard. Rein can discover common local servers such as Ollama, LM Studio, llama.cpp, and vLLM.</p>
+      <div class="command"><div class="command-header"><span>AUTO-DETECT A LOCAL SERVER</span><button class="copy js-only" type="button" data-copy="local-command" aria-label="Copy local setup command">Copy</button></div><pre><code id="local-command">rein setup</code></pre></div>
+      <p>If discovery misses it, choose the custom API option and paste the server URL shown in your model app. On this route, <code>127.0.0.1</code> means the computer running Rein.</p>
+    </div>
+    <div class="panel" id="panel-login" role="tabpanel" aria-labelledby="tab-login">
+      <h3>Sign in with a supported account.</h3><p>Rein delegates subscription authentication to the official Codex or Copilot CLI. Install the one you use, then run its Rein setup command.</p>
+      <div class="command"><div class="command-header"><span>CHATGPT THROUGH CODEX</span><button class="copy js-only" type="button" data-copy="codex-command" aria-label="Copy Codex setup commands">Copy</button></div><pre><code id="codex-command">npm install -g @openai/codex
+rein setup --provider codex</code></pre></div>
+      <div class="command"><div class="command-header"><span>OR, GITHUB COPILOT</span><button class="copy js-only" type="button" data-copy="copilot-command" aria-label="Copy Copilot setup commands">Copy</button></div><pre><code id="copilot-command">npm install -g @github/copilot
+rein setup --provider copilot</code></pre></div>
+      <p>Follow the device-code or browser sign-in shown by the CLI. Use an account eligible for that service. These connections manage their own transport and credentials.</p>
+    </div>
+    <div class="panel" id="panel-key" role="tabpanel" aria-labelledby="tab-key">
+      <h3>A cloud API key.</h3><p>Use a provider API key for direct HTTP requests. API billing is separate from a chat subscription. This example selects OpenAI's Chat Completions API.</p>
+      <div class="command"><div class="command-header"><span>INTERACTIVE CLOUD SETUP</span><button class="copy js-only" type="button" data-copy="key-command" aria-label="Copy cloud API setup command">Copy</button></div><pre><code id="key-command">rein setup --provider openai --api chat-completions</code></pre></div>
+      <p>Setup opens the provider's key page when supported. Enter the key at the hidden terminal prompt and choose a model available to your account. For another provider or a custom base URL, use <code>rein setup</code> and choose it in the wizard.</p>
+    </div>
+    <label class="finish js-only"><input type="checkbox" data-step="2">Setup saved my model connection</label>
+  </div>
+</section>
+
+<section class="step" id="run" aria-labelledby="run-title">
+  <aside><div class="step-number">03</div><div class="step-title">First contact</div><p>A successful check means Rein can talk to the selected model.</p></aside>
+  <div><h2 id="run-title">Ask for a small hello.</h2><p>Verify the saved connection, then make a short request with tools disabled.</p>
+    <div class="command"><div class="command-header"><span>VERIFY AND SEND A TEST MESSAGE</span><button class="copy js-only" type="button" data-copy="run-command" aria-label="Copy first-run commands">Copy</button></div><pre><code id="run-command">rein setup --status &amp;&amp;
+rein --no-tools -p "Reply with the single word: ok"</code></pre></div>
+    <div class="expected"><span>LOOK FOR</span>connection: passed, followed by a short model reply</div>
+    <p style="margin-top:20px">Then move into the project you want Rein to work on and run <code>rein</code>. Your current directory gives its file and shell tools their working context.</p>
+    <p class="small">For chat alongside a live activity view, install tmux and start <code>rein --visual</code>. Ordinary chat does not require tmux.</p>
+    <label class="finish js-only"><input type="checkbox" data-step="3">My model replied</label>
+  </div>
+</section>
+
+<section class="step" id="update" aria-labelledby="update-title">
+  <aside><div class="step-number">04</div><div class="step-title">Keep current</div><p>Install once. Update from the same terminal.</p></aside>
+  <div><h2 id="update-title">Fresh build. Same home.</h2><p>Fetch the current published installer and update Rein. Your model can be offline while this runs.</p>
+    <div class="command"><div class="command-header"><span>UPDATE THE INSTALLED BUILD</span><button class="copy js-only" type="button" data-copy="update-command" aria-label="Copy update commands">Copy</button></div><pre><code id="update-command">rein update &amp;&amp; rein --version</code></pre></div>
+    <p>Restart any running Rein sessions after updating. Your configuration, notes, and saved sessions remain in <code>~/.rein</code>, or your custom <code>REIN_HOME</code>.</p>
+    <details><summary>My version does not have "rein update" yet.</summary><p>Use the curl command in <a href="#install">step 01</a>. It runs the same installer with model setup skipped.</p></details>
+    <details><summary>The updater found local changes in its checkout.</summary><p>Commit or move those changes before updating. The installer preserves edits in its <code>~/.rein/repo</code> checkout. It does not overwrite them to force an update.</p></details>
+    <label class="finish js-only"><input type="checkbox" data-step="4">I know how to update Rein</label>
+  </div>
+</section>
+
+<section class="trouble" aria-labelledby="trouble-title"><h2 id="trouble-title">If a light<br>stays red</h2><div>
+  <details><summary>"No valid chat completion" with Qwen or another reasoning model</summary><p><strong>Update Rein first.</strong> Older setup probes allowed only eight output tokens. A reasoning model could use that budget before returning visible text, even though the server answered correctly. v0.9.3 gives the probe more room and recognizes supported reasoning responses.</p><p>Then rerun <code>rein setup --status</code>. A response that still lacks a completion needs investigation; an HTTP 200 status alone is not enough.</p></details>
+  <details><summary>"SSH connection failed", a timeout, or connection refused</summary><p>Check that NetBird is connected, the model-host is awake, and its model app is serving on the configured port. Run the SSH check in <a href="#connect">step 02</a>. With an SSH route, the model app can remain bound to loopback.</p></details>
+  <details><summary>HTTP 401, HTTP 403, or an unknown model</summary><p>Check the selected provider, account or API key, and model ID. Run <code>rein setup</code> to choose from the server's model list. A missing saved key is only a problem if that server requires one.</p></details>
+  <details><summary>I want to use native Windows without WSL.</summary><p>Use npm to install the prebuilt CLI, then start setup:</p><pre><code>npm install --global git+https://github.com/Zermo/rein-agent.git
+rein setup</code></pre><p>Rerun the npm installation command to update. The curl/Bash updater and tmux route in this guide use macOS, Linux, or WSL.</p></details>
+</div></section>
+
+<footer class="footer"><div><div class="progress-label" id="progress-label" aria-live="polite">YOUR INSTALLATION CHECKLIST</div><div class="progress-track" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div><button class="print js-only" id="print-guide" type="button">Print / save PDF ↗</button></footer>
+<div class="colophon"><span>REIN / FIELD GUIDE 01 / v0.9.3<br>Commands are copied, never executed by this page.</span><span>Documentation and visual review guided by<br><a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/engineering/write-docs">dzhng / write-docs</a> + <a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/visual/screenshot-critique">screenshot-critique</a></span></div>
+<p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
+</main>
+<script>
+document.documentElement.classList.add('js');
+const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+function selectTab(tab, focus = false) {
+  for (const item of tabs) {
+    const selected = item === tab;
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+    document.getElementById(item.getAttribute('aria-controls')).hidden = !selected;
+  }
+  if (focus) tab.focus();
+}
+for (const [index, tab] of tabs.entries()) {
+  tab.addEventListener('click', () => selectTab(tab));
+  tab.addEventListener('keydown', event => {
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = tabs.length - 1;
+    if (next !== undefined) { event.preventDefault(); selectTab(tabs[next], true); }
+  });
+}
+selectTab(tabs[0]);
+for (const button of document.querySelectorAll('[data-copy]')) {
+  button.addEventListener('click', async () => {
+    const command = document.getElementById(button.dataset.copy);
+    try {
+      await navigator.clipboard.writeText(command.textContent);
+      button.textContent = 'Copied';
+      document.getElementById('copy-status').textContent = 'Command copied. Paste it into your terminal when ready.';
+    } catch {
+      const selection = window.getSelection(), range = document.createRange();
+      range.selectNodeContents(command); selection.removeAllRanges(); selection.addRange(range);
+      button.textContent = 'Selected';
+      document.getElementById('copy-status').textContent = 'Clipboard unavailable. The command is selected; copy it using your keyboard.';
+    }
+    setTimeout(() => { button.textContent = 'Copy'; }, 2000);
+  });
+}
+function updateProgress() {
+  const steps = Array.from(document.querySelectorAll('[data-step]'));
+  const completed = steps.filter(step => step.checked).length;
+  document.getElementById('progress-label').textContent = completed === steps.length ? 'ALL SET. TAKE REIN.' : `${completed} OF ${steps.length} STEPS CHECKED`;
+  document.querySelectorAll('.progress-track i').forEach((mark, index) => mark.classList.toggle('done', steps[index].checked));
+}
+document.querySelectorAll('[data-step]').forEach(input => input.addEventListener('change', updateProgress));
+updateProgress();
+document.getElementById('print-guide').addEventListener('click', () => window.print());
+let openBeforePrint;
+window.addEventListener('beforeprint', () => { openBeforePrint = Array.from(document.querySelectorAll('details')).map(item => item.open); document.querySelectorAll('details').forEach(item => { item.open = true; }); });
+window.addEventListener('afterprint', () => { if (openBeforePrint) document.querySelectorAll('details').forEach((item, index) => { item.open = openBeforePrint[index]; }); });
+</script>
+</body>
+</html>

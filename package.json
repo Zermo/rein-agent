@@ -1,6 +1,6 @@
 {
   "name": "rein-agent",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "A minimal, local-first agent harness. System prompt + tools + agentic loop + translation layer, with self-hosted local AI as the default provider.",
   "type": "module",
   "bin": {

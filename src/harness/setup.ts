@@ -13,7 +13,7 @@ import { CLI_PROVIDERS, loginCli, checkCliAuth } from "./auth.ts";
 import { withSshTunnel } from "../ai/ssh.ts";
 import { postChatCompletion } from "../ai/chat-request.ts";
 import { GITHUB_MODELS_RETIRED } from "../ai/endpoints.ts";
-import { chatCompletionChunks, chatCompletionText } from "../ai/openai-completions.ts";
+import { chatCompletionChunks, chatCompletionReasoning, chatCompletionText } from "../ai/openai-completions.ts";
 
 type CliProvider = "codex" | "copilot";
 export interface SetupOptions {
@@ -120,7 +120,8 @@ export async function testConnection(baseUrl: string, model: string, apiKey?: st
 	}
 	const started = Date.now();
 	try {
-		const response = await postChatCompletion(`${baseUrl.replace(/\/$/, "")}/chat/completions`, { model, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 8 }, {
+		// Reasoning models spend part of this budget before writing their visible answer.
+		const response = await postChatCompletion(`${baseUrl.replace(/\/$/, "")}/chat/completions`, { model, messages: [{ role: "user", content: "Reply with the single word: ok" }], max_tokens: 128 }, {
 			signal: AbortSignal.timeout(20_000), redirect: "error",
 			headers: { "content-type": "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
 		});
@@ -128,19 +129,23 @@ export async function testConnection(baseUrl: string, model: string, apiKey?: st
 			const detail = redactKey(await response.text().catch(() => ""), apiKey).slice(0, 300);
 			return { ok: false, detail: `HTTP ${response.status}${detail ? `: ${detail}` : ""}` };
 		}
-		let usable = false;
+		let usable = false, reasoning = false;
 		for await (const chunk of chatCompletionChunks(response)) {
 			if (chunk.error) throw new Error(typeof chunk.error === "string" ? chunk.error : chunk.error.message ?? "The provider returned an error.");
-			const choice = chunk.choices?.[0];
+			const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
+			if (choice?.finish_reason === "content_filter") return { ok: false, detail: "The provider blocked this response (content_filter)." };
+			if (choice?.finish_reason === "aborted") return { ok: false, detail: "The provider aborted this response (aborted)." };
 			const message = choice?.delta ?? choice?.message;
 			if (message && (chatCompletionText(message).trim() || Array.isArray(message.tool_calls) && message.tool_calls.length)) usable = true;
+			if (message && chatCompletionReasoning(message).trim()) reasoning = true;
 		}
-		if (!usable) {
+		if (!usable && !reasoning) {
 			return { ok: false, detail: "Endpoint returned no valid chat completion. Check the API server URL and selected model." };
 		}
+		if (!usable) return { ok: true, detail: `valid chat completion in ${Date.now() - started}ms; the probe returned reasoning rather than a final answer` };
 		return { ok: true, detail: `valid chat completion in ${Date.now() - started}ms` };
 	} catch (error) {
-		return { ok: false, detail: `${redactKey(error instanceof Error ? error.message : String(error), apiKey)}. For a remote server, check its listening port, bind to 0.0.0.0, and verify NetBird/firewall reachability.` };
+		return { ok: false, detail: `${redactKey(error instanceof Error ? error.message : String(error), apiKey)}. For direct remote access, check the server's listening address, port, and NetBird/firewall reachability. For a loopback-only server, use --ssh <host>.` };
 	}
 }
 

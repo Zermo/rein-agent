@@ -1,5 +1,29 @@
 # Posthorse and harness review
 
+## 0.9.3 Reasoning-model setup and install guide
+
+The reported model-host connection was valid: an eight-token setup probe returned
+reasoning with no visible answer. A live probe with 128 tokens reached `ok` in
+26 completion tokens through the existing SSH route. Setup now uses that
+bounded budget and recognizes the same reasoning aliases as normal inference.
+It identifies reasoning-only results explicitly. Empty, malformed, timed-out,
+and provider-error responses continue to fail.
+
+An independent runtime review found one P2 issue: partial reasoning could pass
+setup when the provider ended with `content_filter` or `aborted`. Both terminal
+reasons now fail, including a later SSE chunk after partial text or reasoning.
+Twelve real HTTP regression cases cover these combinations. The reviewer
+rechecked the change and reported no remaining findings. The full source suite,
+Node 18 bundle smoke, native provenance, real browser smoke, and package gates
+all pass.
+
+The [installation field guide](docs/install.html) covers fresh installation,
+existing configurations, model-host loopback access through SSH, local discovery,
+cloud accounts, API keys, first use, and updates. It runs offline and copies
+commands without executing them. The guide follows dzhng's `write-docs` and
+`screenshot-critique` skills. The [visual review record](docs/install-guide-review.md)
+records the screenshot findings, corrections, and functional checks.
+
 ## 0.9.2 Installer updates
 
 `rein update` downloads the official installer with curl before invoking Bash
