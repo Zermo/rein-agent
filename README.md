@@ -57,8 +57,7 @@ instructions. For offline use, open `docs/install.html` from a local checkout.
 
 [Repo cards and logo files](docs/branding.md) · [Publish the guide](docs/guide-deployment.md)
 
-One-liner (macOS / Linux / WSL) — installs the harness and walks you through
-model setup (the openclaw / hermes style onboarding):
+Install on macOS, Linux, or WSL and start the guided setup:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
@@ -77,8 +76,15 @@ external session-launch API, so this is one manual step; Rein does not silently
 drop a supplied prompt, resume ID, model option, or working directory into a
 different session. Commands with options continue in their original terminal.
 
-Flags after `bash -s --`: `--skip-setup` skips model checks and app launch,
-`--yes` avoids model prompts, `--no-launch` leaves the app closed, and
+The installer opens the wizard in your terminal even when installed through the
+curl pipe. Answer four work-style questions, review your profile and suggested
+skill pack, then connect a model. You can change answers before saving, choose
+another pack, or skip skills. The last step offers optional proactive suggestions
+for a folder you choose and gives you a first task to try.
+
+Flags after `bash -s --`: `--skip-setup` skips onboarding, model checks, and app launch,
+`--yes` runs unattended connection setup without inventing a profile,
+`--no-launch` leaves the app closed, and
 `--terminal-only` skips NodeTerm and saves a terminal preference.
 Linux, WSL, remote shells, and CI keep the CLI path. Install NodeTerm separately
 from its [official releases](https://nodeterm.dev/releases) on other supported desktops.
@@ -96,8 +102,9 @@ platforms, setup details, and the current native-app limits.
 The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM),
 accepts remote hosts, and offers cloud API keys or supported subscription logins.
 It tests API connections and saves `~/.rein/config.json` (or `$REIN_HOME/config.json`).
-You can always re-run it: `rein setup` (`--yes` non-interactive,
-`--status` config + connection check).
+Run `rein setup` again for the full walkthrough. Use
+`rein setup --connection-only` to change only the model connection,
+or `rein setup --status` to check it.
 
 Or install manually:
 
@@ -136,8 +143,8 @@ curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | 
 Native Windows users can rerun the manual npm installation command above.
 
 ```sh
-# local (the default):
-ollama serve && ollama pull qwen2.5-coder:7b
+# local, with the Ollama app or server already running:
+ollama pull qwen2.5-coder:7b
 rein-agent
 
 # any provider:
@@ -145,6 +152,48 @@ rein-agent --provider deepseek --model deepseek-chat
 rein-agent --provider openai --model gpt-4o
 REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein-agent -p "hello"
 ```
+
+### Tell Rein how you work
+
+The operator-profile wizard asks what you work on, how much detail helps you,
+how you want changes handled, and where you prefer to talk to your agent.
+Answers use fixed weights to recommend one of four packs. The profile is a
+revisable work preference, with no personality ranking or health assessment.
+
+| Pack | Matching preferences | Bundled workflows |
+| --- | --- | --- |
+| `ship` | Coding, terse, yolo | `github-pr-workflow`, `tdd`, `caveman` |
+| `ops` | Ops, terse, plan | `hermes-agent`, `fleet-command-ops`, `execution-discipline` |
+| `study` | Research, walkthrough, ask | `grounded-citations`, `plan` |
+| `studio` | Creative, normal, ask | `claude-design`, `comfyui` |
+
+`ops` is the fallback when no rule matches or scoring is tied. You can select
+any pack or none. These are bundled workflow instructions; selecting a pack
+does not install Hermes, Claude, or ComfyUI. Choosing chat or voice records a
+preference; NodeTerm and the terminal remain the available chat interfaces.
+
+Setup saves `SOUL.md` for agent voice, `USER.md` for your work preferences,
+`AGENTS.md` for the operating brief, and `profile.yaml` for the machine-readable
+`operator_profile` and enabled pack. They live in your private `~/.rein`, or
+`$REIN_HOME`, and leave project instructions and model credentials in place.
+The profile informs Rein's instructions in future sessions.
+
+```sh
+rein profile                   # view your saved profile and enabled pack
+rein profile --json            # inspect the structured profile
+rein setup profile             # revise it without connecting to a model
+rein profile pack study        # choose a different pack
+rein profile pack none         # disable profile-pack skills
+```
+
+`rein profile setup` also opens the profile wizard. An autonomy preference
+changes the operating brief; it does not change `--ask`, host permissions, or
+background task approvals. Proactive suggestions are optional. Setup lets you
+choose manual scans for a folder, enroll it and start a background service, or
+skip proactive work.
+Proposed tasks stay pending until you approve them and run within fixed budgets.
+See the [operator-profile walkthrough](https://github.com/Zermo/rein-agent/wiki/Operator-profile)
+for the questions, saved files, and controls.
 
 ## Usage
 
@@ -155,7 +204,7 @@ rein-agent loop               autonomous experiment loop (TASK.md + METRIC.md)
 rein-agent improve [goal]     self-improvement loop on this repo
 rein-agent gates [file] --mode m  unlazy gates: lint | status | approve | reverify
 rein-agent models             what rein can see: local servers + provider presets
-rein skills [name]            bundled Matt Pocock workflows and references
+rein skills [name]            bundled workflows and enabled profile-pack skills
 rein debug <folder> [--json]  offline exported-session diagnostics (counts only)
 rein update                   download and install the latest published build
 rein --visual                 split chat and live activity; press c in the activity pane for the canvas
@@ -164,12 +213,15 @@ rein tmux start               start a persistent bash shell
 rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
 rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
 rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
-rein setup                    onboarding wizard (also: --yes, --status)
+rein setup                    guided work profile, model connection, and first task
+rein setup --connection-only  change only the model connection
+rein setup profile            offline work-style wizard; review and choose a pack
+rein profile                  view your profile (also: --json, setup, pack <name>)
 rein login codex|copilot       official browser/device account sign-in
 rein --version                print version
 ```
 
-REPL commands: `/help /new /model /tools /sessions /resume <id> /branch /context /new-context [handoff] /skills /skill <name> <task> /stop /quit`.
+REPL commands: `/help /legend /new /model /tools /sessions /resume <id> /branch /context /new-context [handoff] /skills /skill <name> <task> /stop /quit`.
 While the agent is working, just type — it's injected as a steering message
 after the current tool batch (pi's steering, not pi's queue).
 `/stop` immediately cancels the current turn and its owned shell process group.
@@ -178,9 +230,9 @@ Queued input is discarded; send a new request when ready to continue.
 ### Explicit Chat Completions connections
 
 ```sh
-rein setup --api chat-completions --base-url http://model-host:1234
+rein setup --connection-only --api chat-completions --base-url http://model-host:1234
 # When the remote API listens only on its own loopback interface:
-rein setup --api chat-completions --ssh model-host --base-url 127.0.0.1:1234
+rein setup --connection-only --api chat-completions --ssh model-host --base-url 127.0.0.1:1234
 ```
 
 The wizard records `"api": "chat-completions"` and shows the final POST endpoint.
@@ -200,6 +252,18 @@ marker with each numbered reply. Tools have separate named labels. While you
 type steering, the display pauses under an operator prompt; agent execution
 continues, and its output resumes under the same reply identity after Enter.
 `NO_COLOR` removes ANSI color while preserving the labels and spacing.
+
+`MESSAGE` labels ordinary assistant text. A reply that begins with an explicit
+`[RESULT]`, `[OPINION]`, `[CHOICE]`, `[CHANGE]`, or `[EDIT]` heading keeps that
+agent-declared purpose in its label. These labels do not measure confidence or
+verify the claim. Known tool contracts get READ, WRITE, EDIT, EXEC, or other
+action labels; matching call numbers connect each request with its tool result.
+COMPLETE, HANDOFF, ERROR, CANCELED, and LIMIT show how a reply ended.
+
+THINKING shows a status without exposing hidden reasoning. When the provider
+reports reasoning-token usage, Rein shows that count at the end of the reply.
+This adapter does not report reasoning effort, and token count or elapsed time
+does not measure thinking strength. Use `/legend` for the full label key.
 
 ### Persistent bash and a live node canvas
 
@@ -653,8 +717,9 @@ is the baseline for fully self-sustaining agents.
 ### Proactive work from task history
 
 `rein autonomy` adds a background supervisor and a terminal dashboard. It uses
-the host's user service manager: launchd on macOS, or systemd on Linux. Setup
-offers the commands; installing the package alone does not start inference.
+the host's user service manager: launchd on macOS, or systemd on Linux. The
+onboarding wizard offers folder enrollment and a separate background-service
+choice. Installing the package alone does not start inference.
 
 Start in a workspace whose Rein history you want the supervisor to inspect:
 

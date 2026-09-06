@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="A hands-on Rein installation guide for NodeTerm, local models, self-hosted models over SSH, and cloud accounts.">
-<title>Rein field guide · Install, connect, run</title>
+<meta name="description" content="Set up Rein for the way you work: choose an operator profile, an optional skill pack, a model connection, and your first task.">
+<title>Rein field guide · Set up your agent</title>
 <link rel="canonical" href="https://zermo.github.io/rein-agent/">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%22240%20200%20780%20780%22%20color%3D%22%23b54229%22%3E%3Crect%20x%3D%22240%22%20y%3D%22200%22%20width%3D%22780%22%20height%3D%22780%22%20rx%3D%2280%22%20fill%3D%22%23f5eddc%22%2F%3E%3Cpath%20fill%3D%22currentColor%22%20fill-rule%3D%22evenodd%22%20d%3D%22M466%20278H707C814%20278%20886%20354%20886%20456V509C886%20610%20833%20666%20762%20690L885%20902Q888%20907%20882%20907H666Q661%20907%20659%20902L541%20708H507V903Q507%20907%20503%20907H377Q372%20907%20372%20903V375C372%20321%20416%20278%20466%20278Z%20M616%20408H735L818%20586L794%20616H726L683%20582H543Q540%20581%20541%20577L615%20410Q615%20408%20616%20408Z%22%2F%3E%3Crect%20x%3D%22682%22%20y%3D%22446%22%20width%3D%2242%22%20height%3D%2238%22%20rx%3D%222%22%20fill%3D%22currentColor%22%2F%3E%3C%2Fsvg%3E">
 <meta name="theme-color" content="#f5eddc">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Boot up. Take Rein. | Installation field guide">
-<meta property="og:description" content="Install Rein, connect your local or cloud model, and run your first session. A field guide for NodeTerm, self-hosted models over SSH, and cloud accounts.">
+<meta property="og:description" content="Install Rein, choose how your agent works with you, connect a local or cloud model, and start your first task.">
 <meta property="og:url" content="https://zermo.github.io/rein-agent/">
 <meta property="og:image" content="https://zermo.github.io/rein-agent/assets/rein-field-guide-card.jpg">
 <meta property="og:image:width" content="1280">
@@ -26,6 +26,7 @@
 @media(max-width:360px){h1{font-size:70px}.masthead .right a{font-size:11px}.brand{font-size:25px}.network{grid-template-columns:1fr}.network .arrow{transform:rotate(90deg)}.footer{flex-direction:column}}
 @media(pointer:coarse){.copy,summary,.finish{min-height:44px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{@page{margin:14mm}body{background:#fff;color:#000}main{max-width:none;margin:0;padding:0;border:0;box-shadow:none}.hero{padding:22px 0}.hero-art{max-width:350px;box-shadow:none}h1{font-size:62px}.route,.copy,.print,.finish,.footer,.skip,.tabs{display:none!important}.step{padding:24px 0;grid-template-columns:100px 1fr;break-inside:avoid}.step-number{font-size:48px}.step aside p{display:none}.notice,.trouble{grid-template-columns:100px 1fr}.command,details pre{color:#000;background:#f1f1f1;border:1px solid #bbb}.command-header{color:#333;border-color:#bbb}.hero-art,.notice,.network{-webkit-print-color-adjust:exact;print-color-adjust:exact}.panel[hidden]{display:none!important}.trouble details{break-inside:avoid}.colophon{font-size:9px}.eyebrow{font-size:10px}a{color:#000}pre{font-size:10px}}
+.profile-questions{list-style:none;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:22px 0}.profile-questions li{border:1px solid var(--line);border-top:3px solid var(--red);padding:16px;background:#eee4d0}.profile-questions strong{display:block;margin:7px 0 10px;font-size:17px;line-height:1.35}.profile-questions p{margin:0;font-size:14px}.profile-questions .eyebrow{color:var(--red);font-size:10px;letter-spacing:1px}.table-wrap{overflow-x:auto;margin:20px 0}.guide-table{width:100%;border-collapse:collapse;font-size:14px;text-align:left}.guide-table caption{text-align:left;font:700 12px var(--mono);letter-spacing:.7px;text-transform:uppercase;margin-bottom:12px}.guide-table th,.guide-table td{padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:top}.guide-table thead{background:var(--ink);color:var(--paper)}.guide-table tbody th{font-family:var(--mono);color:var(--red)}.first-task{border-left:4px solid var(--red);background:#eee4d0;padding:18px 20px;margin:22px 0}.first-task .eyebrow{color:var(--red)}.first-task p{margin:10px 0 0}@media(max-width:600px){.profile-questions{grid-template-columns:1fr}.guide-table{font-size:12px}.guide-table th,.guide-table td{padding:9px 6px}}@media print{.profile-questions li,.first-task{break-inside:avoid}.profile-questions{grid-template-columns:1fr 1fr}.guide-table{font-size:10px}.guide-table thead{background:#eee;color:#000}}
 </style>
 </head>
 <body>
@@ -33,7 +34,7 @@
 <main id="top">
 <header class="masthead"><a class="brand" href="#top" aria-label="Back to top"><svg class="brand-mark" viewBox="340 250 580 690" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M466 278H707C814 278 886 354 886 456V509C886 610 833 666 762 690L885 902Q888 907 882 907H666Q661 907 659 902L541 708H507V903Q507 907 503 907H377Q372 907 372 903V375C372 321 416 278 466 278Z M616 408H735L818 586L794 616H726L683 582H543Q540 581 541 577L615 410Q615 408 616 408Z"/><rect x="682" y="446" width="42" height="38" rx="2" fill="currentColor"/></svg>REIN</a><div class="right"><span class="eyebrow">Operator's field guide / 01</span><a href="https://github.com/Zermo/rein-agent/wiki">Wiki ↗</a><a href="https://github.com/Zermo/rein-agent">Source ↗</a></div></header>
 <section class="hero" aria-labelledby="title">
-  <div><p class="eyebrow">NodeTerm · macOS · Linux · WSL</p><h1 id="title">Boot up.<br>Take rein.</h1><p class="intro">A terminal on your desk.<br>A model wherever you want it.<br>Let's get them talking.</p></div>
+  <div><p class="eyebrow">NodeTerm · macOS · Linux · WSL</p><h1 id="title">Boot up.<br>Take rein.</h1><p class="intro">An agent for the way you work.<br>Your model. Your preferences.<br>Set up your first session.</p></div>
   <div class="hero-art">
     <svg viewBox="0 0 440 292" role="img" aria-labelledby="art-title art-desc" xmlns="http://www.w3.org/2000/svg">
       <title id="art-title">A terminal connected to a remote model server</title><desc id="art-desc">A retro computer and a server tower stand on a printed grid, joined by a red cable.</desc>
@@ -64,38 +65,58 @@
     <div class="art-caption"><span>FIG. 01 / TWO MACHINES, ONE SESSION</span><span>REIN SYSTEMS</span></div>
   </div>
 </section>
-<nav class="route" aria-label="Installation steps"><a href="#install"><span>01</span>Install</a><a href="#connect"><span>02</span>Connect</a><a href="#run"><span>03</span>First run</a><a href="#update"><span>04</span>Keep current</a></nav>
-<div class="notice"><div class="stamp">ALREADY RAN CURL?<br>START HERE.</div><p><strong>"Existing config found" is normal.</strong> It means Rein kept your saved settings. A failed connection check is a separate result. If a reasoning model reports "no valid chat completion", <a href="#update">update Rein</a>, then run <code>rein setup --status</code>. The short-probe fix is in v0.9.3.</p></div>
+<nav class="route" aria-label="Setup steps"><a href="#install"><span>01</span>Install</a><a href="#profile"><span>02</span>Your profile</a><a href="#connect"><span>03</span>Connect</a><a href="#run"><span>04</span>First task</a><a href="#update"><span>05</span>Keep current</a></nav>
+<div class="notice"><div class="stamp">ALREADY HAVE REIN?<br>START HERE.</div><p>Run <code>rein setup</code> for the complete walkthrough, or <code>rein setup profile</code> to add your work preferences without changing the model connection. <strong>You can review your choices before saving.</strong> Need a newer build? <a href="#update">Update Rein first.</a></p></div>
 
 <section class="step" id="install" aria-labelledby="install-title">
   <aside><div class="step-number">01</div><div class="step-title">Install the CLI</div><p>Run these commands in your current terminal.</p></aside>
-  <div><h2 id="install-title">Put Rein in your terminal.</h2><p class="lead">Rein installs as a command. On a local macOS desktop, the installer also adds the official NodeTerm app for its native canvas. Start with a working Node.js installation and these command-line tools.</p>
+  <div><h2 id="install-title">Meet your agent.</h2><p class="lead">Rein installs as a command. On a local macOS desktop, the installer also adds the official NodeTerm app for its native canvas. Start with a working Node.js installation and these command-line tools.</p>
     <div class="checks" aria-label="Prerequisites"><span>Node.js 18+</span><span>npm</span><span>git</span><span>curl + Bash</span></div>
     <div class="command"><div class="command-header"><span>CHECK YOUR TOOLS</span><button class="copy js-only" type="button" data-copy="prereqs" aria-label="Copy prerequisite checks">Copy</button></div><pre><code id="prereqs">node --version
 npm --version
 git --version
 curl --version</code></pre></div>
     <p class="small">If one is missing, install it before continuing. Node includes npm. <a href="https://nodejs.org/en/download">Get Node.js from its official site.</a> The Bash installer supports macOS, Linux, and WSL.</p>
-    <div class="command"><div class="command-header"><span>INSTALL / LEAVE MODEL SETUP FOR STEP 02</span><button class="copy js-only" type="button" data-copy="install-command" aria-label="Copy installation command">Copy</button></div><pre><code id="install-command">curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh \
-  | bash -s -- --skip-setup</code></pre></div>
-    <p><code>--skip-setup</code> installs the latest build without checking a saved model connection. Your settings and session history stay in place. On macOS, this also installs NodeTerm if missing, without opening it. Add <code>--terminal-only</code> to keep the terminal-only setup.</p>
-    <div class="expected"><span>LOOK FOR</span>installed · rein &lt;version&gt; · setup skipped</div>
+    <div class="command"><div class="command-header"><span>INSTALL + START GUIDED SETUP</span><button class="copy js-only" type="button" data-copy="install-command" aria-label="Copy installation command">Copy</button></div><pre><code id="install-command">curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash</code></pre></div>
+    <p>Keep this terminal open. Rein asks how you work, shows an optional skill pack, then connects a model. The installer reads your answers from the terminal even through the curl pipe. The next sections explain what to choose.</p>
+    <div class="expected"><span>NEXT</span>Follow the numbered choices in the setup wizard.</div>
+    <details><summary>I want to install now and set up later.</summary><p>Add <code>--skip-setup</code> after <code>bash -s --</code> to skip the wizard, connection checks, and app launch. Add <code>--terminal-only</code> to skip NodeTerm and keep Rein in your current terminal. <code>--yes</code> runs unattended connection setup without inventing work-style answers. Start the guided setup later with <code>rein setup</code>.</p></details>
     <details><summary>"rein: command not found" after installing?</summary><p>Open a fresh NodeTerm shell. If it still cannot find Rein, check the global npm location:</p><pre><code>npm prefix -g</code></pre><p>On macOS and Linux, its <code>bin</code> directory must be on your shell's <code>PATH</code>. The installer prints the exact path when it detects this problem.</p></details>
     <details><summary>NodeTerm was already running during installation.</summary><p>Its active settings stay untouched. Close NodeTerm when convenient, then run <code>rein desktop install --no-launch</code> to register Rein as its default agent. You can already run <code>rein --terminal</code> in a NodeTerm terminal node.</p></details>
     <label class="finish js-only"><input type="checkbox" data-step="1">I can run <code>rein --version</code></label>
   </div>
 </section>
 
+<section class="step" id="profile" aria-labelledby="profile-title">
+  <aside><div class="step-number">02</div><div class="step-title">Your work style</div><p>Four choices. A profile you can change as your work changes.</p></aside>
+  <div><h2 id="profile-title">Tell Rein how you work.</h2><p class="lead">Answer for the tasks you want help with today. Rein uses your choices to set its response style and suggest a skill pack. These are work preferences, with no personality ranking or health assessment.</p>
+    <ol class="profile-questions">
+      <li><span class="eyebrow">RESPONSE DETAIL</span><strong>When the agent talks, I want...</strong><p>Bullets, then stop · Short paragraphs · Step-by-step with why</p></li>
+      <li><span class="eyebrow">EVERYDAY WORK</span><strong>Most days I will use this for...</strong><p>Shipping code · Keeping services alive · Research and writing · Images, video, and design</p></li>
+      <li><span class="eyebrow">WORKING TOGETHER</span><strong>When a change is risky, the agent should...</strong><p>Ask first · Show a plan, then do it · Do it, tell me after</p></li>
+      <li><span class="eyebrow">PREFERRED INTERFACE</span><strong>I will mostly talk to it from...</strong><p>Terminal · Slack or chat · Voice or phone</p></li>
+    </ol>
+    <p>Enter a letter or number at each question. Type <code>back</code> to revisit one. Review the result, then accept the suggested pack, choose another, or skip packs before saving. The same answers produce the same recommendation.</p>
+    <div class="table-wrap"><table class="guide-table"><caption>Four optional skill packs</caption><thead><tr><th scope="col">Pack</th><th scope="col">Fits this work style</th><th scope="col">Helps with</th></tr></thead><tbody><tr><th scope="row">ship</th><td>Coding · terse · yolo</td><td>Pull requests, tests, concise updates</td></tr><tr><th scope="row">ops</th><td>Ops · terse · plan</td><td>Service checks and deliberate execution</td></tr><tr><th scope="row">study</th><td>Research · walkthrough · ask</td><td>Sources, citations, and plans</td></tr><tr><th scope="row">studio</th><td>Creative · normal · ask</td><td>Design and image-workflow planning</td></tr></tbody></table></div>
+    <p class="small"><code>ops</code> is the fallback for a tie or an unmatched combination. Packs add bundled instructions. They do not install extra apps. Chat and voice choices record preferences; start with NodeTerm or the terminal. Your autonomy choice does not change tool permissions or background approvals.</p>
+    <details><summary>What gets saved, and where?</summary><p>Your private <code>~/.rein</code> folder, or custom <code>REIN_HOME</code>, receives <code>SOUL.md</code> for agent voice, <code>USER.md</code> for your preferences, <code>AGENTS.md</code> for the operating brief, and <code>profile.yaml</code> for the machine-readable profile and enabled pack. Project instructions and model credentials stay in place. Setup preserves text outside Rein's marked sections and backs up changed originals.</p><p>Scoring runs locally without a model. The wizard does not send answers to a poll service. During normal model sessions, the saved instructions become part of the prompt sent to your selected provider.</p></details>
+    <div class="command"><div class="command-header"><span>REVISIT YOUR PROFILE AT ANY TIME</span><button class="copy js-only" type="button" data-copy="profile-command" aria-label="Copy profile commands">Copy</button></div><pre><code id="profile-command">rein profile
+rein setup profile</code></pre></div>
+    <p class="small">Use <code>rein profile pack none</code> to turn off the pack while keeping your preferences. The <a href="https://github.com/Zermo/rein-agent/wiki/Operator-profile">operator-profile wiki</a> lists every skill and profile control.</p>
+    <label class="finish js-only"><input type="checkbox" data-step="2">I reviewed my profile and chose a pack, or skipped packs</label>
+  </div>
+</section>
+
 <section class="step" id="connect" aria-labelledby="connect-title">
-  <aside><div class="step-number">02</div><div class="step-title">Choose a model</div><p>Same Rein. Pick the connection that matches where your model runs.</p></aside>
-  <div><h2 id="connect-title">Make the connection.</h2><p>You can use a local server, your own remote hardware, a supported subscription CLI, or a cloud API key. Choose your route below.</p>
+  <aside><div class="step-number">03</div><div class="step-title">Choose a model</div><p>Same Rein. Pick the connection that matches where your model runs.</p></aside>
+  <div><h2 id="connect-title">Give Rein a model.</h2><p>Continue in the wizard and reuse your saved connection or choose a new one. You can use a local server, your own remote hardware, a supported subscription CLI, or a cloud API key. The routes below explain each choice. Their commands revisit only the connection step.</p>
     <div class="tabs js-only" role="tablist" aria-label="Model connection"><button class="tab" type="button" id="tab-local" role="tab" aria-controls="panel-local" aria-selected="true">Local server</button><button class="tab" type="button" id="tab-remote" role="tab" aria-controls="panel-remote" aria-selected="false" tabindex="-1">Network / SSH</button><button class="tab" type="button" id="tab-login" role="tab" aria-controls="panel-login" aria-selected="false" tabindex="-1">Cloud login</button><button class="tab" type="button" id="tab-key" role="tab" aria-controls="panel-key" aria-selected="false" tabindex="-1">Cloud API key</button></div>
     <noscript><p>Connection routes are all shown below. Pick the one that matches your setup.</p></noscript>
     <div class="panel" id="panel-local" role="tabpanel" aria-labelledby="tab-local">
       <h3>Your hardware. Your model.</h3><p>Install a model server on a computer with enough memory for your chosen model. Rein connects to its OpenAI-compatible Chat Completions API.</p>
       <p><strong>LM Studio:</strong> <a href="https://lmstudio.ai/download">install LM Studio</a>, download and load a model, then start the server from its Developer tab. Its usual local address is <code>http://localhost:1234/v1</code>. See the <a href="https://lmstudio.ai/docs/developer/core/server">server guide</a>.</p>
       <p><strong>Ollama:</strong> <a href="https://ollama.com/download">install Ollama</a> and start its app, or run <code>ollama serve</code>. In another terminal run <code>ollama pull qwen2.5-coder:7b</code>, or pull another model that fits your hardware. Its Chat Completions base URL is <code>http://localhost:11434/v1</code>.</p>
-      <div class="command"><div class="command-header"><span>AUTO-DETECT A LOCAL SERVER</span><button class="copy js-only" type="button" data-copy="local-command" aria-label="Copy local setup command">Copy</button></div><pre><code id="local-command">rein setup</code></pre></div>
+      <div class="command"><div class="command-header"><span>AUTO-DETECT A LOCAL SERVER</span><button class="copy js-only" type="button" data-copy="local-command" aria-label="Copy local setup command">Copy</button></div><pre><code id="local-command">rein setup --connection-only</code></pre></div>
       <p>Rein checks localhost ports <code>11434</code>, <code>1234</code>, <code>8080</code>, and <code>8000</code> for Ollama, LM Studio, llama.cpp, and vLLM. It lists available models and tests the selected connection.</p>
       <p>If discovery misses it, choose the custom API option and paste the URL shown in your model app. <code>127.0.0.1</code> means the computer running Rein. Find more hosting options in the <a href="https://github.com/Zermo/rein-agent/wiki/Self-hosted-models">self-hosted models wiki</a>.</p>
     </div>
@@ -103,13 +124,13 @@ curl --version</code></pre></div>
       <h3>A model elsewhere on your network.</h3><p>Run the server on your own hardware and connect over your LAN, VPN, or mesh network. Supply the reachable hostname or IP and the port shown by your model server. Rein checks API paths on that address; it does not scan your network for machines.</p>
       <div class="network" role="img" aria-label="Rein connects over your LAN, mesh, or SSH to a model server on your own hardware"><div class="network-node">YOUR TERMINAL<small>Rein checks the API</small></div><div class="arrow" aria-hidden="true">→</div><div class="network-node">YOUR MODEL SERVER<small>LAN · mesh · SSH</small></div></div>
       <p>For a direct connection, enable LM Studio's <strong>Serve on Local Network</strong> setting, or configure Ollama's <code>OLLAMA_HOST</code> to bind to a reachable interface. Allow the server port through your firewall only for intended clients. A mesh connection still needs a listener on a reachable interface.</p>
-      <div class="command"><div class="command-header"><span>DIRECT CONNECTION / REPLACE THE HOST</span><button class="copy js-only" type="button" data-copy="remote-command" aria-label="Copy remote setup command">Copy</button></div><pre><code id="remote-command">rein setup --provider custom \
+      <div class="command"><div class="command-header"><span>DIRECT CONNECTION / REPLACE THE HOST</span><button class="copy js-only" type="button" data-copy="remote-command" aria-label="Copy remote setup command">Copy</button></div><pre><code id="remote-command">rein setup --connection-only --provider custom \
   --base-url http://model-host.local:1234/v1 \
   --api chat-completions</code></pre></div>
       <p>Replace <code>model-host.local:1234</code> with your server's actual LAN or mesh address and port. Rein normalizes the API prefix, asks the server for models, then checks Chat Completions. Enter a key if your server requires one.</p>
       <details><summary>Keep the server on loopback and connect over SSH.</summary><p>Create a working SSH alias such as <code>model-host</code> using your normal SSH configuration and key-based login. Connect once with <code>ssh model-host true</code> to verify its identity. Rein's non-interactive check must pass:</p>
       <div class="command"><div class="command-header"><span>CHECK SSH, THEN CONFIGURE REIN</span><button class="copy js-only" type="button" data-copy="ssh-command" aria-label="Copy SSH setup commands">Copy</button></div><pre><code id="ssh-command">ssh -o BatchMode=yes model-host true &amp;&amp;
-rein setup --ssh model-host --base-url 127.0.0.1:1234 \
+rein setup --connection-only --ssh model-host --base-url 127.0.0.1:1234 \
   --api chat-completions</code></pre></div>
       <p>Replace the alias and port with your own. With <code>--ssh</code>, the loopback address belongs to the remote server. Rein opens the tunnel, so your model app can stay bound to <code>127.0.0.1</code>.</p></details>
       <p class="small">See <a href="https://github.com/Zermo/rein-agent/wiki/Self-hosted-models">server binding, mesh setup, and connection checks</a> for the complete walkthrough.</p>
@@ -117,53 +138,59 @@ rein setup --ssh model-host --base-url 127.0.0.1:1234 \
     <div class="panel" id="panel-login" role="tabpanel" aria-labelledby="tab-login">
       <h3>Sign in with a supported account.</h3><p>Rein delegates subscription authentication to the official Codex or Copilot CLI. Install the one you use, then run its Rein setup command.</p>
       <div class="command"><div class="command-header"><span>CHATGPT THROUGH CODEX</span><button class="copy js-only" type="button" data-copy="codex-command" aria-label="Copy Codex setup commands">Copy</button></div><pre><code id="codex-command">npm install -g @openai/codex
-rein setup --provider codex</code></pre></div>
+rein setup --connection-only --provider codex</code></pre></div>
       <div class="command"><div class="command-header"><span>OR, GITHUB COPILOT</span><button class="copy js-only" type="button" data-copy="copilot-command" aria-label="Copy Copilot setup commands">Copy</button></div><pre><code id="copilot-command">npm install -g @github/copilot
-rein setup --provider copilot</code></pre></div>
+rein setup --connection-only --provider copilot</code></pre></div>
       <p>Follow the device-code or browser sign-in shown by the CLI. Use an account eligible for that service. These connections manage their own transport and credentials.</p>
     </div>
     <div class="panel" id="panel-key" role="tabpanel" aria-labelledby="tab-key">
       <h3>A cloud API key.</h3><p>Use a provider API key for direct HTTP requests. API billing is separate from a chat subscription. This example selects OpenAI's Chat Completions API.</p>
-      <div class="command"><div class="command-header"><span>INTERACTIVE CLOUD SETUP</span><button class="copy js-only" type="button" data-copy="key-command" aria-label="Copy cloud API setup command">Copy</button></div><pre><code id="key-command">rein setup --provider openai --api chat-completions</code></pre></div>
-      <p>Setup opens the provider's key page when supported. Enter the key at the hidden terminal prompt and choose a model available to your account. For another provider or a custom base URL, use <code>rein setup</code> and choose it in the wizard.</p>
+      <div class="command"><div class="command-header"><span>INTERACTIVE CLOUD SETUP</span><button class="copy js-only" type="button" data-copy="key-command" aria-label="Copy cloud API setup command">Copy</button></div><pre><code id="key-command">rein setup --connection-only --provider openai --api chat-completions</code></pre></div>
+      <p>Setup opens the provider's key page when supported. Enter the key at the hidden terminal prompt and choose a model available to your account. For another provider or a custom base URL, use <code>rein setup --connection-only</code> and choose it in the wizard.</p>
     </div>
-    <label class="finish js-only"><input type="checkbox" data-step="2">Setup saved my model connection</label>
+    <label class="finish js-only"><input type="checkbox" data-step="3">Setup saved my model connection</label>
   </div>
 </section>
 
 <section class="step" id="run" aria-labelledby="run-title">
-  <aside><div class="step-number">03</div><div class="step-title">First contact</div><p>A successful check means Rein can talk to the selected model.</p></aside>
-  <div><h2 id="run-title">Ask for a small hello.</h2><p>Verify the saved connection, then make a short request with tools disabled.</p>
+  <aside><div class="step-number">04</div><div class="step-title">First task</div><p>A successful check means Rein can talk to the selected model.</p></aside>
+  <div><h2 id="run-title">Start with one useful task.</h2><p>First, verify the saved connection and ask for a short reply with tools disabled.</p>
     <div class="command"><div class="command-header"><span>VERIFY AND SEND A TEST MESSAGE</span><button class="copy js-only" type="button" data-copy="run-command" aria-label="Copy first-run commands">Copy</button></div><pre><code id="run-command">rein setup --status &amp;&amp;
 rein --no-tools -p "Reply with the single word: ok"</code></pre></div>
-    <div class="expected"><span>LOOK FOR</span>connection: passed, followed by a short model reply</div>
+    <div class="expected"><span>LOOK FOR</span>HTTP connections: connection: passed, then a short reply.<br>Subscription CLI: authentication status, then a short reply.</div>
     <p style="margin-top:20px">On a local macOS desktop, bare <code>rein</code> opens an installed NodeTerm. Choose a project and add a Rein agent node. NodeTerm has no external session-launch API, so that last step is manual. To work in your current terminal and directory, use <code>rein --terminal</code>.</p>
-    <p class="small">Chat shows distinct, numbered OPERATOR and REIN labels. In local NodeTerm sessions the detailed activity view opens automatically, in a browser if the native node cannot embed it. Use <code>--no-browser</code> to skip this, or install tmux for the explicit <code>rein --visual</code> split.</p>
-    <label class="finish js-only"><input type="checkbox" data-step="3">My model replied</label>
+    <div class="first-task"><span class="eyebrow">TRY THIS IN YOUR PROJECT</span><p>Read the files in this folder and explain what is here. Suggest one useful next step, and wait for me before changing anything.</p></div>
+    <details><summary>Should Rein suggest work between conversations?</summary><p>The last setup stage offers proactive suggestions for a folder you choose. Choose manual scans for that folder, enroll it and start the background service, or skip this and keep using chat.</p><p>Rein uses task history and current workspace changes to propose work. Tasks stay pending until you approve them, then run within fixed budgets. Review proposals with <code>rein autonomy tui</code>, check <code>rein autonomy status</code>, or pause with <code>rein autonomy pause</code>. <code>rein autonomy disable</code> stops and removes Rein's service while retaining reports and decisions.</p></details>
+    <p class="small">Chat shows distinct, numbered OPERATOR and REIN labels. Messages, thinking status, tool actions, and tool results have separate labels. Use <code>/legend</code> to read the key. Explicit RESULT, OPINION, CHOICE, CHANGE, and EDIT headings describe the agent's stated purpose. They do not measure confidence. Rein shows reasoning-token counts only when the provider reports them.</p>
+    <p class="small">In local NodeTerm sessions the detailed activity view opens automatically, in a browser if the native node cannot embed it. Use <code>--no-browser</code> to skip this, or install tmux for the explicit <code>rein --visual</code> split.</p>
+    <label class="finish js-only"><input type="checkbox" data-step="4">My model replied and I know how to start a task</label>
   </div>
 </section>
 
 <section class="step" id="update" aria-labelledby="update-title">
-  <aside><div class="step-number">04</div><div class="step-title">Keep current</div><p>Install once. Update from the same terminal.</p></aside>
+  <aside><div class="step-number">05</div><div class="step-title">Keep current</div><p>Install once. Update from the same terminal.</p></aside>
   <div><h2 id="update-title">Fresh build. Same home.</h2><p>Fetch the current published installer and update Rein. Your model can be offline while this runs.</p>
     <div class="command"><div class="command-header"><span>UPDATE THE INSTALLED BUILD</span><button class="copy js-only" type="button" data-copy="update-command" aria-label="Copy update commands">Copy</button></div><pre><code id="update-command">rein update &amp;&amp; rein --version</code></pre></div>
-    <p>Restart any running Rein sessions after updating. Your configuration, notes, and saved sessions remain in <code>~/.rein</code>, or your custom <code>REIN_HOME</code>.</p>
-    <details><summary>My version does not have "rein update" yet.</summary><p>Use the curl command in <a href="#install">step 01</a>. It runs the same installer with model setup skipped.</p></details>
+    <p>Restart any running Rein sessions after updating. Your profile, configuration, notes, and saved sessions remain in <code>~/.rein</code>, or your custom <code>REIN_HOME</code>.</p>
+    <details><summary>My version does not have "rein update" yet.</summary><p>Run the installer with setup skipped:</p><pre><code>curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh \
+  | bash -s -- --skip-setup</code></pre></details>
     <details><summary>The updater found local changes in its checkout.</summary><p>Commit or move those changes before updating. The installer preserves edits in its <code>~/.rein/repo</code> checkout. It does not overwrite them to force an update.</p></details>
-    <label class="finish js-only"><input type="checkbox" data-step="4">I know how to update Rein</label>
+    <label class="finish js-only"><input type="checkbox" data-step="5">I know how to update Rein</label>
   </div>
 </section>
 
 <section class="trouble" aria-labelledby="trouble-title"><h2 id="trouble-title">If a light<br>stays red</h2><div>
+  <details><summary>The installer finished without asking questions.</summary><p>Run <code>rein setup</code> in an interactive terminal. Automated shells may have no terminal for the wizard to read. Use <code>rein setup profile</code> if your connection is already working and you only want to add your work preferences.</p></details>
+  <details><summary>I saved my profile, but the model connection failed.</summary><p>Keep your model server running, then run <code>rein setup --connection-only</code>. Check the URL, selected model, or login. Your saved profile remains available while you fix the connection.</p></details>
   <details><summary>"No valid chat completion" with Qwen or another reasoning model</summary><p><strong>Update Rein first.</strong> Older setup probes allowed only eight output tokens. A reasoning model could use that budget before returning visible text, even though the server answered correctly. v0.9.3 gives the probe more room and recognizes supported reasoning responses.</p><p>Then rerun <code>rein setup --status</code>. A response that still lacks a completion needs investigation; an HTTP 200 status alone is not enough.</p></details>
-  <details><summary>"SSH connection failed", a timeout, or connection refused</summary><p>Check that your network or mesh is connected, the model host is awake, and its model app is serving on the configured port. Run the SSH check in <a href="#connect">step 02</a>. With an SSH route, the model app can remain bound to loopback.</p></details>
-  <details><summary>HTTP 401, HTTP 403, or an unknown model</summary><p>Check the selected provider, account or API key, and model ID. Run <code>rein setup</code> to choose from the server's model list. A missing saved key is only a problem if that server requires one.</p></details>
+  <details><summary>"SSH connection failed", a timeout, or connection refused</summary><p>Check that your network or mesh is connected, the model host is awake, and its model app is serving on the configured port. Run the SSH check in <a href="#connect">step 03</a>. With an SSH route, the model app can remain bound to loopback.</p></details>
+  <details><summary>HTTP 401, HTTP 403, or an unknown model</summary><p>Check the selected provider, account or API key, and model ID. Run <code>rein setup --connection-only</code> to choose from the server's model list. A missing saved key is only a problem if that server requires one.</p></details>
   <details><summary>I want to use native Windows without WSL.</summary><p>Use npm to install the prebuilt CLI, then start setup:</p><pre><code>npm install --global git+https://github.com/Zermo/rein-agent.git
 rein setup</code></pre><p>Rerun the npm installation command to update. The curl/Bash updater and tmux route in this guide use macOS, Linux, or WSL.</p></details>
 </div></section>
 
-<footer class="footer"><div><div class="progress-label" id="progress-label" aria-live="polite">YOUR INSTALLATION CHECKLIST</div><div class="progress-track" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div><button class="print js-only" id="print-guide" type="button">Print / save PDF ↗</button></footer>
-<div class="colophon"><span>REIN / FIELD GUIDE 01 / v0.10.0<br>Commands are copied, never executed by this page.<br><a href="https://github.com/Zermo/rein-agent/blob/main/docs/branding.md">Repo cards + logo</a> · <a href="https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide">Deploy this guide</a></span><span>Documentation and visual review guided by<br><a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/engineering/write-docs">dzhng / write-docs</a> + <a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/visual/screenshot-critique">screenshot-critique</a></span></div>
+<footer class="footer"><div><div class="progress-label" id="progress-label" aria-live="polite">YOUR INSTALLATION CHECKLIST</div><div class="progress-track" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div></div><button class="print js-only" id="print-guide" type="button">Print / save PDF ↗</button></footer>
+<div class="colophon"><span>REIN / FIELD GUIDE 01 / v0.11.0<br>Commands are copied, never executed by this page.<br><a href="https://github.com/Zermo/rein-agent/blob/main/docs/branding.md">Repo cards + logo</a> · <a href="https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide">Deploy this guide</a></span><span>Documentation and visual review guided by<br><a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/engineering/write-docs">dzhng / write-docs</a> + <a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/visual/screenshot-critique">screenshot-critique</a></span></div>
 <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
 </main>
 <script>

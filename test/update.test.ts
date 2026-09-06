@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -181,10 +181,70 @@ if (process.argv.includes('--global') && process.env.REIN_UPDATE_NPM_FAIL === '1
 		return gitAt(remote, "rev-parse", "HEAD");
 	};
 	publish("1.0.0");
-	return { ...f, remote, checkout, gitAt, publish,
+	return { ...f, remote, checkout, gitAt, publish, installEnv: env,
 		install: (args = ["--skip-setup"], extraEnv: NodeJS.ProcessEnv = {}) => run("/bin/bash", [installer, ...args], f.root, { ...env, ...extraEnv }),
 		npmCalls: () => readFileSync(join(f.root, "npm.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)) };
 }
+
+test("curl-piped installer opens guided setup on the controlling terminal", posix, async t => {
+	if (spawnSync("python3", ["--version"]).error) { t.skip("python3 is needed only to create a real test PTY"); return; }
+	const f = installFixture();
+	let child: ReturnType<typeof spawn> | undefined;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		writeFileSync(join(f.remote, "dist/rein.js"), `
+const fs = require('node:fs'), path = require('node:path');
+const args = process.argv.slice(2);
+fs.appendFileSync(path.join(process.env.REIN_UPDATE_FIXTURE, 'installed-cli.jsonl'), JSON.stringify(args) + '\\n');
+if (args[0] === 'setup') {
+  if (args.length !== 1 || !process.stdin.isTTY) { console.error('GUIDED_SETUP_HAS_NO_TTY'); process.exit(8); }
+  console.log('OPERATOR_PROFILE_READY');
+  const rl = require('node:readline').createInterface({ input: process.stdin });
+  rl.once('line', line => { console.log('OPERATOR_ANSWER=' + line); rl.close(); process.exit(0); });
+} else console.log('rein fixture');
+`);
+		f.gitAt(f.remote, "add", "dist/rein.js"); f.gitAt(f.remote, "commit", "-m", "Interactive installer fixture");
+		const python = `import os, pty, select, signal, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execl('/bin/bash', 'bash', '-c', 'cat "$REIN_INSTALL_SCRIPT" | /bin/bash -s -- --terminal-only --no-launch')
+seen = b''
+answered = False
+deadline = time.monotonic() + 15
+try:
+    while time.monotonic() < deadline:
+        if not select.select([fd], [], [], 0.1)[0]:
+            continue
+        try: data = os.read(fd, 65536)
+        except OSError: break
+        if not data: break
+        sys.stdout.buffer.write(data)
+        sys.stdout.buffer.flush()
+        seen += data
+        if not answered and b'OPERATOR_PROFILE_READY' in seen:
+            os.write(fd, b'work-style-answer\\n')
+            answered = True
+    else: raise RuntimeError('installer PTY timed out')
+    _, status = os.waitpid(pid, 0)
+    sys.exit(os.waitstatus_to_exitcode(status))
+finally:
+    os.close(fd)
+    try: os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError: pass
+`;
+		child = spawn("python3", ["-c", python], { cwd: f.root, env: { ...f.installEnv, REIN_INSTALL_SCRIPT: installer, CI: "", TERM: "xterm" } });
+		let output = "";
+		timer = setTimeout(() => child?.kill("SIGKILL"), 17000);
+		const code = await new Promise<number | null>((resolve, reject) => {
+			child!.on("error", reject); child!.on("close", resolve);
+			child!.stdout!.on("data", chunk => output += chunk);
+			child!.stderr!.on("data", chunk => output += chunk);
+		});
+		assert.equal(code, 0, output); assert.match(output, /OPERATOR_ANSWER=work-style-answer/);
+		assert.doesNotMatch(output, /GUIDED_SETUP_HAS_NO_TTY|Setup is unfinished/);
+		f.unchanged();
+	} finally { clearTimeout(timer); child?.kill(); f.close(); }
+});
 
 test("published installer clones and updates the latest build without probing the offline model or changing state", posix, async () => {
 	const f = installFixture();

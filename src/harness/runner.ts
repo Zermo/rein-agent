@@ -16,7 +16,7 @@ import { toolsForCwd } from "./tools/index.ts";
 import * as nodeterm from "./nodeterm.ts";
 import { Posthorse, POSTHORSE_GUIDANCE } from "./posthorse.ts";
 import { contextTools } from "./tools/context.ts";
-import { skillTool, SKILL_GUIDANCE } from "./skills.ts";
+import { createSkillRuntime } from "./skills.ts";
 import { createMeatTool } from "./meat/tool.ts";
 import { ActivityJournal } from "./activity/store.ts";
 
@@ -98,13 +98,14 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	const withContextTools = opts.tools === undefined;
 	const autoContext = opts.autoContext ?? (withContextTools && config.posthorse?.enabled !== false);
 	const contextGuidance = autoContext ? POSTHORSE_GUIDANCE : POSTHORSE_GUIDANCE.replace("Automatic rollover starts a fresh window without generating a summary.", "Automatic rollover is disabled. Use new_context to start a fresh window without generating a summary.");
-	const basePrompt = (opts.systemPrompt ?? buildSystemPrompt(opts.cwd)) + (withContextTools ? contextGuidance + SKILL_GUIDANCE : "");
+	const skillRuntime = withContextTools ? createSkillRuntime() : undefined;
+	const basePrompt = (opts.systemPrompt ?? buildSystemPrompt(opts.cwd)) + (withContextTools ? contextGuidance + skillRuntime!.guidance : "");
 	const tools = [...(opts.tools ?? toolsForCwd(opts.cwd))];
 	let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
 
 	const steering: AgentMessage[] = [];
 	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
-	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillTool, createMeatTool(opts.cwd, () => ({ model: { ...model }, apiKey, toolsMode: runner.toolsMode, forcedMode, temperature: opts.temperature ?? config.temperature })));
+	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillRuntime!.tool, createMeatTool(opts.cwd, () => ({ model: { ...model }, apiKey, toolsMode: runner.toolsMode, forcedMode, temperature: opts.temperature ?? config.temperature })));
 	const context: AgentContext = { systemPrompt, messages: posthorse.messages, tools };
 	const activity = opts.activityId ? new ActivityJournal(opts.activityId, opts.cwd, model.id) : undefined;
 	let running = false;

@@ -36,6 +36,9 @@ export interface SetupPrompt {
 }
 export interface SetupDependencies {
 	prompt?: SetupPrompt;
+	/** The full walkthrough shares one readline queue across non-login stages. */
+	keepPromptOpen?: boolean;
+	onPromptReleased?: () => void;
 	log?: (text: string) => void;
 	discover?: typeof discoverLocalServers;
 	detect?: typeof detectEndpoint;
@@ -79,7 +82,7 @@ export function createSetupPrompt(input: Readable = process.stdin, output: Writa
 	const terminal = Boolean((input as NodeJS.ReadStream).isTTY && (output as NodeJS.WriteStream).isTTY);
 	const rl = createInterface({ input, output: echo, terminal });
 	const queue: string[] = [];
-	let closed = false;
+	let closed = input.readableEnded || input.destroyed;
 	let pending: { resolve: (text: string) => void; reject: (error: Error) => void } | undefined;
 	const eof = () => new Error("Setup input closed. Run setup again, or use --yes with --base-url/--provider and --model.");
 	rl.on("line", line => {
@@ -163,6 +166,7 @@ async function choose(prompt: SetupPrompt, log: (text: string) => void, label: s
 export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDependencies = {}): Promise<number> {
 	let prompt = dependencies.prompt;
 	const getPrompt = () => prompt ??= createSetupPrompt();
+	const releasePrompt = () => { prompt?.close(); prompt = undefined; dependencies.onPromptReleased?.(); };
 	const logRaw = dependencies.log ?? console.log;
 	const loaded = loadConfig();
 	const config = loaded && typeof loaded === "object" && !Array.isArray(loaded) ? loaded : {};
@@ -231,7 +235,7 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 			if (!status.available) throw new Error(`${status.detail}\nInstall with: ${info.installCommand}`);
 			if (!opts.yes && status.authenticated !== true) {
 				// Release readline before an official CLI takes control of the terminal.
-				prompt?.close(); prompt = undefined;
+				releasePrompt();
 				log(`Sign in through ${info.label} in Rein's dedicated CLI profile. Browser fallback: ${info.loginUrl}`);
 				const result = await (dependencies.login ?? loginCli)(provider, { deviceAuth: opts.deviceAuth !== false, interactive: true, openBrowser: !opts.noBrowser });
 				if (!result.ok) throw new Error(result.detail);
@@ -322,5 +326,5 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 	} catch (error) {
 		log(error instanceof Error ? error.message : String(error));
 		return 1;
-	} finally { prompt?.close(); }
+	} finally { if (!dependencies.keepPromptOpen) releasePrompt(); }
 }

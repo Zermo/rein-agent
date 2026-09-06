@@ -64,6 +64,8 @@ Usage:
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
   rein skills [name]            list bundled workflows, or read one without running it
+  rein profile [--json]         view your operator profile and enabled skill pack
+  rein profile pack <name>      enable ship|ops|study|studio, or none to skip a pack
   rein debug <folder> [--json]  inspect exported JSONL sessions offline (counts only)
   rein web install|status       install or inspect the native Obscura browser
   rein web search <query>        search DuckDuckGo through Obscura (--json optional)
@@ -86,7 +88,9 @@ Usage:
   rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
-  rein setup                    provider → login/key → model → connection test
+  rein setup                    work style → model → follow-ups → first task
+  rein setup profile            four questions and an optional skill pack, offline
+  rein setup --connection-only  provider → login/key → model → connection test
                                 saves $REIN_HOME/config.json (default ~/.rein)
   rein setup --yes              non-interactive (first local server / existing config)
   rein autonomy                 task-history proposals and background service controls
@@ -135,7 +139,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -208,6 +212,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	if (_[0] === "desktop") {
 		const { desktopCommand } = await import("./harness/desktop/cli.ts");
 		await desktopCommand(_.slice(1), flags); return;
+	}
+	if (_[0] === "profile" || _[0] === "setup" && _[1] === "profile") {
+		const { profileCommand } = await import("./harness/onboarding.ts");
+		await profileCommand(_[0] === "profile" ? _.slice(1) : ["setup", ..._.slice(2)], flags); return;
 	}
 
 	if (flags.tools !== undefined && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
@@ -364,12 +372,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	}
 
 	if (_[0] === "setup") {
+		if (_.length !== 1) throw new Error("Usage: rein setup [profile] [--connection-only|--yes|--status]");
 		const auth = stringFlag(flags, "auth");
 		if (auth !== undefined && auth !== "api-key" && auth !== "cli") throw new Error("--auth must be api-key or cli");
 		const cliProvider = stringFlag(flags, "cli-provider");
 		if (cliProvider !== undefined && cliProvider !== "codex" && cliProvider !== "copilot") throw new Error("--cli-provider must be codex or copilot");
 		const { runSetup } = await import("./harness/setup.ts");
-		const code = await runSetup({ yes: flags.yes === true, status: flags.status === true,
+		const { runOnboarding } = await import("./harness/onboarding.ts");
+		const setup = flags["connection-only"] === true || flags.yes === true || flags.status === true ? runSetup : runOnboarding;
+		const code = await setup({ yes: flags.yes === true, status: flags.status === true,
 			api: common.api,
 			provider: common.providerOverride, baseUrl: common.baseUrlOverride, model: common.modelOverride,
 			sshHost: common.sshHostOverride, auth, cliProvider, deviceAuth: flags["device-auth"] !== false, noBrowser: flags["no-browser"] === true });
@@ -423,6 +434,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	}
 
 	// Default: interactive REPL
+	const saved = loadConfig() ?? {};
+	if (process.stdin.isTTY && process.stdout.isTTY && !flags.resume &&
+		!common.modelOverride && !common.baseUrlOverride && !common.providerOverride &&
+		!process.env.REIN_BASE_URL && !process.env.REIN_MODEL && !saved.model) {
+		const { runOnboarding } = await import("./harness/onboarding.ts");
+		const code = await runOnboarding({ noBrowser: flags["no-browser"] === true });
+		if (code !== 0) { process.exitCode = code; return; }
+	}
 	const { desktopAvailable, nativeApp, openNodeTerm, preferredSurface, shouldOpenDesktop, remoteDesktopSession } = await import("./harness/desktop/surface.ts");
 	if (shouldOpenDesktop({ interactive: !!(process.stdin.isTTY && process.stdout.isTTY), insideNodeTerm: !!process.env.NODETERM_NODE_ID,
 		terminal: flags.terminal === true, visual: typeof flags.visual === "boolean" ? flags.visual : undefined, activity: common.activityId,

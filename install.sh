@@ -5,7 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
 #
 # Installs the harness (prebuilt, zero runtime deps) and runs the interactive
-# onboarding wizard: detect local AI servers → pick model → test → save config.
+# onboarding wizard: work style → model connection → follow-ups → first task.
 #
 # Options (after `bash -s --`):
 #   --skip-setup    install only; skip the wizard and connection checks
@@ -39,7 +39,19 @@ while [ $# -gt 0 ]; do
             [ $# -ge 2 ] && [ -n "$2" ] || { echo "--branch requires a name" >&2; exit 2; }
             shift; BRANCH="$1" ;;
         -h|--help)
-            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            cat <<'HELP'
+Rein installer
+  curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
+
+Options after bash -s --:
+  --skip-setup     Install only; keep saved settings and skip checks
+  --yes            Unattended model setup; never invent an operator profile
+  --terminal-only  Skip NodeTerm and prefer the current terminal
+  --no-launch      Install the desktop app without opening it
+  --branch NAME    Install a branch, default main
+
+Run rein setup later for the guided walkthrough.
+HELP
             exit 0
             ;;
         *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
@@ -126,24 +138,20 @@ else
 fi
 
 # ---- onboarding -------------------------------------------------------------
-CONFIG="$REIN_HOME/config.json"
 if [ "$RUN_SETUP" = false ]; then
     step "setup skipped (--skip-setup)"
-elif [ -f "$CONFIG" ]; then
-    step "existing config found — verifying"
-    rein setup --status
+elif [ "$ASSUME_YES" = true ]; then
+    node "$REPO_DIR/dist/rein.js" setup --yes ||
+        warn "Connection setup needs attention. Run rein setup for the guided walkthrough."
+elif [ -t 0 ] && [ -t 1 ]; then
+    node "$REPO_DIR/dist/rein.js" setup ||
+        warn "Setup is unfinished. Run rein setup to continue; saved settings are kept."
+# curl owns stdin. Read answers from the controlling terminal instead of the script.
+elif [ -t 1 ] && [ -z "${CI:-}" ] && ( : < /dev/tty ) 2>/dev/null; then
+    node "$REPO_DIR/dist/rein.js" setup < /dev/tty ||
+        warn "Setup is unfinished. Run rein setup to continue; saved settings are kept."
 else
-    echo ""
-    if [ -t 0 ] && [ "$ASSUME_YES" = false ]; then
-        rein setup
-    else
-        if ! rein setup --yes 2>/dev/null; then
-            echo ""
-            warn "no local AI server detected — the wizard could not auto-pick a model"
-            echo "    Start one (e.g. ollama serve) or run:"
-            echo "        rein setup"
-        fi
-    fi
+    step "No interactive terminal. Run rein setup when ready, or use --yes for unattended model setup."
 fi
 
 echo ""

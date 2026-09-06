@@ -85,7 +85,7 @@ test("print/REPL stream, persistence, resume, and JSON errors", { timeout: 20_00
 		const resumed = await cli([...args, "--resume", file.replace(/\.jsonl$/, "")], testHome, "/context\nsecond prompt\n/quit\n");
 		assert.equal(resumed.code, 0, resumed.stderr);
 		assert.equal(resumed.stdout.split("unique-answer").length - 1, 1, "REPL must render streamed text once");
-		assert.match(resumed.stdout, /\[OPERATOR · turn 01\]\nsecond prompt\n\n\[REIN · reply 01 ◐\]\nunique-answer\n/, "REPL separates the operator and streamed reply in redirected output");
+		assert.match(resumed.stdout, /\[OPERATOR · turn 01\]\nsecond prompt\n\n\[REIN · reply 01 ◐\]\n\[MESSAGE\]\nunique-answer\n/, "REPL separates the operator and streamed reply in redirected output");
 		assert.doesNotMatch(resumed.stdout, /\x1b/, "colorless REPL output must not contain terminal escapes");
 		assert.ok(requests.at(-1).messages.some((m: any) => m.role === "user" && /persistent workspace overlay/.test(m.content)), "resume must load current workspace evidence");
 		assert.ok(!requests.at(-1).messages.some((m: any) => m.role === "user" && m.content === "first prompt"), "resume must keep archived history out of the fresh provider window");
@@ -160,7 +160,7 @@ test("REPL /stop aborts a running shell and discards queued steering before the 
 		});
 		assert.equal(result.code, 0, result.stdout + result.stderr);
 		assert.match(result.stdout, /\[OPERATOR · turn 02\] · steering queued\nSTALE_QUEUED_REQUEST\n/);
-		assert.match(result.stdout, /\[REIN · reply \d+ [◐◓◑◒]\]\nReply canceled\./);
+		assert.match(result.stdout, /\[REIN · reply \d+ [◐◓◑◒]\]\n\[CANCELED\] Reply canceled\./);
 		assert.match(result.stdout, /\[OPERATOR · turn 03\]\nNEW_SCOPE\n/);
 		assert.equal(requests.length, 2);
 		assert.match(JSON.stringify(requests[1]), /NEW_SCOPE/);

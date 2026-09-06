@@ -1,5 +1,38 @@
 # Posthorse and harness review
 
+## 0.11.0 Operator onboarding and terminal activity
+
+The guided setup combines four fixed work-style questions, a preview and optional
+skill pack, model connection setup, explicit proactive enrollment, and a first
+task. All 108 answer combinations have deterministic results. Profiles live in
+the private Rein home, preserve custom Markdown, and apply to new sessions with
+a stable per-session skill roster. Nine new pack workflows are original Rein
+guidance; the existing reviewed TDD workflow remains vendored. No external app
+or connector is implied by enabling a pack.
+
+Independent review reproduced and fixed dropped queued input, false success
+after EOF, manual enrollment retaining active background state, null config
+recovery, and inaccessible help when the installer is piped. A real PTY test
+verifies that the curl-shaped installer reads answers from the controlling
+terminal. Persistence review fixed long custom notes crowding out saved style,
+stale previews being saved, and interrupted saves exposing mixed guidance.
+Readers now reject an active save or a changed snapshot; backups remain private.
+
+Terminal messages, thinking status, numbered tool actions/results, and completion
+states have distinct labels. Explicit first-line reply purposes are identified
+as agent-labeled. Reasoning usage is shown only when reported by the provider;
+there is no inferred confidence or effort score. Existing steering, approval,
+cancellation, and plain-output paths remain covered by regression tests.
+Malformed duplicate parallel tool IDs are marked unpaired instead of inventing
+a result-to-call match; sequential reuse remains supported.
+
+Validation: 380 source tests passed with no skips; the rebuilt bundle passed on
+Node 18.20.8, including offline profile and pack controls. Native provenance,
+package contents, guide build, and public text privacy checks passed. No real
+background service or cloud inference was started by these tests. Guide HTML,
+links, copy targets, and JavaScript were checked; browser policy prevented a
+rendered visual check of the local guide.
+
 ## 0.10.0 Reply identities and NodeTerm desktop
 
 Operator turns and REIN replies have distinct numbered labels; REIN cycles its

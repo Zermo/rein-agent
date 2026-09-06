@@ -12,14 +12,14 @@ let requests = 0;
 let meatRequests = 0;
 let webRequests = 0;
 const cliEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("NODETERM_"))), REIN_HOME: dir, REIN_API: "", REIN_API_KEY: "", REIN_BASE_URL: "", REIN_MODEL: "" };
-const runCli = (args, extraEnv = {}) => new Promise((resolve, reject) => {
+const runCli = (args, extraEnv = {}, input = "") => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [join(root, "dist/rein.js"), ...args], { cwd: dir, env: { ...cliEnv, ...extraEnv } });
   let stdout = "", stderr = "";
   child.stdout.on("data", chunk => stdout += chunk); child.stderr.on("data", chunk => stderr += chunk);
   child.on("error", reject);
   const timer = setTimeout(() => child.kill("SIGKILL"), 15_000);
   child.on("close", code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
-  child.stdin.end();
+  child.stdin.end(input);
 });
 const server = createServer(async (req, res) => {
   let text = "";
@@ -109,6 +109,16 @@ try {
   assert.equal(web.code, 0, web.stderr); assert.equal(webRequests, 2); assert.match(web.stdout, /native web bundle OK/);
   const invalidWeb = await runCli(["web", "search", "fixture", "--language", "fr"], { OBSCURA_BIN: browser });
   assert.notEqual(invalidWeb.code, 0); assert.match(invalidWeb.stderr, /does not support --language/);
+  const profileSetup = await runCli(["setup", "profile"], {}, "a\na\nc\na\n3\n1\n");
+  assert.equal(profileSetup.code, 0, profileSetup.stdout + profileSetup.stderr);
+  const profile = JSON.parse((await runCli(["profile", "--json"])).stdout);
+  assert.equal(profile.recommended_pack, "ship"); assert.equal(profile.enabled_pack, null);
+  for (const name of ["SOUL.md", "USER.md", "AGENTS.md", "profile.yaml"]) assert.ok(existsSync(join(dir, name)));
+  const enablePack = await runCli(["profile", "pack", "ship"]); assert.equal(enablePack.code, 0, enablePack.stderr);
+  const nativeSkill = await runCli(["skills", "caveman"]); assert.equal(nativeSkill.code, 0, nativeSkill.stderr);
+  assert.match(nativeSkill.stdout, /Original Rein-native workflow/);
+  const disablePack = await runCli(["profile", "pack", "none"]); assert.equal(disablePack.code, 0, disablePack.stderr);
+  assert.equal((await runCli(["skills", "caveman"])).code, 1);
   console.log(`bundle smoke OK (${process.version})`);
 } finally {
   await new Promise(resolve => server.close(resolve));

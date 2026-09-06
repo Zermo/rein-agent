@@ -79,11 +79,11 @@ await startRepl({ runner });`;
 			assert.equal(code, 0, out + err);
 			const plain = strip(out);
 			assert.match(plain, /answer begins\n\[OPERATOR · turn 02\] ❯ steer now\n/);
-			assert.match(plain, /\[REIN · reply 01 ◐ · continued\]\n answer ends\n/);
+			assert.match(plain, /\[REIN · reply 01 ◐ · continued\]\n\[MESSAGE\]\n answer ends\n/);
 			assert.equal(plain.split("first request").length - 1, 1, plain);
 			assert.equal(plain.split("steer now").length - 1, 1, plain);
 			assert.match(out, /\x1b\[1;36m/);
-			if (mode === "parallel-approval") assert.match(plain, /\[y\/N\] yes\n\[TOOL · read · done\] parallel result\n/, "parallel completion must not split the approval answer");
+			if (mode === "parallel-approval") assert.match(plain, /\[y\/N\] yes\n\[TOOL READ RESULT · read · done\] parallel result\n/, "parallel completion must not split the approval answer");
 			if (finishWhileTyping) { assert.match(plain, /next request answered/); assert.doesNotMatch(err, /STEERING_ACCEPTED/); }
 			else assert.match(err, /STEERING_ACCEPTED/);
 		} finally { clearTimeout(timer); child.kill(); rmSync(dir, { recursive: true, force: true }); }

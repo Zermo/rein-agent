@@ -17,7 +17,7 @@ import type { AgentTool } from "../agent/agent-loop.ts";
 import * as nodeterm from "./nodeterm.ts";
 import { readState as autonomyState } from "./autonomy/state.ts";
 import { skillRequest, skillRoster } from "./skills.ts";
-import { createReplyPresentation } from "./reply-presentation.ts";
+import { createReplyPresentation, toolActionType } from "./reply-presentation.ts";
 
 interface ReplOptions {
 	runner: Runner;
@@ -88,6 +88,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 				console.log(
 					[
 						"  /help            this list",
+						"  /legend          reply types, tool labels, and reasoning metadata",
 						"  /new             start a fresh session",
 						"  /model           show the active model + tool mode",
 						"  /tools <list>    show available tools",
@@ -104,6 +105,17 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 						"  /quit            exit",
 					].join("\n"),
 				);
+				return true;
+			case "legend":
+				console.log([
+					"OPERATOR: your input. REIN: numbered replies with rotating accents.",
+					"MESSAGE: ordinary assistant text. THINKING: status only; hidden reasoning stays hidden.",
+					"RESULT / OPINION / CHOICE / CHANGE / EDIT: explicitly agent-labeled purpose, not confidence or verification.",
+					"TOOL READ / WRITE / EDIT / EXEC / WEB / REVIEW / SKILL / CONTEXT / CHECK: known tool action; CALL means unclassified.",
+					"Matching call numbers connect tool starts and results. A done tool is not proof that the whole task succeeded.",
+					"COMPLETE: the reply ended. HANDOFF: tools requested. ERROR / CANCELED / LIMIT: the reply stopped early.",
+					"REASONING: tokens reported by the provider, when available. Token count and run time do not measure thinking strength or confidence. Effort is not reported by this adapter.",
+				].join("\n"));
 				return true;
 			case "model":
 				console.log(
@@ -307,7 +319,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			if (!process.stdin.isTTY || inputClosed || controller?.signal.aborted) return false;
 			const s = JSON.stringify(args);
 			presentation.flush();
-			process.stdout.write(`\n\u26a1 approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} \u2014 [y/N] `);
+			process.stdout.write(`\n[APPROVAL · TOOL ${toolActionType(name, args)}] approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} [y/N] `);
 			const line = await new Promise<string>((resolve) => { approvalAnswer = resolve; });
 			return /^y(es)?$/i.test(line.trim());
 		});
@@ -331,7 +343,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
 	// Seed with a greeting only on a fresh, empty session
 	if (runner.context.messages.length === 0) {
-		console.log(gray("ask me anything, or /help for commands. while I'm working, just type — I'll fold it in."));
+		console.log(gray("ask me anything, /help for commands, or /legend for reply types. while I'm working, just type — I'll fold it in."));
 	}
 
 	try { while (!terminating) {
@@ -377,7 +389,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			const secs = ((Date.now() - started) / 1000).toFixed(1);
 			const usage = runner.context.messages[runner.context.messages.length - 1];
 			const tokens = (usage as any)?.usage?.output;
-			console.log(gray(`${secs}s${tokens ? ` · ${tokens} out-tokens` : ""}`));
+			console.log(gray(`[RUN] ${secs}s${tokens ? ` · ${tokens} out-tokens` : ""}`));
 		} catch (err) {
 			runFinished = true;
 			if (typingDone) await typingDone;

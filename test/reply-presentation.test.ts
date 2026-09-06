@@ -29,9 +29,9 @@ test("streamed replies and tools have distinct boundaries, numbers, and rotating
 	f.start(); f.delta("Follow-up\n"); f.end(); f.view.finish();
 	f.view.operator("second request"); f.start(); f.delta("Second answer."); f.end();
 	const out = f.output();
-	assert.match(out, /\[OPERATOR · turn 01\]\nfirst request\n\n\[REIN · reply 01 ◐\]\nFirst answer\.\n/);
-	assert.match(out, /\[TOOL · read\] \{\}\n\[TOOL · read · done\] file preview/);
-	assert.match(out, /\[REIN · reply 02 ◓\]\nFollow-up\n/);
+	assert.match(out, /\[OPERATOR · turn 01\]\nfirst request\n\n\[REIN · reply 01 ◐\]\n\[MESSAGE\]\nFirst answer\.\n/);
+	assert.match(out, /\[TOOL READ · read · call 01\] \{\}\n\[TOOL READ RESULT · read · call 01 · done\] file preview/);
+	assert.match(out, /\[REIN · reply 02 ◓\]\n\[MESSAGE\]\nFollow-up\n/);
 	assert.match(out, /\[OPERATOR · turn 02\]\nsecond request\n\n\[REIN · reply 03 ◑\]/);
 	assert.equal(out.split("First answer.").length - 1, 1);
 	assert.doesNotMatch(out, /\x1b|No text reply/);
@@ -44,7 +44,7 @@ test("steering restores the active reply identity and never exposes thinking del
 	f.delta("partial response");
 	f.view.operator("new instruction", false, true);
 	f.delta("continued response"); f.end();
-	assert.match(f.output(), /partial response\n\n\[OPERATOR · turn 02\] · steering queued\nnew instruction\n\n\[REIN · reply 01 ◐ · continued\]\ncontinued response\n/);
+	assert.match(f.output(), /partial response\n\n\[OPERATOR · turn 02\] · steering queued\nnew instruction\n\n\[REIN · reply 01 ◐ · continued\]\n\[MESSAGE\]\ncontinued response\n/);
 	assert.equal(f.output().split("Thinking…").length - 1, 1);
 	assert.doesNotMatch(f.output(), /PRIVATE_REASONING_SENTINEL|another hidden delta|reply 02/);
 });
@@ -55,26 +55,26 @@ test("empty, canceled, error, and truncated replies remain visible and labeled",
 	f.view.startRun(); f.start(); f.end({ stopReason: "aborted" }); f.view.finish(undefined, true);
 	f.view.startRun(); f.view.finish("connection failed");
 	f.view.startRun(); f.start(); f.delta("unfinished"); f.end({ stopReason: "length" });
-	assert.match(f.output(), /reply 01 ◐\]\nNo text reply/);
-	assert.match(f.output(), /reply 02 ◓\]\nReply canceled/);
+	assert.match(f.output(), /reply 01 ◐\]\n\[COMPLETE\] No text reply/);
+	assert.match(f.output(), /reply 02 ◓\]\n\[CANCELED\] Reply canceled/);
 	assert.equal(f.output().split("Reply canceled.").length - 1, 1);
-	assert.match(f.output(), /reply 03 ◑\]\nError: connection failed/);
-	assert.match(f.output(), /reply 04 ◒\]\nunfinished\nReply reached the output limit/);
+	assert.match(f.output(), /reply 03 ◑\]\n\[ERROR\] Error: connection failed/);
+	assert.match(f.output(), /reply 04 ◒\]\n\[MESSAGE\]\nunfinished\n\[LIMIT\] Reply reached the output limit/);
 });
 
 test("cancellation before streaming gets an identity and the next reply rotates", () => {
 	const f = fixture();
 	f.view.startRun(); f.view.finish(undefined, true);
 	f.view.startRun(); f.start(); f.delta("recovered"); f.end();
-	assert.match(f.output(), /reply 01 ◐\]\nReply canceled/);
-	assert.match(f.output(), /reply 02 ◓\]\nrecovered/);
+	assert.match(f.output(), /reply 01 ◐\]\n\[CANCELED\] Reply canceled/);
+	assert.match(f.output(), /reply 02 ◓\]\n\[MESSAGE\]\nrecovered/);
 });
 
 test("a final-only provider response renders once without depending on delta events", () => {
 	const f = fixture();
 	f.end({ content: [{ type: "text", text: "final answer" }] });
 	f.view.finish();
-	assert.match(f.output(), /reply 01 ◐\]\nfinal answer\n$/);
+	assert.match(f.output(), /reply 01 ◐\]\n\[MESSAGE\]\nfinal answer\n\[COMPLETE\] Reply ended\.\n$/);
 	assert.doesNotMatch(f.output(), /No text reply/);
 });
 
@@ -82,7 +82,7 @@ test("operator stays cyan while reply accents rotate and close their ANSI style"
 	const f = fixture(true);
 	for (let i = 0; i < 5; i++) { f.view.operator(`request ${i}`); f.start(); f.delta("answer"); f.end(); }
 	assert.match(f.output(), /\x1b\[1;36m\[OPERATOR · turn 01\]\x1b\[0m/);
-	assert.match(f.output(), /\x1b\[1;32m\[REIN · reply 01 ◐\]\x1b\[0m\nanswer/);
+	assert.match(f.output(), /\x1b\[1;32m\[REIN · reply 01 ◐\]\x1b\[0m\n\x1b\[1;32m\[MESSAGE\]\x1b\[0m\nanswer/);
 	assert.match(f.output(), /\x1b\[1;35m\[REIN · reply 02 ◓\]\x1b\[0m/);
 	assert.match(f.output(), /\x1b\[1;33m\[REIN · reply 03 ◑\]\x1b\[0m/);
 	assert.match(f.output(), /\x1b\[1;94m\[REIN · reply 04 ◒\]\x1b\[0m/);
