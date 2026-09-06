@@ -1,0 +1,26 @@
+{
+  "name": "@rein/klaud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "productName": "rein-klaʊd",
+  "main": "main.mjs",
+  "license": "MIT",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "postinstall": "install-electron",
+    "build": "node build.mjs",
+    "dev": "npm run build && electron .",
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "electron": "44.2.0",
+    "esbuild": "0.28.2"
+  },
+  "build": { "appId": "org.zermo.rein-klaud", "productName": "rein-klaʊd" }
+}

@@ -37,17 +37,17 @@ export interface ReminderEntry {
 	reserveTokens: number;
 }
 export type SessionEntry = StoredMessage | ContextWindowEntry | ReminderEntry | WorkspaceSnapshotEntry;
-export const sessionsDir = () => join(process.env.REIN_HOME || join(homedir(), ".rein"), "sessions");
+export const sessionsDir = (home?: string) => join(home ?? (process.env.REIN_HOME || join(homedir(), ".rein")), "sessions");
 export function newSessionId(): string { return `session-${Date.now()}-${randomUUID().slice(0, 8)}`; }
-export function sessionPath(id: string): string {
+export function sessionPath(id: string, home?: string): string {
 	if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(id)) throw new Error("Invalid session id. Use the full id from /sessions.");
-	return join(sessionsDir(), `${id}.jsonl`);
+	return join(sessionsDir(home), `${id}.jsonl`);
 }
-export function createSession(opts: { id?: string; model?: string; provider?: string; cwd?: string; purpose?: "autonomy" }): string {
-	mkdirSync(sessionsDir(), { recursive: true });
+export function createSession(opts: { id?: string; model?: string; provider?: string; cwd?: string; purpose?: "autonomy" }, home?: string): string {
+	mkdirSync(sessionsDir(home), { recursive: true });
 	const id = opts.id ?? newSessionId();
 	const header: SessionHeader = { ...opts, type: "header", version: 1, id, created: new Date().toISOString() };
-	writeFileSync(sessionPath(id), JSON.stringify(header) + "\n", { flag: "wx", mode: 0o600 });
+	writeFileSync(sessionPath(id, home), JSON.stringify(header) + "\n", { flag: "wx", mode: 0o600 });
 	return id;
 }
 export function appendSessionEntry(sessionId: string, entry: SessionEntry): void {
@@ -101,8 +101,8 @@ export function validWindowStart(messages: AgentMessage[], start: number): boole
 	}
 	return pending.size === 0 && messages[start]?.role !== "toolResult";
 }
-export function loadSession(sessionId: string): { header: SessionHeader | null; messages: StoredMessage[]; entries: SessionEntry[]; window?: ContextWindowEntry; activeMessages: AgentMessage[] } {
-	const path = sessionPath(sessionId);
+export function loadSession(sessionId: string, home?: string): { header: SessionHeader | null; messages: StoredMessage[]; entries: SessionEntry[]; window?: ContextWindowEntry; activeMessages: AgentMessage[] } {
+	const path = sessionPath(sessionId, home);
 	if (!existsSync(path)) throw new Error(`No such session: ${sessionId}`);
 	let header: SessionHeader | null = null;
 	const messages: StoredMessage[] = [];

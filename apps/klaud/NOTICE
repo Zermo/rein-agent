@@ -1,0 +1,10 @@
+rein-klaʊd
+Copyright 2026 Zermo contributors.
+
+This app and its droplet artwork were written for Rein. No third-party source
+files, icons, or binary assets were copied or adapted into the app source.
+
+React and React DOM are used under the MIT license. Electron is used under the
+MIT license and includes Chromium and Node.js with their respective notices.
+esbuild is a development dependency under the MIT license. Dependency license
+texts are distributed in their installed npm packages.

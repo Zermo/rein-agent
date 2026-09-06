@@ -16,6 +16,7 @@
     "scripts",
     "docs",
     "examples",
+    "apps/klaud",
     "AGENTS.md",
     "GATES.md",
     "LESSONS.md",

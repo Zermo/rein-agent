@@ -1,0 +1,2 @@
+# Optional training checkout stays separate from the dependency-free CLI package.
+automodel/

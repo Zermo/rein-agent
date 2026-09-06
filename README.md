@@ -91,6 +91,14 @@ rein desktop status
 The optional NodeTerm installer downloads a verified upstream release on a local
 macOS desktop. See [terminal and desktop integration](docs/nodeterm-desktop.md)
 for supported platforms and native-app limits.
+
+The optional [rein-klaʊd desktop](docs/klaud.md) adds named bots, saved chat,
+live shell preferences, and approval dialogs over Rein's loopback AG-UI server.
+From a checkout, run `npm --prefix apps/klaud ci` once, then `rein klaud`.
+The terminal CLI still has zero runtime dependencies. Ponytail workflows are
+bundled as skill text; `rein train recipe.yaml` can use a separate optional
+Automodel environment. See the desktop guide for setup and limits.
+
 The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM),
 accepts remote hosts, and offers cloud API keys or supported subscription logins.
 It tests API connections and saves `~/.rein/config.json` (or `$REIN_HOME/config.json`).

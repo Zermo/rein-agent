@@ -55,12 +55,15 @@ Usage:
   rein web fetch <url>           render a page to markdown (--max-chars 20000)
   rein update                   curl the latest installer and update the installed build
   rein desktop install          optional NodeTerm installation and registration
-  rein desktop open|status      explicitly open or inspect NodeTerm
-  rein desktop use terminal     keep future bare rein sessions in the current terminal
+  rein desktop [open|status]    open or inspect the selected desktop surface
+  rein desktop use <surface>   choose klaud, nodeterm, or terminal
+  rein klaud                    open rein-klaʊd with a loopback AG-UI backend
   rein --terminal               stay in this terminal for this session
   rein --visual                 split the terminal into chat and live activity (tmux)
   rein watch <activity-id>       inspect activity inside this terminal
   rein canvas <activity-id>      serve an optional node canvas; --browser opens it
+  rein serve [--port n]          serve the loopback rein-klaʊd AG-UI API
+  rein train <recipe.yaml>       run optional Automodel training
   rein meat [ref [ref]]          review a commit or range with the embedded Meat engine
                                 --staged or --working-tree selects uncommitted changes
   rein tmux start [command]      start a persistent bash shell; returns its session ID
@@ -192,6 +195,20 @@ function discoveryFlags(flags: ParsedArgs["flags"]) {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+	// Forward trainer arguments verbatim; Rein's flag parser must not consume them.
+	if (argv[0] === "train" && !["--help", "-h"].includes(argv[1])) {
+		if (!argv[1]) throw new Error("Usage: rein train <recipe.yaml> [Automodel arguments]");
+		const { automodelAvailable, runTrain } = await import("./harness/klaud/train.ts");
+		if (!automodelAvailable()) {
+			console.error("I need uv on PATH and an Automodel checkout to train.\nInstall uv: https://docs.astral.sh/uv/getting-started/installation/\nClone: git clone https://github.com/NousResearch/Automodel.git ./automodel\nThen set REIN_AUTOMODEL_ROOT to the checkout's absolute path and retry.");
+			process.exitCode = 1;
+			return;
+		}
+		const result = await runTrain(argv[1], argv.slice(2));
+		if (result.log) process.stdout.write(result.log);
+		process.exitCode = result.code;
+		return;
+	}
 	const { _, flags } = parseArgs(argv);
 
 	if (flags.help === true || flags.h === true || _[0] === "help") {
@@ -209,6 +226,30 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		const { runUpdate } = await import("./harness/update.ts");
 		process.exitCode = await runUpdate();
 		return;
+	}
+	if (_[0] === "serve") {
+		if (_.length !== 1 || Object.keys(flags).some(key => key !== "port")) throw new Error("Usage: rein serve [--port n]");
+		const port = numberFlag(flags, "port", 0);
+		if (port !== undefined && port > 65535) throw new Error("--port must be <= 65535");
+		const { startKlaudServe } = await import("./harness/klaud/serve.ts");
+		const handle = await startKlaudServe({ port });
+		console.log(`rein-klaʊd is listening at ${handle.url}`);
+		console.log("The bearer token is in $REIN_HOME/klaud/serve-<port>.token, default ~/.rein.");
+		await new Promise<void>((resolve, reject) => {
+			const stop = () => {
+				process.removeListener("SIGINT", stop);
+				process.removeListener("SIGTERM", stop);
+				handle.close().then(resolve, reject);
+			};
+			process.once("SIGINT", stop);
+			process.once("SIGTERM", stop);
+		});
+		return;
+	}
+	if (_[0] === "klaud") {
+		if (_.length !== 1 || Object.keys(flags).length) throw new Error("Usage: rein klaud");
+		const { launchKlaud } = await import("./harness/desktop/cli.ts");
+		await launchKlaud(); return;
 	}
 	if (_[0] === "desktop") {
 		const { desktopCommand } = await import("./harness/desktop/cli.ts");
