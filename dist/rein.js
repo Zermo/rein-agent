@@ -6511,8 +6511,7 @@ function postEvent(payload, extra = {}) {
   const opts = sock ? { socketPath: sock, path: reqPath, method: "POST", headers, timeout: 1500 } : { host: "127.0.0.1", port: Number(port), path: reqPath, method: "POST", headers, timeout: 1500 };
   try {
     const req = http.request(opts);
-    req.on("error", () => {
-    });
+    req.on("error", (e) => console.error("NT-ERR", e?.message ?? e));
     req.on("timeout", () => req.destroy());
     req.end(body);
   } catch {

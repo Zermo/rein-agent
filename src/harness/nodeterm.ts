@@ -80,7 +80,7 @@ export function postEvent(payload: Record<string, unknown>, extra: Record<string
 
 	try {
 		const req = http.request(opts);
-		req.on("error", () => {});
+		req.on("error", (e) => console.error("NT-ERR", e?.message ?? e));
 		req.on("timeout", () => req.destroy());
 		req.end(body);
 	} catch {
