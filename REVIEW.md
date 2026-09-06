@@ -1,5 +1,44 @@
 # Posthorse and harness review
 
+## 0.12.0 Grok, server discovery and serving recipes
+
+Grok Build subscriptions and the xAI HTTP API are separate selectable routes.
+The subscription bridge uses the official CLI's device login, a dedicated private
+profile, temporary prompt files, and structured completion events. HTTP setup
+uses xAI's text-capable model catalog and validates a Chat Completions reply.
+Account eligibility and limits remain the service's decision.
+
+The official Grok 1.0.13 binary was checked against a local mock with synthetic
+credentials. Completed text-tool handoff and usage passed. The CLI reinserts
+three native shell-control definitions despite tool filtering; a catch-all deny
+rule blocked a simulated write before execution, and Rein cancels attempted
+native tool events. Independent review also fixed output accepted after a
+completion event. No real account credentials or paid inference were used.
+The supported contract and limitations are in the Grok wiki source.
+
+Interactive discovery checks localhost, configured endpoints, and known private
+LAN/mesh peers within fixed candidate, concurrency, time and response-size
+bounds. Protected and empty servers remain selectable. Review fixed generic
+adapter rejection, lost SSH routes after metadata identification, rejected saved
+key replacement, and provider-local environment keys disappearing after setup.
+Peer probes do not receive unrelated credentials; server-supplied model IDs
+cannot include terminal control sequences. Tests used synthetic peers only.
+
+Hardware recommendations use current-machine memory pools, architecture-based
+KV estimates and explicit context. Review fixed model-size ambiguity, unknown
+free VRAM, Apple/Intel memory distinctions, container ceilings and single-device
+selection. vLLM has its own publisher-precision assessment and requires enough
+free memory for its full allocation budget. A Q4 fit does not imply a BF16 fit.
+Recipes expose runtime/artifact prerequisites and never start a server or download
+weights. Remote server capacity is not inferred from the gateway.
+
+Validation: 435 source tests passed, no skips; the Node 18.20.8 bundle smoke
+passed, including hardware JSON and new CLI options. Native provenance, package
+contents, guide staging, wiki sources, public-text privacy, and guide IDs/copy
+targets passed. Hardware recipes are planning estimates and were not benchmarked
+or launched on the user's serving hardware. Guide changes were structurally
+checked; no rendered visual check is claimed.
+
 ## 0.11.0 Operator onboarding and terminal activity
 
 The guided setup combines four fixed work-style questions, a preview and optional

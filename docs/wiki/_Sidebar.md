@@ -7,3 +7,7 @@
 - [Deploy the field guide](https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide)
 
 [Open the retro field guide](https://zermo.github.io/rein-agent/) · [Repository](https://github.com/Zermo/rein-agent)
+
+- [Server discovery](https://github.com/Zermo/rein-agent/wiki/Server-discovery)
+- [Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and-serving)
+- [Grok and X Premium+](https://github.com/Zermo/rein-agent/wiki/Grok)

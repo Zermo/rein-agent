@@ -18,8 +18,9 @@ import { dim, green, red, yellow } from "../util/ansi.ts";
 import { loadConfig, apiKeyFor, detectEndpoint, guessProvider, normalizeBaseUrl } from "../ai/models.ts";
 import type { ReinConfig } from "../ai/models.ts";
 import { checkCliAuth } from "./auth.ts";
-import { matchCatalog, CATALOG } from "../hardware/catalog.ts";
+import { matchCatalog } from "../hardware/catalog.ts";
 import { bestAssessment } from "../hardware/fit.ts";
+import { servingRecommendations } from "../hardware/recipes.ts";
 import { profileHardware } from "../hardware/profile.ts";
 
 export type DoctorStatus = "ok" | "warn" | "fail";
@@ -136,7 +137,7 @@ export function usesLocalHardware(config: ReinConfig): boolean {
 /** Provider diagnosis never launches login or repairs an unrelated local server. */
 export async function checkConfiguredProvider(config: ReinConfig): Promise<DoctorCheck> {
 	const cli = config.auth?.type === "cli" ? config.auth.provider ?? config.provider : config.provider;
-	if (cli === "codex" || cli === "copilot") {
+	if (cli === "codex" || cli === "copilot" || cli === "grok") {
 		const status = await checkCliAuth(cli);
 		return { name: "server", status: !status.available || status.authenticated === false ? "fail" : status.authenticated === null ? "warn" : "ok",
 			detail: status.detail, fix: status.authenticated === true ? undefined : `rein login ${cli}` };
@@ -261,11 +262,7 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 				const fit = bestAssessment(profile, entry);
 				let bestPick = "";
 				if (fit.verdict === "no") {
-					const fitting = CATALOG
-						.map((m) => ({ m, a: bestAssessment(profile, m) }))
-						.filter(({ a }) => a.verdict === "fits")
-						.sort((x, y) => (y.a.estTokS ?? 0) - (x.a.estTokS ?? 0));
-					bestPick = fitting.length ? fitting[0].m.name : "none fits on this machine";
+					bestPick = servingRecommendations(profile).best?.model.name ?? "none fits on this machine";
 				}
 				checks.push({
 					name: "hardware",

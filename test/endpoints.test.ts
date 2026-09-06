@@ -9,7 +9,7 @@ import { apiKeyFor, resolveModel, discoverLocalServers } from "../src/ai/models.
 
 async function isolated(fn: (directory: string) => Promise<void>) {
 	const directory = mkdtempSync(join(tmpdir(), "rein-endpoints-"));
-	const keys = ["REIN_HOME", "REIN_BASE_URL", "REIN_MODEL", "REIN_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OLLAMA_API_KEY"];
+	const keys = ["REIN_HOME", "REIN_BASE_URL", "REIN_MODEL", "REIN_API_KEY", ...Object.values(PROVIDER_PRESETS).map(preset => preset.keyEnv)];
 	const previous = new Map(keys.map(key => [key, process.env[key]]));
 	for (const key of keys) delete process.env[key];
 	process.env.REIN_HOME = directory;
@@ -127,6 +127,21 @@ test("provider environment keys only go to preset origins; generic REIN_API_KEY 
 	process.env.REIN_API_KEY = "explicit-generic-key";
 	assert.equal(apiKeyFor("custom", "100.64.0.1:8123"), "explicit-generic-key");
 	assert.equal(apiKeyFor("codex", "cli://codex"), undefined);
+}));
+
+test("a saved custom local listener keeps its provider environment key without relabeling the adapter", async () => isolated(async directory => {
+	process.env.LMSTUDIO_API_KEY = "local-env-fixture-secret";
+	writeFileSync(join(directory, "config.json"), JSON.stringify({ provider: "custom", baseUrl: "http://localhost:1234/v1", model: "fixture-local-model" }));
+	const resolved = await resolveModel();
+	assert.equal(resolved.provider, "custom");
+	assert.equal(apiKeyFor(resolved.provider, resolved.baseUrl, resolved.sshHost), "local-env-fixture-secret");
+	assert.equal(apiKeyFor("openai-compatible", "http://localhost:1234/v1"), "local-env-fixture-secret");
+	assert.equal(apiKeyFor("custom", "http://localhost:1234/v1", "fixture-ssh-host"), undefined);
+	assert.equal(apiKeyFor("custom", "http://100.64.6.7:1234/v1"), undefined);
+	assert.equal(apiKeyFor("custom", "http://localhost:1234/proxy/v1"), undefined);
+	assert.equal(apiKeyFor("custom", "http://localhost:1234/v2"), undefined);
+	assert.equal(apiKeyFor("custom", "http://127.0.0.1:1234/v1"), undefined);
+	assert.equal(apiKeyFor("custom", "https://localhost:1234/v1"), undefined);
 }));
 
 test("changing endpoint ignores saved model/key and discovers only the new endpoint", async (t) => isolated(async directory => {

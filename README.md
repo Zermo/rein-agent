@@ -389,12 +389,31 @@ rein setup --provider lmstudio --api chat-completions
 rein setup --provider ollama --api chat-completions
 ```
 
-Local discovery checks only the four localhost addresses above. It lists servers
-that return available models; an empty model list or missing credentials can keep
-a server out of that list. To connect to another machine, enter its reachable host
-and port. Rein normalizes API paths, accepts pasted `/models` or
-`/chat/completions` URLs, and discovers model IDs on that same origin. It does not
-scan your LAN, mesh peers, or arbitrary ports.
+Interactive setup checks localhost, saved endpoints, and known private LAN/mesh
+peers from the neighbor table, NetBird, and Tailscale. It probes the four common
+ports above plus ports from saved or explicit hints. The scan is bounded to 16
+peers, 80 endpoint candidates, 8 concurrent checks, and 10 seconds. It does not
+sweep subnets. Server labels come from API evidence, not a port number.
+
+The menu keeps reachable servers that need authentication or have no loaded
+models. Choose one to enter a key or load a model. Rein normalizes API paths,
+accepts pasted `/models` or `/chat/completions` URLs, and tests a chat response
+before saving. Credentials are scoped to an explicitly configured endpoint and
+SSH host; peer probes do not inherit them.
+
+```sh
+rein models --discover-network
+rein models --discover-network --json
+# Add an unusual listening port or a host absent from the peer table:
+rein models --discover-hosts model-host --discover-ports 9000
+# Keep interactive setup limited to localhost and configured endpoints:
+rein setup --connection-only --discover-network=false
+```
+
+`rein models` and unattended setup stay local/configured by default. Add
+`--discover-network` to opt into known peers. Loopback-only remote APIs still
+need an explicit SSH route. Discovery cannot make an unreachable listener
+reachable. See the [discovery guide](https://github.com/Zermo/rein-agent/wiki/Server-discovery).
 
 ### Connect through a LAN, mesh VPN, or SSH
 
@@ -448,6 +467,7 @@ Switching endpoints cannot reuse that saved key automatically.
 ```sh
 rein setup --provider openai
 rein setup --provider gemini
+rein setup --provider xai       # XAI_API_KEY or the hidden key prompt
 rein setup --provider openrouter --no-browser  # print the key-page link
 ```
 
@@ -457,13 +477,14 @@ Subscription connections use installed official CLIs:
 | --- | --- | --- |
 | ChatGPT through Codex | `npm install -g @openai/codex` | `rein setup --provider codex` |
 | GitHub Copilot | `npm install -g @github/copilot` | `rein setup --provider copilot` |
+| SuperGrok / X Premium+ | `npm install -g @xai-official/grok` | `rein setup --provider grok` |
 
 Setup opens device sign-in and lets the official CLI display the one-time code.
-`rein login codex` or `rein login copilot` repeats login; `--device-auth=false`
+`rein login codex`, `rein login copilot`, or `rein login grok` repeats login; `--device-auth=false`
 selects the CLI's browser callback flow. `--no-browser` prints the link without
 launching a browser. Login requires user interaction; `setup --yes` never starts it.
 ChatGPT device login may need enabling in your account or workspace security
-settings. Subscription access and API billing are separate. See the official
+settings. Access and billing follow the selected provider and account. See the official
 [Codex authentication guide](https://learn.chatgpt.com/docs/auth) and
 [Copilot authentication guide](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli).
 
@@ -473,14 +494,22 @@ Use `rein login`, rather than a bare CLI login, to select Rein's configuration.
 The default model follows the official CLI; pass `--model` for an available model.
 CLI responses use Rein's text tool protocol and retain Rein's tool approvals and
 Posthorse history. Each turn starts in a temporary directory with native tools
-disabled or sandboxed; unexpected native Codex tool events stop the turn.
+disabled or sandboxed; unexpected native Codex or Grok tool events stop the turn.
 CLI output is returned when that CLI turn finishes, rather than token by token.
 These bridges require current CLIs with the isolation flags used by Rein.
 
 Gemini API uses its documented [OpenAI-compatible endpoint](https://ai.google.dev/gemini-api/docs/openai).
 The retired GitHub Models API is no longer offered; [GitHub's retirement notice](https://docs.github.com/en/github-models)
-applies to that API, while Copilot CLI is a separate connection. Other subscription
-CLIs are not integrated. Compatible cloud APIs continue to use API keys.
+applies to that API, while Copilot CLI is a separate connection.
+
+Grok subscriptions use the official Grok Build CLI and its device login. Basic X
+Premium is not advertised as eligible; the supported X tier is **Premium+**.
+For direct HTTP instead, `--provider xai` uses `https://api.x.ai/v1` and
+`XAI_API_KEY`. Setup prefers xAI's language-model catalog so image/video models
+are not suggested for agent chat. Check your account's current allowances in
+the official [Grok Build announcement](https://x.ai/news/grok-build-cli) and
+[CLI reference](https://docs.x.ai/build/cli/reference), or follow Rein's
+[Grok guide](https://github.com/Zermo/rein-agent/wiki/Grok).
 
 ### Tool calls work for every model
 
@@ -832,34 +861,26 @@ Stolen concept from [Magnitude](https://github.com/magnitudedev/magnitude)
 with a per-domain memory model (system RAM vs VRAM, unified memory handled as
 one pool) and reserves before a model may claim memory (`max(pool/10, 2 GiB)`).
 
-```
-rein hardware
-  Apple M5 Pro · 18 cores
-  48 GB unified memory (26 GB available) · ~307 GB/s (est)
-
-  what you can run (7)
-  ✓ ~121 tok/s  DeepSeek Coder V2 Lite 16B  16B · 2B active  Q4_K_M  unified
-  ✓ ~91 tok/s   GPT-OSS 20B (MoE)           21B · 4B active  MXFP4   unified
-  ✓ ~38 tok/s   Qwen2.5-Coder 7B            8B               Q4_K_M  unified
-  ...
-  tight — fits only if other memory hogs are closed
-  △ tight  Qwen3 30B-A3B (MoE)   31B · 3B active  Q4_K_M  unified
-  △ tight  Qwen2.5-Coder 32B     33B              Q4_K_M  unified
-
-  out of reach: GPT-OSS 120B (MoE)
-
-  best pick: DeepSeek Coder V2 Lite 16B
-    ollama pull deepseek-coder-v2:16b
-    weights 9 GB + KV ~3 GB @ 16k ctx, after 5 GB reserve
+```sh
+rein hardware             # this machine, ranked models, prerequisites and recipes
+rein hardware --json      # the same evidence for another tool
 ```
 
-The math is deliberately visible and rough: footprint = weights
-(`params × bytesPerWeight`) + KV estimate @ 16k ctx, minus reserves; tok/s ≈
-`bandwidth / bytes-per-token` (MoE: active params only) × 0.55 efficiency.
-Directional, not a benchmark — the point is to stop guessing between a 7B and
-a 32B before you've spent an hour downloading. `rein models` shows a
-best-5 fit section, and the `rein setup` wizard marks each detected model
-with its verdict. `--json` for machines.
+Recommendations consider the operator's work focus, memory headroom, context
+length, quantization, and accelerator placement. They do not call the smallest
+model with the highest estimated speed the best agent. The report shows engine
+prerequisites and serving/check commands for LM Studio, Ollama, llama.cpp, and
+vLLM where the model and hardware have a supported recipe. It never downloads
+a model or starts a service by itself.
+
+Fit and throughput are estimates, not measurements. GPU memory is assessed per
+device; unsupported split/offload behavior is not assumed. Unknown hardware or
+model architecture stays marked as unknown. The report explains its assumptions.
+
+The installer shows a local fit summary and a **Help me host a model** option.
+Run `rein hardware` on the actual model host when using a remote server: the
+machine running Rein or its gateway cannot reveal a remote GPU's capacity.
+See [Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and-serving).
 
 ## Architecture notes (what I took from pi, and where I cut)
 

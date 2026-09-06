@@ -8,14 +8,16 @@ import { promisify } from "node:util";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 import type { Readable } from "node:stream";
-import { PROVIDER_PRESETS, discoverLocalServers, loadConfig, pickDefaultModelId, apiKeyFor, normalizeBaseUrl, detectEndpoint, validateHttpApi } from "../ai/models.ts";
+import { PROVIDER_PRESETS, discoverLocalServers, discoverServers, loadConfig, pickDefaultModelId, apiKeyFor, normalizeBaseUrl, detectEndpoint, validateHttpApi } from "../ai/models.ts";
 import { CLI_PROVIDERS, loginCli, checkCliAuth } from "./auth.ts";
+import type { CliProvider } from "./auth.ts";
+import { XAI_API_KEY_PAGE } from "../ai/xai.ts";
+import { printDiscoverySummary, printServingAdvice } from "./server-setup.ts";
 import { withSshTunnel } from "../ai/ssh.ts";
 import { postChatCompletion } from "../ai/chat-request.ts";
 import { GITHUB_MODELS_RETIRED } from "../ai/endpoints.ts";
 import { chatCompletionChunks, chatCompletionReasoning, chatCompletionText } from "../ai/openai-completions.ts";
 
-type CliProvider = "codex" | "copilot";
 export interface SetupOptions {
 	api?: string;
 	yes?: boolean;
@@ -28,6 +30,9 @@ export interface SetupOptions {
 	deviceAuth?: boolean;
 	sshHost?: string;
 	noBrowser?: boolean;
+	discoverNetwork?: boolean;
+	discoverHosts?: string[];
+	discoverPorts?: number[];
 }
 export interface SetupPrompt {
 	ask(prompt: string, fallback?: string): Promise<string>;
@@ -41,6 +46,8 @@ export interface SetupDependencies {
 	onPromptReleased?: () => void;
 	log?: (text: string) => void;
 	discover?: typeof discoverLocalServers;
+	discoverServers?: typeof discoverServers;
+	servingAdvice?: typeof printServingAdvice;
 	detect?: typeof detectEndpoint;
 	keyFor?: typeof apiKeyFor;
 	connection?: typeof testConnection;
@@ -53,6 +60,7 @@ const LOCAL = new Set(["ollama", "lmstudio", "llamacpp", "vllm"]);
 // Official provider account pages. CLI subscription sign-in is a separate flow.
 export const API_KEY_PAGES: Record<string, string> = {
 	openai: "https://platform.openai.com/api-keys",
+	xai: XAI_API_KEY_PAGE,
 	deepseek: "https://platform.deepseek.com/api_keys",
 	groq: "https://console.groq.com/keys",
 	together: "https://api.together.ai/settings/api-keys",
@@ -152,7 +160,7 @@ export async function testConnection(baseUrl: string, model: string, apiKey?: st
 	}
 }
 
-interface Selection { provider?: string; baseUrl?: string; model?: string; cli?: CliProvider; label: string }
+interface Selection { provider?: string; baseUrl?: string; model?: string; cli?: CliProvider; label: string; sshHost?: string; hardware?: boolean; status?: string; error?: string }
 async function choose(prompt: SetupPrompt, log: (text: string) => void, label: string, choices: string[], defaultIndex = 0): Promise<number> {
 	choices.forEach((item, i) => log(`  ${i + 1}. ${item}`));
 	for (;;) {
@@ -201,29 +209,40 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 			return result.ok ? 0 : 1;
 		}
 		if (opts.auth !== undefined && opts.auth !== "api-key" && opts.auth !== "cli") throw new Error("--auth must be api-key or cli.");
-		if (opts.cliProvider && !(opts.cliProvider in CLI_PROVIDERS)) throw new Error("--cli-provider must be codex or copilot.");
+		const cliProviders = Object.keys(CLI_PROVIDERS) as CliProvider[];
+		if (opts.cliProvider && !cliProviders.includes(opts.cliProvider)) throw new Error(`--cli-provider must be ${cliProviders.join(", ")}.`);
 		const envBase = process.env.REIN_BASE_URL?.trim() || undefined;
 		const envModel = process.env.REIN_MODEL?.trim() || undefined;
 		const selectedProvider = opts.provider?.trim().toLowerCase() || undefined;
 		const explicitSelection = Boolean(selectedProvider || opts.baseUrl || opts.auth || opts.cliProvider || opts.sshHost || envBase);
 		let selection: Selection = { label: "selected endpoint", provider: selectedProvider, baseUrl: opts.baseUrl?.trim() || (selectedProvider ? PROVIDER_PRESETS[selectedProvider]?.baseUrl : undefined) || envBase, model: opts.model?.trim() || envModel };
-		const cli = opts.cliProvider ?? (selection.provider === "codex" || selection.provider === "copilot" ? selection.provider : undefined);
+		const cli = opts.cliProvider ?? (cliProviders.includes(selection.provider as CliProvider) ? selection.provider as CliProvider : undefined);
 		if (opts.auth === "api-key" && cli) throw new Error("CLI providers use --auth cli; API-key setup requires an HTTP provider or --base-url.");
 		if ((opts.auth === "cli" || cli) && (opts.baseUrl || opts.sshHost || envBase)) throw new Error("CLI account setup does not accept --base-url, REIN_BASE_URL or --ssh; choose an HTTP API connection for those options.");
 		if (opts.auth === "cli" || cli) {
 			selection.cli = cli;
-			if (!selection.cli && opts.yes) throw new Error("CLI setup needs --cli-provider codex or --cli-provider copilot.");
-			if (!selection.cli) selection.cli = (["codex", "copilot"] as const)[await choose(getPrompt(), log, "Choose CLI account", [CLI_PROVIDERS.codex.label, CLI_PROVIDERS.copilot.label])];
+			if (!selection.cli && opts.yes) throw new Error(`CLI setup needs --cli-provider ${cliProviders.join(" | ")}.`);
+			if (!selection.cli) selection.cli = cliProviders[await choose(getPrompt(), log, "Choose CLI account", cliProviders.map(p => CLI_PROVIDERS[p].label))];
 		} else if (!explicitSelection && opts.yes && config.auth?.type === "cli") {
 			selection.cli = config.auth.provider;
 		} else if (!explicitSelection && !opts.yes) {
 			log("rein setup — local server, remote host, cloud API, or CLI account");
-			const locals = await (dependencies.discover ?? discoverLocalServers)();
-			const choices: Selection[] = locals.map(server => ({ ...server, label: `${server.provider} — ${server.baseUrl}` }));
-			choices.push({ label: "Custom Chat Completions API / remote host (LAN, VPN, mesh)", provider: "custom" });
-			choices.push(...(["codex", "copilot"] as const).map(provider => ({ label: CLI_PROVIDERS[provider].label, cli: provider })));
-			for (const [provider, preset] of Object.entries(PROVIDER_PRESETS)) if (!LOCAL.has(provider) && provider !== "github") choices.push({ label: `${provider} — cloud API key`, provider, baseUrl: preset.baseUrl });
-			selection = { ...choices[await choose(getPrompt(), log, "Choose connection", choices.map(c => c.label))], model: selection.model };
+			await (dependencies.servingAdvice ?? printServingAdvice)(false, log);
+			for (;;) {
+				log(opts.discoverNetwork === false ? "Checking localhost and configured endpoints…" : "Checking localhost, configured endpoints, and known LAN/mesh peers (up to 10 seconds)…");
+				const report = dependencies.discover && !dependencies.discoverServers ? undefined : await (dependencies.discoverServers ?? discoverServers)({ network: opts.discoverNetwork !== false, hosts: opts.discoverHosts, ports: opts.discoverPorts });
+				if (report) printDiscoverySummary(report, log);
+				const servers: Array<{ provider: string; baseUrl: string; sshHost?: string; status?: string; error?: string }> = report?.servers ?? await dependencies.discover!();
+				const choices: Selection[] = servers.map(server => ({ ...server, label: `${server.provider} — ${server.baseUrl}${server.sshHost ? ` via SSH ${server.sshHost}` : ""}${"status" in server ? ` [${server.status}]` : ""}` }));
+				choices.push({ label: "Custom Chat Completions API / remote host (LAN, VPN, mesh)", provider: "custom" });
+				choices.push(...cliProviders.map(provider => ({ label: CLI_PROVIDERS[provider].label, cli: provider })));
+				for (const [provider, preset] of Object.entries(PROVIDER_PRESETS)) if (!LOCAL.has(provider)) choices.push({ label: `${provider} — cloud API key`, provider, baseUrl: preset.baseUrl });
+				choices.push({ label: "Help me host a model — hardware fit and serving recipes", hardware: true });
+				const picked = choices[await choose(getPrompt(), log, "Choose connection", choices.map(c => c.label))];
+				if (!picked.hardware) { selection = { ...picked, model: selection.model }; break; }
+				await (dependencies.servingAdvice ?? printServingAdvice)(true, log);
+				await getPrompt().ask("Start a server using a recipe in another terminal, then press Enter to scan again (or choose a cloud connection next): ");
+			}
 		}
 
 		if (selection.cli) {
@@ -257,14 +276,20 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 
 		validateHttpApi(requestedApi ?? config.api);
 		if (selection.provider === "github") throw new Error(GITHUB_MODELS_RETIRED);
-		if (selection.provider && selection.provider !== "custom" && !PROVIDER_PRESETS[selection.provider]) throw new Error(`Unknown API provider "${selection.provider}". Use --base-url for a custom host.`);
+		if (selection.provider && !["custom", "openai-compatible"].includes(selection.provider) && !PROVIDER_PRESETS[selection.provider]) throw new Error(`Unknown API provider "${selection.provider}". Use --base-url for a custom host.`);
 		selection.baseUrl ??= selection.provider && PROVIDER_PRESETS[selection.provider]?.baseUrl;
 		if (!selection.baseUrl && opts.yes && !opts.provider) {
 			selection.baseUrl = config.auth?.type !== "cli" ? config.baseUrl : undefined;
 			selection.provider ??= config.provider;
 			if (!selection.baseUrl) {
-				const local = (await (dependencies.discover ?? discoverLocalServers)())[0];
-				if (local) { selection.baseUrl = local.baseUrl; selection.provider = local.provider; }
+				const expanded = opts.discoverNetwork || opts.discoverHosts?.length || opts.discoverPorts?.length;
+				const report = expanded ? await (dependencies.discoverServers ?? discoverServers)({ network: opts.discoverNetwork === true, hosts: opts.discoverHosts, ports: opts.discoverPorts }) : undefined;
+				if (report) printDiscoverySummary(report, log);
+				const local = report ? report.servers.find(s => s.status === "ready") : (await (dependencies.discover ?? discoverLocalServers)())[0];
+				if (local) {
+					selection.baseUrl = local.baseUrl; selection.provider = local.provider;
+					if ("sshHost" in local && typeof local.sshHost === "string") selection.sshHost = local.sshHost;
+				}
 			}
 		}
 		if (!selection.baseUrl) {
@@ -273,23 +298,32 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 			selection.baseUrl = await getPrompt().ask("Server URL or host:port: ");
 		}
 		let baseUrl = normalizeBaseUrl(selection.baseUrl);
-		const inferredProvider = Object.entries(PROVIDER_PRESETS).find(([, preset]) => normalizeBaseUrl(preset.baseUrl) === baseUrl)?.[0];
-		let provider = (!selection.provider || selection.provider === "custom" ? inferredProvider : selection.provider) ?? "custom";
+		const inferredProvider = Object.entries(PROVIDER_PRESETS).find(([name, preset]) => !LOCAL.has(name) && normalizeBaseUrl(preset.baseUrl) === baseUrl)?.[0];
+		let provider = (!selection.provider || ["custom", "openai-compatible"].includes(selection.provider) ? inferredProvider : selection.provider) ?? "custom";
 		let sameEndpoint = false;
-		try { sameEndpoint = Boolean(config.baseUrl && config.auth?.type !== "cli" && normalizeBaseUrl(config.baseUrl) === baseUrl && (!config.provider || config.provider === provider || provider === "custom")); } catch {}
-		let sshHost = opts.sshHost ?? (sameEndpoint ? config.sshHost : undefined);
-		if (!opts.yes && !sshHost && provider === "custom") {
+		try { sameEndpoint = Boolean(config.baseUrl && config.auth?.type !== "cli" && normalizeBaseUrl(config.baseUrl) === baseUrl); } catch {}
+		let sshHost = opts.sshHost ?? selection.sshHost ?? (sameEndpoint ? config.sshHost : undefined);
+		if (!opts.yes && !sshHost && provider === "custom" && !selection.status) {
 			log("If the remote API listens only on 127.0.0.1, Rein can reach it through an SSH host from your SSH config (for example, model-host).");
 			sshHost = await getPrompt().ask("SSH host (optional; Enter for direct LAN or mesh access): ") || undefined;
 		}
 		const sameConnection = sameEndpoint && (config.sshHost ?? undefined) === sshHost;
 		let model = selection.model ?? (sameConnection ? config.model : undefined);
-		let key = keyFor(provider, baseUrl, sshHost);
-		if (!sameConnection && key === config.apiKey && !process.env.REIN_API_KEY && !process.env[PROVIDER_PRESETS[provider]?.keyEnv ?? "REIN_API_KEY"]) key = undefined;
+		// An exact local preset may name a credential without proving the server's
+		// implementation. A remote SSH loopback route never inherits that local key.
+		const credentialProvider = provider === "custom" && !sshHost
+			? Object.entries(PROVIDER_PRESETS).find(([name, preset]) => LOCAL.has(name) && normalizeBaseUrl(preset.baseUrl) === baseUrl)?.[0] ?? provider : provider;
+		let key = keyFor(credentialProvider, baseUrl, sshHost);
+		if (!sameConnection && key === config.apiKey && !process.env.REIN_API_KEY && !process.env[PROVIDER_PRESETS[credentialProvider]?.keyEnv ?? "REIN_API_KEY"]) key = undefined;
 		if (key) secrets.add(key);
 		let saveKey = sameConnection && key === config.apiKey ? config.apiKey : undefined;
-		const keyEnv = PROVIDER_PRESETS[provider]?.keyEnv ?? "REIN_API_KEY";
+		const keyEnv = PROVIDER_PRESETS[credentialProvider]?.keyEnv ?? "REIN_API_KEY";
 		if (process.env.REIN_API_KEY || process.env[keyEnv]) saveKey = undefined;
+		if (selection.status === "auth-required" && key && /Authentication was rejected/.test(selection.error ?? "")) {
+			if (process.env.REIN_API_KEY === key || process.env[keyEnv] === key) throw new Error(`This server rejected the environment credential. Correct or unset ${process.env.REIN_API_KEY === key ? "REIN_API_KEY" : keyEnv}, then rerun setup.`);
+			log("The server rejected its saved credential. Enter a replacement key; the existing configuration stays intact until a chat reply passes.");
+			key = undefined; saveKey = undefined;
+		}
 		const cloud = Boolean(PROVIDER_PRESETS[provider] && !LOCAL.has(provider));
 		if (!key && !opts.yes) {
 			const url = API_KEY_PAGES[provider];
@@ -300,7 +334,7 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 			key = await getPrompt().secret(cloud ? "API key (hidden): " : "API key if required (hidden; Enter for none): ");
 			if (key) { secrets.add(key); saveKey = key; }
 		}
-		if (cloud && !key) throw new Error(`No API key for ${provider}. Set ${keyEnv} and rerun setup; API keys are separate from CLI subscriptions.`);
+		if (cloud && !key) throw new Error(`No API key for ${provider}. Set ${keyEnv} and rerun setup${provider === "xai" ? ", or choose --provider grok for SuperGrok / X Premium+ CLI sign-in" : "; choose a supported CLI provider for subscription sign-in"}.`);
 		const endpoint = await detect(baseUrl, { provider, apiKey: key, sshHost });
 		baseUrl = endpoint.baseUrl; provider = endpoint.provider;
 		if (endpoint.error) log(`Model discovery: ${endpoint.error}`);

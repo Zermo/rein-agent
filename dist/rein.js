@@ -135,6 +135,187 @@ var init_ssh = __esm({
   }
 });
 
+// src/ai/xai.ts
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+function grokDeviceLoginUrl(output) {
+  for (const value of output.match(/https:\/\/[^\s<>\u001b"']+/g) ?? []) {
+    try {
+      const url = new URL(value.replace(/[),.;]+$/, ""));
+      if (url.origin === "https://auth.x.ai" && !url.username && !url.password) return url.toString();
+    } catch {
+    }
+  }
+  return void 0;
+}
+function xaiLanguageModelIds(doc) {
+  if (!doc || typeof doc !== "object" || !Array.isArray(doc.models)) return void 0;
+  const models = doc.models;
+  const ids = models.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const model = item;
+    if (typeof model.id !== "string" || !model.id.trim()) return [];
+    if (!Array.isArray(model.input_modalities) || !model.input_modalities.includes("text")) return [];
+    if (!Array.isArray(model.output_modalities) || !model.output_modalities.includes("text")) return [];
+    return [model.id];
+  });
+  return [...new Set(ids)];
+}
+function prepareGrokProfile(directory, systemDirectory = "/etc/grok") {
+  mkdirSync(directory, { recursive: true, mode: 448 });
+  for (const name of ["managed_config.toml", "requirements.toml"]) {
+    if (existsSync(join(systemDirectory, name))) throw new Error("Grok has system-managed configuration. Rein cannot isolate its native tools from that policy; use the xai API provider or run Grok directly.");
+  }
+  for (const name of ["managed_config.toml", "requirements.toml", "sandbox.toml", "hooks", "plugins", "agents", "skills", "mcp.json", "mcp-config.json"]) {
+    const path2 = join(directory, name);
+    if (!existsSync(path2)) continue;
+    const stat3 = lstatSync(path2);
+    if (stat3.isDirectory() && !stat3.isSymbolicLink() && readdirSync(path2).length === 0) continue;
+    throw new Error(`Rein's isolated Grok profile contains custom ${name}. Remove that customization from ${directory} or use Grok directly.`);
+  }
+  const config = join(directory, "config.toml");
+  if (existsSync(config)) {
+    if (lstatSync(config).isSymbolicLink() || readFileSync(config, "utf8") !== GROK_BRIDGE_CONFIG) throw new Error(`Rein's isolated Grok profile contains custom config.toml. Preserve your changes and use a clean Rein CLI profile or the xai API provider.`);
+  } else writeFileSync(config, GROK_BRIDGE_CONFIG, { flag: "wx", mode: 384 });
+}
+function grokEnvironment(env, directory) {
+  const result = { ...env };
+  for (const key of Object.keys(result)) if (key.startsWith("GROK_") || key.startsWith("XAI_") || key === "RUST_LOG") delete result[key];
+  Object.assign(result, {
+    GROK_HOME: directory,
+    GROK_DISABLE_AUTOUPDATER: "1",
+    GROK_SANDBOX: "read-only",
+    GROK_SANDBOX_AUTO_ALLOW_BASH: "0",
+    GROK_WEB_FETCH: "0",
+    GROK_MEMORY: "0",
+    GROK_SUBAGENTS: "0",
+    GROK_WRITE_FILE: "0",
+    GROK_TOOL_SEARCH: "0",
+    GROK_LSP_TOOLS: "0",
+    GROK_WORKFLOWS: "0",
+    GROK_PROMPT_SUGGESTIONS: "0",
+    GROK_SHOW_THINKING_BLOCKS: "0"
+  });
+  for (const app of ["CURSOR", "CLAUDE", "CODEX"]) for (const feature of ["SKILLS", "RULES", "AGENTS", "MCPS", "HOOKS", "SESSIONS"]) result[`GROK_${app}_${feature}_ENABLED`] = "0";
+  return result;
+}
+function grokArguments(model, promptPath) {
+  const disabled = ["bash", "run_terminal_command", "read_file", "search_replace", "list_dir", "grep", "kill_command_or_subagent", "todo_write", "get_command_or_subagent_output", "scheduler_create", "scheduler_delete", "scheduler_list", "monitor", "search_tool", "use_tool", "update_goal", "enter_plan_mode", "exit_plan_mode", "ask_user_question", "image_gen", "image_edit", "image_to_video", "reference_to_video"];
+  return [
+    "--prompt-file",
+    promptPath,
+    "--output-format",
+    "streaming-json",
+    "--disallowed-tools",
+    disabled.join(","),
+    "--deny",
+    "*",
+    "--permission-mode",
+    "dontAsk",
+    "--sandbox",
+    "read-only",
+    "--no-plan",
+    "--no-subagents",
+    "--disable-web-search",
+    "--max-turns",
+    "1",
+    "--system-prompt-override",
+    "You generate the next assistant message for Rein. Follow the supplied Rein context and text-tool protocol. Rein executes tools; never execute native tools.",
+    ...model && model !== "default" ? ["--model", model] : []
+  ];
+}
+function grokUsage(value) {
+  if (!value || typeof value !== "object") return void 0;
+  const count = (input2) => typeof input2 === "number" && Number.isSafeInteger(input2) && input2 >= 0 ? input2 : 0;
+  const input = count(value.input_tokens), output = count(value.output_tokens);
+  return { input, output, totalTokens: input + output, ...typeof value.reasoning_tokens === "number" ? { reasoning: count(value.reasoning_tokens) } : {} };
+}
+function grokEvent(line) {
+  let value;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new Error("Grok returned invalid JSON events. Update the official Grok Build CLI.");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Grok returned an invalid event.");
+  if (value.error || value.type === "error") throw new Error("Grok request failed. Check 'rein login grok' and your subscription/model access.");
+  if (value.type === "available_commands") {
+    const residual = ["run_terminal_command", "kill_command_or_subagent", "get_command_or_subagent_output"];
+    if (!Array.isArray(value.tools) || value.tools.some((tool) => typeof tool !== "string" || !residual.includes(tool))) throw new Error("Grok advertised unexpected native tools. The bridge canceled this turn; use the xai API provider or update Grok Build.");
+    return {};
+  }
+  if (value.type === "text") {
+    if (typeof value.data !== "string") throw new Error("Grok returned invalid text content.");
+    return { text: value.data };
+  }
+  if (value.type === "thought" || value.type === "thinking") return { thinking: true };
+  if (value.type === "usage") return { usage: grokUsage(value.usage) };
+  if (["tool_call", "tool_call_update", "permission_request"].includes(value.type)) throw new Error("Grok attempted a native tool. The bridge canceled this turn; Rein tools must use text tool blocks.");
+  if (value.type === "max_turns_reached") throw new Error("Grok exceeded the bridge's single-turn limit.");
+  const update = value.method === "session/update" ? value.params?.update : value.update ?? value;
+  if (!update || typeof update !== "object") throw new Error("Grok returned an invalid session update.");
+  const type = update.sessionUpdate;
+  if (type === "tool_call" || type === "tool_call_update" || value.method === "session/request_permission") throw new Error("Grok attempted a native tool. The bridge canceled this turn; Rein tools must use text tool blocks.");
+  if (type === "agent_message_chunk") {
+    if (update.content?.type !== "text" || typeof update.content.text !== "string") throw new Error("Grok returned unsupported assistant content.");
+    return { text: update.content.text };
+  }
+  if (type === "agent_thought_chunk") return { thinking: true };
+  if (["user_message_chunk", "available_commands_update", "current_mode_update", "config_option_update", "session_info_update", "usage_update", "plan"].includes(type)) return {};
+  const acpResult = value.jsonrpc === "2.0" && (typeof value.id === "number" || typeof value.id === "string") && value.method === void 0 && value.result && typeof value.result === "object";
+  if (value.type === "end" || acpResult) {
+    const reason2 = value.type === "end" ? value.stopReason : value.result.stopReason;
+    if (reason2 !== "end_turn") throw new Error(`Grok did not complete its reply (${reason2}).`);
+    return { done: true, usage: grokUsage(value.usage ?? value.result?.usage) };
+  }
+  throw new Error("Grok returned an unknown event. Update the official Grok Build CLI.");
+}
+function grokOutput(output) {
+  let text = "", done = false, usage2;
+  for (const line of output.split(/\r?\n/).filter((line2) => line2.trim())) {
+    if (done) throw new Error("Grok sent output after its completion event. The reply was discarded.");
+    const event = grokEvent(line);
+    text += event.text ?? "";
+    done ||= event.done ?? false;
+    if (event.usage) usage2 = event.usage;
+  }
+  if (!done) throw new Error("Grok did not confirm completion. The partial reply was discarded.");
+  return { text, usage: usage2 };
+}
+var XAI_PRESET, XAI_API_KEY_PAGE, GROK_ACCOUNT_PAGE, GROK_CLI, GROK_BRIDGE_CONFIG;
+var init_xai = __esm({
+  "src/ai/xai.ts"() {
+    XAI_PRESET = { baseUrl: "https://api.x.ai/v1", keyEnv: "XAI_API_KEY" };
+    XAI_API_KEY_PAGE = "https://console.x.ai/team/default/api-keys";
+    GROK_ACCOUNT_PAGE = "https://grok.com";
+    GROK_CLI = {
+      label: "SuperGrok / X Premium+ subscription via Grok Build CLI",
+      command: "grok",
+      installCommand: "npm install -g @xai-official/grok",
+      loginUrl: GROK_ACCOUNT_PAGE,
+      defaultModel: "default",
+      baseUrl: "cli://grok"
+    };
+    GROK_BRIDGE_CONFIG = `# Rein Grok bridge: native tools and automatic integrations are disabled.
+[cli]
+auto_update = false
+show_tips = false
+[session]
+load_envrc = false
+[ui]
+permission_mode = "dontAsk"
+[ui.status_line]
+type = "disabled"
+[permission]
+rules = [{ action = "deny", tool = "*" }]
+[workflows]
+enabled = false
+[grok_com_config]
+disable_api_key_auth = true
+`;
+  }
+});
+
 // src/ai/endpoints.ts
 function localHost(hostname) {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -178,8 +359,8 @@ function normalizeBaseUrl(input, provider) {
   const inferred = guessProvider(url.toString());
   if (inferred === "github" || provider?.toLowerCase() === "github") throw new Error(GITHUB_MODELS_RETIRED);
   let path2 = url.pathname.replace(/\/+$/, "");
-  const wasRoute = /\/(?:chat\/completions|models)$/.test(path2);
-  path2 = path2.replace(/\/(?:chat\/completions|models)$/, "");
+  const wasRoute = /\/(?:chat\/completions|models|language-models)$/.test(path2);
+  path2 = path2.replace(/\/(?:chat\/completions|models|language-models)$/, "");
   const preset = PROVIDER_PRESETS[inferred];
   if (preset && url.origin === new URL(preset.baseUrl).origin && (!path2 || path2 === "/v1" || new URL(preset.baseUrl).pathname.startsWith(path2 + "/"))) {
     path2 = new URL(preset.baseUrl).pathname;
@@ -188,12 +369,44 @@ function normalizeBaseUrl(input, provider) {
   } else if (!path2 && !wasRoute && !/^https?:\/\/[^/]+\/$/i.test(input.trim())) path2 = "/v1";
   return url.origin + (path2 || "/");
 }
+function endpointStatus(result) {
+  if (result.models.length) return "ready";
+  if (/Authentication .*HTTP (401|403)/.test(result.error ?? "")) return "auth-required";
+  if (/API is reachable but has no available models/.test(result.error ?? "")) return "no-models";
+  if (/Connection refused|Could not connect|could not be resolved|timed out|Cannot open SSH tunnel/i.test(result.error ?? "")) return "unreachable";
+  return "incompatible";
+}
+async function boundedJson(response) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Empty model list response");
+  const decoder = new TextDecoder();
+  let size = 0;
+  let body = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 1024 * 1024) {
+        await reader.cancel();
+        throw new Error("Model list exceeded 1 MiB");
+      }
+      body += decoder.decode(value, { stream: true });
+    }
+    return JSON.parse(body + decoder.decode());
+  } finally {
+    reader.releaseLock();
+  }
+}
 function modelIds(doc) {
   const values = Array.isArray(doc?.data) ? doc.data : Array.isArray(doc?.models) ? doc.models : void 0;
   if (!values) return void 0;
-  const ids = values.map((item) => typeof item === "string" ? item : item?.id ?? item?.name ?? item?.model).filter((id) => typeof id === "string" && id.length > 0);
+  const ids = values.map((item) => typeof item === "string" ? item : item?.id ?? item?.name ?? item?.model).filter(safeModelId);
   if (values.length && !ids.length) return void 0;
   return [...new Set(ids)];
+}
+function safeModelId(id) {
+  return typeof id === "string" && id.length <= 512 && id.trim().length > 0 && !/[\u0000-\u001f\u007f-\u009f]/.test(id);
 }
 function serverProvider(doc, fallback) {
   if (fallback !== "custom" && fallback !== "openai-compatible") return fallback;
@@ -208,9 +421,14 @@ function serverProvider(doc, fallback) {
 async function detectEndpoint(input, options = {}) {
   const logicalBase = normalizeBaseUrl(input, options.provider);
   const provider = options.provider?.toLowerCase() ?? guessProvider(logicalBase, "custom");
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(abort, Math.max(1, options.timeoutMs ?? (options.sshHost ? 15e3 : 2500)));
   try {
-    return await withSshTunnel(logicalBase, options.sshHost, async (forwardedBase) => {
-      const detected = await detectEndpointDirect(forwardedBase, { ...options, provider });
+    const result = await withSshTunnel(logicalBase, options.sshHost, async (forwardedBase) => {
+      const detected = await detectEndpointDirect(forwardedBase, { ...options, provider, signal: controller.signal });
       const logicalOrigin = new URL(logicalBase).origin;
       const forwardedOrigin = new URL(forwardedBase).origin;
       return {
@@ -218,9 +436,14 @@ async function detectEndpoint(input, options = {}) {
         baseUrl: logicalOrigin + (new URL(detected.baseUrl).pathname === "/" ? "/" : new URL(detected.baseUrl).pathname.replace(/\/$/, "")),
         ...detected.error ? { error: detected.error.replaceAll(forwardedOrigin, logicalOrigin) } : {}
       };
-    });
+    }, { signal: controller.signal, timeoutMs: options.timeoutMs });
+    return { ...result, status: endpointStatus(result) };
   } catch (error) {
-    return { baseUrl: logicalBase, provider, models: [], error: error.message };
+    const result = { baseUrl: logicalBase, provider, models: [], error: controller.signal.aborted ? "Connection timed out while checking this endpoint. Check the host, VPN connection, and server bind address." : error.message };
+    return { ...result, status: endpointStatus(result) };
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
   }
 }
 async function detectEndpointDirect(input, options) {
@@ -232,13 +455,20 @@ async function detectEndpointDirect(input, options) {
   if (url.pathname.endsWith("/v1")) bases.push(baseUrl.slice(0, -3));
   else if (provider === "custom" || provider === "openai-compatible") bases.push(`${baseUrl.replace(/\/$/, "")}/v1`);
   const probes = [...new Set(bases)].map((base) => ({ base, endpoint: `${base}/models` }));
-  if (provider === "ollama") probes.push({ base: `${url.origin}/v1`, endpoint: `${url.origin}/api/tags` });
+  if (provider === "xai") probes.unshift({ base: bases[0], endpoint: `${bases[0]}/language-models` });
+  if (provider === "ollama" || url.port === "11434") probes.push({ base: `${url.origin}/v1`, endpoint: `${url.origin}/api/tags` });
   const deadline = Date.now() + Math.max(1, options.timeoutMs ?? 2500);
   let error = "No compatible model list was found.";
   for (const probe of probes) {
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (options.signal?.aborted) return { ...result, error: "Connection timed out while checking this endpoint." };
+    options.signal?.addEventListener("abort", abort, { once: true });
     const remaining = deadline - Date.now();
-    if (remaining <= 0) return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
+    if (remaining <= 0) {
+      options.signal?.removeEventListener("abort", abort);
+      return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
+    }
     const timer = setTimeout(() => controller.abort(), remaining);
     try {
       let endpoint = probe.endpoint;
@@ -265,20 +495,25 @@ async function detectEndpointDirect(input, options) {
       }
       let doc;
       try {
-        doc = await response.json();
+        doc = await boundedJson(response);
       } catch {
         if (controller.signal.aborted) throw new Error("Timed out");
         error = `Invalid model list at ${probe.endpoint}: expected JSON, but received another response (possibly a web UI).`;
         continue;
       }
-      const models = modelIds(doc);
+      const languageRoute = new URL(endpoint).pathname.endsWith("/language-models");
+      const models = provider === "xai" ? xaiLanguageModelIds(languageRoute ? doc : { models: doc?.data ?? doc?.models })?.filter(safeModelId) : modelIds(doc);
+      if (provider === "xai" && !languageRoute && models?.length === 0 && modelIds(doc)?.length) {
+        error = "The xAI model list did not identify any text-capable models. Check /v1/language-models or enter an available chat model ID manually.";
+        continue;
+      }
       if (!models) {
         error = `Invalid model list at ${probe.endpoint}: expected a data[] or models[] array of model IDs.`;
         continue;
       }
-      const rawDetectedBase = endpoint.endsWith("/models") ? endpoint.slice(0, -7) : probe.base;
+      const rawDetectedBase = /\/(?:models|language-models)$/.test(endpoint) ? endpoint.replace(/\/(?:models|language-models)$/, "") : probe.base;
       const detectedBase = new URL(rawDetectedBase).pathname === "/" ? new URL(rawDetectedBase).origin + "/" : rawDetectedBase;
-      return { baseUrl: detectedBase, provider: serverProvider(doc, provider), models, ...models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." } };
+      return { baseUrl: detectedBase, provider: serverProvider(doc, new URL(endpoint).pathname === "/api/tags" && Array.isArray(doc?.models) ? "ollama" : provider), models, ...models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." } };
     } catch (err) {
       if (controller.signal.aborted || err.name === "AbortError") return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
       const cause = err;
@@ -286,6 +521,7 @@ async function detectEndpointDirect(input, options) {
       return { ...result, error: `${code === "ECONNREFUSED" ? "Connection refused" : code === "ENOTFOUND" || code === "EAI_AGAIN" ? "Host name could not be resolved" : "Could not connect"} at ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
     } finally {
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
     }
   }
   return { ...result, error };
@@ -294,12 +530,14 @@ var PROVIDER_PRESETS, GITHUB_MODELS_RETIRED, PORT_PROVIDERS;
 var init_endpoints = __esm({
   "src/ai/endpoints.ts"() {
     init_ssh();
+    init_xai();
     PROVIDER_PRESETS = {
       ollama: { baseUrl: "http://localhost:11434/v1", keyEnv: "OLLAMA_API_KEY" },
       lmstudio: { baseUrl: "http://localhost:1234/v1", keyEnv: "LMSTUDIO_API_KEY" },
       llamacpp: { baseUrl: "http://localhost:8080/v1", keyEnv: "LLAMACPP_API_KEY" },
       vllm: { baseUrl: "http://localhost:8000/v1", keyEnv: "VLLM_API_KEY" },
       openai: { baseUrl: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
+      xai: XAI_PRESET,
       deepseek: { baseUrl: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY" },
       groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY" },
       together: { baseUrl: "https://api.together.xyz/v1", keyEnv: "TOGETHER_API_KEY" },
@@ -316,6 +554,200 @@ var init_endpoints = __esm({
   }
 });
 
+// src/ai/discovery.ts
+import { execFile } from "node:child_process";
+import { isIP } from "node:net";
+function privatePeerAddress(input) {
+  if (typeof input !== "string") return void 0;
+  const address = input.replace(/\/\d+$/, "").toLowerCase();
+  if (input.includes("/")) {
+    const prefix = input.slice(input.lastIndexOf("/") + 1);
+    if (!/^\d+$/.test(prefix) || Number(prefix) > (isIP(address) === 4 ? 32 : 128)) return void 0;
+  }
+  if (isIP(address) === 4) {
+    const [a, b, , d] = address.split(".").map(Number);
+    if (d === 0 || d === 255) return void 0;
+    if (a === 10 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 100 && b >= 64 && b <= 127) return address;
+  }
+  if (isIP(address) === 6 && /^(?:fc|fd)/.test(address)) return address;
+  return void 0;
+}
+function parseTailscalePeers(output) {
+  const doc = JSON.parse(output);
+  if (doc?.BackendState === "Running" && doc.Peer === null) return [];
+  if (!doc || typeof doc !== "object" || !doc.Peer || typeof doc.Peer !== "object" || Array.isArray(doc.Peer)) {
+    if (doc?.BackendState && doc.BackendState !== "Running") return [];
+    throw new Error("Tailscale status did not include a Peer map.");
+  }
+  return [...new Set(Object.values(doc.Peer).flatMap((peer) => peer?.Online === true && Array.isArray(peer.TailscaleIPs) ? peer.TailscaleIPs.map(privatePeerAddress).filter((ip) => typeof ip === "string") : []))];
+}
+function parseNetbirdPeers(output) {
+  const doc = JSON.parse(output);
+  if (doc?.peers?.total === 0 && doc.peers.details === null) return [];
+  if (!Array.isArray(doc?.peers?.details)) throw new Error("NetBird status did not include peers.details.");
+  return [...new Set(doc.peers.details.flatMap((peer) => typeof peer?.status === "string" && peer.status.toLowerCase() === "connected" ? [privatePeerAddress(peer.netbirdIp), privatePeerAddress(peer.netbirdIpv6)].filter((ip) => !!ip) : []))];
+}
+function parseNeighborPeers(output) {
+  const ips = [];
+  for (const line of output.split(/\r?\n/)) {
+    if (/\b(?:FAILED|INCOMPLETE|incomplete|Unreachable)\b/.test(line)) continue;
+    for (const match of line.matchAll(/(?:^|[\s(])((?:\d{1,3}\.){3}\d{1,3})(?=[\s)]|$)/g)) {
+      const ip = privatePeerAddress(match[1]);
+      if (ip) ips.push(ip);
+    }
+  }
+  return [...new Set(ips)];
+}
+function parseLinuxNeighbors(output) {
+  const doc = JSON.parse(output);
+  if (!Array.isArray(doc)) throw new Error("IP neighbor status was not an array.");
+  return [...new Set(doc.flatMap((row) => {
+    const state = Array.isArray(row?.state) ? row.state.join(" ") : String(row?.state ?? "");
+    if (/FAILED|INCOMPLETE/i.test(state)) return [];
+    const address = privatePeerAddress(row?.dst);
+    return address ? [address] : [];
+  }))];
+}
+function commandOutput(command, args) {
+  return new Promise((resolve22, reject) => execFile(command, args, { encoding: "utf8", timeout: 1200, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve22(stdout)));
+}
+async function knownPeers(dependencies) {
+  const platform2 = dependencies.platform ?? process.platform;
+  const run3 = dependencies.run ?? commandOutput;
+  const commands = [
+    { source: "tailscale", command: "tailscale", args: ["status", "--json"], parse: parseTailscalePeers },
+    { source: "netbird", command: "netbird", args: ["status", "--json"], parse: parseNetbirdPeers },
+    platform2 === "linux" ? { source: "neighbors", command: "ip", args: ["-j", "neighbor", "show"], parse: parseLinuxNeighbors } : { source: "neighbors", command: "arp", args: platform2 === "win32" ? ["-a"] : ["-an"], parse: parseNeighborPeers }
+  ];
+  const results = await Promise.all(commands.map(async (command) => {
+    try {
+      const peers = command.parse(await run3(command.command, command.args));
+      return { peers: peers.map((host) => ({ host, source: command.source })), source: { source: command.source, status: "ok", peers: peers.length } };
+    } catch (error) {
+      const missing = error.code === "ENOENT";
+      return { peers: [], source: {
+        source: command.source,
+        status: missing ? "unavailable" : "error",
+        peers: 0,
+        detail: missing ? `${command.command} is not installed or is not on PATH.` : `${command.command} status could not be read. Check that it is running and accessible to this account.`
+      } };
+    }
+  }));
+  return { peers: results.flatMap((result) => result.peers), sources: results.map((result) => result.source) };
+}
+function limit(value, fallback, maximum = fallback) {
+  return Number.isFinite(value) ? Math.max(1, Math.min(maximum, Math.floor(value))) : fallback;
+}
+function endpointStatus2(result) {
+  if (result.status) return result.status;
+  if (result.models.length) return "ready";
+  if (/Authentication .*HTTP (401|403)/.test(result.error ?? "")) return "auth-required";
+  if (/API is reachable but has no available models/.test(result.error ?? "")) return "no-models";
+  if (/Connection refused|Could not connect|could not be resolved|timed out|Cannot open SSH tunnel/i.test(result.error ?? "")) return "unreachable";
+  return "incompatible";
+}
+async function discoverServers(options = {}, dependencies = {}) {
+  const now = dependencies.now ?? Date.now;
+  const started = now();
+  const deadline = started + limit(options.budgetMs, LIMITS.budgetMs);
+  const detect = dependencies.detect ?? detectEndpoint;
+  const maxCandidates = limit(options.maxCandidates, LIMITS.candidates);
+  const maxPeers = limit(options.maxPeers, LIMITS.peers);
+  const candidates = [];
+  const seen = /* @__PURE__ */ new Set();
+  const sources = [];
+  let truncated = false;
+  const add = (candidate) => {
+    let baseUrl;
+    try {
+      baseUrl = normalizeBaseUrl(candidate.baseUrl, candidate.provider);
+    } catch {
+      return;
+    }
+    const key = `${candidate.sshHost ?? ""}
+${baseUrl}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    if (candidates.length >= maxCandidates) {
+      truncated = true;
+      return;
+    }
+    candidates.push({ ...candidate, baseUrl });
+  };
+  for (const candidate of options.configured ?? []) add(candidate);
+  const allPorts = [.../* @__PURE__ */ new Set([
+    ...DISCOVERY_PORTS,
+    ...(options.ports ?? []).filter((port) => Number.isInteger(port) && port >= 1 && port <= 65535),
+    ...(options.configured ?? []).flatMap((endpoint) => {
+      try {
+        const port = Number(new URL(normalizeBaseUrl(endpoint.baseUrl)).port);
+        return port ? [port] : [];
+      } catch {
+        return [];
+      }
+    })
+  ])];
+  const ports = allPorts.slice(0, 8);
+  if (allPorts.length > ports.length) truncated = true;
+  for (const port of ports) add({ baseUrl: `http://localhost:${port}/v1`, source: "localhost", provider: "openai-compatible" });
+  const peers = (options.hosts ?? []).slice(0, maxPeers).map((host) => ({ host, source: "explicit" }));
+  if ((options.hosts?.length ?? 0) > maxPeers) truncated = true;
+  if (options.network) {
+    const known = await knownPeers(dependencies);
+    peers.push(...known.peers);
+    sources.push(...known.sources);
+  }
+  const peerHosts = /* @__PURE__ */ new Set();
+  for (const peer of peers) {
+    if (peerHosts.has(peer.host)) continue;
+    if (peerHosts.size >= maxPeers) {
+      truncated = true;
+      break;
+    }
+    peerHosts.add(peer.host);
+    if (peer.source === "explicit" && !isIP(peer.host) && (/^https?:\/\//i.test(peer.host) || /:\d+(?:\/|$)/.test(peer.host))) {
+      add({ baseUrl: peer.host, source: peer.source, provider: "openai-compatible" });
+      continue;
+    }
+    const host = isIP(peer.host) === 6 ? `[${peer.host}]` : peer.host;
+    if (!host || /[\s/@?#]/.test(host) || host.startsWith("-")) continue;
+    for (const port of ports) add({ baseUrl: `http://${host}:${port}/v1`, source: peer.source, provider: "openai-compatible" });
+  }
+  const results = new Array(candidates.length);
+  let next = 0;
+  let scanned = 0;
+  let timedOut = false;
+  await Promise.all(Array.from({ length: Math.min(limit(options.concurrency, LIMITS.concurrency), candidates.length) }, async () => {
+    while (next < candidates.length) {
+      const index = next++;
+      const candidate = candidates[index];
+      const remaining = deadline - now();
+      const base = { provider: candidate.provider ?? "openai-compatible", baseUrl: candidate.baseUrl, modelsEndpoint: `${candidate.baseUrl.replace(/\/$/, "")}/models`, models: [], source: candidate.source, ...candidate.sshHost ? { sshHost: candidate.sshHost } : {} };
+      if (remaining <= 0) {
+        timedOut = true;
+        results[index] = { ...base, status: "skipped", error: "Discovery time budget reached; this endpoint was not checked." };
+        continue;
+      }
+      scanned++;
+      try {
+        const detected = await detect(candidate.baseUrl, { provider: candidate.provider ?? "openai-compatible", apiKey: candidate.apiKey, sshHost: candidate.sshHost, timeoutMs: Math.min(remaining, limit(options.timeoutMs, LIMITS.timeoutMs, 2500)) });
+        results[index] = { ...base, ...detected, modelsEndpoint: `${detected.baseUrl.replace(/\/$/, "")}/models`, status: endpointStatus2(detected) };
+      } catch {
+        results[index] = { ...base, status: "error", error: "Endpoint probe failed. Enter the API URL manually to check its configuration." };
+      }
+    }
+  }));
+  return { servers: results.filter((result) => ["ready", "auth-required", "no-models"].includes(result.status)), results, sources, scanned, candidateCount: candidates.length, truncated, timedOut, network: !!options.network };
+}
+var DISCOVERY_PORTS, LIMITS;
+var init_discovery = __esm({
+  "src/ai/discovery.ts"() {
+    init_endpoints();
+    DISCOVERY_PORTS = [11434, 1234, 8080, 8e3];
+    LIMITS = { peers: 16, candidates: 80, concurrency: 8, timeoutMs: 1200, budgetMs: 1e4 };
+  }
+});
+
 // src/ai/models.ts
 var models_exports = {};
 __export(models_exports, {
@@ -324,6 +756,7 @@ __export(models_exports, {
   apiKeyFor: () => apiKeyFor,
   detectEndpoint: () => detectEndpoint,
   discoverLocalServers: () => discoverLocalServers,
+  discoverServers: () => discoverServers2,
   guessProvider: () => guessProvider,
   loadConfig: () => loadConfig,
   normalizeBaseUrl: () => normalizeBaseUrl,
@@ -331,9 +764,9 @@ __export(models_exports, {
   resolveModel: () => resolveModel,
   validateHttpApi: () => validateHttpApi
 });
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync as readFileSync2, existsSync as existsSync2 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 function pickDefaultModelId(ids) {
   if (ids.length === 0) return void 0;
   for (const re of PREFERRED_MODELS) {
@@ -354,6 +787,42 @@ async function discoverLocalServers() {
   }));
   return results.filter((server) => server !== void 0);
 }
+async function discoverServers2(options = {}, dependencies = {}) {
+  const config = loadConfig();
+  const configured = [];
+  const savedBase = config.auth?.type !== "cli" ? config.baseUrl ?? (config.provider ? PROVIDER_PRESETS[config.provider.toLowerCase()]?.baseUrl : void 0) : void 0;
+  const envBase = process.env.REIN_BASE_URL?.trim();
+  if (envBase && !envBase.startsWith("cli://")) {
+    try {
+      const normalized = normalizeBaseUrl(envBase);
+      let sameSaved = false;
+      try {
+        sameSaved = !!savedBase && normalizeBaseUrl(savedBase) === normalized;
+      } catch {
+      }
+      const sshHost = sameSaved ? config.sshHost : void 0;
+      const inferred = guessProvider(normalized, "openai-compatible");
+      const provider = sameSaved ? config.provider ?? "openai-compatible" : LOCAL_SERVERS.some((server) => server.provider === inferred) ? "openai-compatible" : inferred;
+      configured.push({ baseUrl: normalized, provider, source: "environment", sshHost, apiKey: apiKeyFor(provider, normalized, sshHost) });
+    } catch {
+    }
+  }
+  if (savedBase && !savedBase.startsWith("cli://")) {
+    const provider = config.provider ?? "openai-compatible";
+    configured.push({
+      baseUrl: savedBase,
+      provider,
+      source: "configured",
+      sshHost: config.sshHost,
+      apiKey: scopedApiKeyFor(provider, savedBase, config.sshHost, !envBase)
+    });
+  }
+  for (const server of LOCAL_SERVERS) {
+    const key = scopedApiKeyFor(server.provider, server.baseUrl, void 0, false);
+    if (key) configured.push({ baseUrl: server.baseUrl, source: "localhost", provider: "openai-compatible", apiKey: key });
+  }
+  return discoverServers({ ...options, configured: [...configured, ...options.configured ?? []] }, dependencies);
+}
 function validateHttpApi(api) {
   if (api !== void 0 && api !== "chat-completions") throw new Error("Supported HTTP API: chat-completions. Use --api chat-completions with an OpenAI-compatible endpoint.");
   return "chat-completions";
@@ -363,7 +832,7 @@ function apiKeyFor(provider, baseUrl, sshHost) {
 }
 function scopedApiKeyFor(provider, baseUrl, sshHost, allowGeneric = true) {
   provider = provider?.toLowerCase();
-  if (provider === "codex" || provider === "copilot" || baseUrl?.startsWith("cli://")) return void 0;
+  if (provider === "codex" || provider === "copilot" || provider === "grok" || baseUrl?.startsWith("cli://")) return void 0;
   const config = loadConfig();
   const preset = provider ? PROVIDER_PRESETS[provider] : void 0;
   const target = baseUrl ?? preset?.baseUrl ?? config.baseUrl;
@@ -374,6 +843,11 @@ function scopedApiKeyFor(provider, baseUrl, sshHost, allowGeneric = true) {
     return void 0;
   }
   if (allowGeneric && process.env.REIN_API_KEY) return process.env.REIN_API_KEY;
+  if (["custom", "openai-compatible"].includes(provider ?? "") && normalized && !sshHost) {
+    const local = LOCAL_SERVERS.find((server) => normalizeBaseUrl(server.baseUrl) === normalized);
+    const key = local ? process.env[PROVIDER_PRESETS[local.provider].keyEnv] : void 0;
+    if (key) return key;
+  }
   if (preset && normalized && new URL(normalized).origin === new URL(preset.baseUrl).origin) {
     const key = process.env[preset.keyEnv];
     if (key) return key;
@@ -387,9 +861,12 @@ function scopedApiKeyFor(provider, baseUrl, sshHost, allowGeneric = true) {
   }
 }
 function loadConfig() {
-  const path2 = join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json");
+  const path2 = join2(process.env.REIN_HOME || join2(homedir(), ".rein"), "config.json");
   try {
-    if (existsSync(path2)) return JSON.parse(readFileSync(path2, "utf8"));
+    if (existsSync2(path2)) {
+      const parsed = JSON.parse(readFileSync2(path2, "utf8"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    }
   } catch {
   }
   return {};
@@ -405,7 +882,7 @@ async function resolveModel(overrides = {}) {
   const configuredProvider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0);
   const providerName = providerOverride ?? (selectingEndpoint ? void 0 : configuredProvider);
   if (providerName === "github") throw new Error(GITHUB_MODELS_RETIRED);
-  if (providerName === "codex" || providerName === "copilot") {
+  if (providerName === "codex" || providerName === "copilot" || providerName === "grok") {
     if (requestedApi !== void 0) throw new Error("--api/REIN_API selects an HTTP API protocol. Subscription CLI providers manage their own transport.");
     if (overrides.baseUrl !== void 0 || envBase) throw new Error(`CLI provider ${providerName} cannot be combined with an HTTP base URL. Remove --base-url/REIN_BASE_URL or select an API provider.`);
     if (overrides.sshHost) throw new Error("SSH forwarding applies to HTTP API providers, not subscription CLI providers.");
@@ -420,7 +897,7 @@ async function resolveModel(overrides = {}) {
   validateHttpApi(requestedApi ?? config.api);
   const preset = providerName ? PROVIDER_PRESETS[providerName] : void 0;
   if (providerOverride && !preset && !["custom", "openai-compatible"].includes(providerOverride)) {
-    throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, custom`);
+    throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, grok, custom`);
   }
   const configuredBase = config.auth?.type !== "cli" && !config.baseUrl?.startsWith("cli://") ? config.baseUrl : void 0;
   const rawBase = overrides.baseUrl ?? (providerOverride ? preset?.baseUrl : void 0) ?? envBase ?? configuredBase ?? preset?.baseUrl;
@@ -456,6 +933,7 @@ async function resolveModel(overrides = {}) {
 var LOCAL_SERVERS, PREFERRED_MODELS;
 var init_models = __esm({
   "src/ai/models.ts"() {
+    init_discovery();
     init_endpoints();
     init_endpoints();
     LOCAL_SERVERS = [
@@ -477,162 +955,821 @@ var init_models = __esm({
   }
 });
 
+// src/harness/operator-profile.ts
+var operator_profile_exports = {};
+__export(operator_profile_exports, {
+  AXES: () => AXES,
+  ITEMS: () => ITEMS,
+  OPERATOR_FILES: () => OPERATOR_FILES,
+  PACKS: () => PACKS,
+  createOperatorProfile: () => createOperatorProfile,
+  operatorFilesFingerprint: () => operatorFilesFingerprint,
+  readOperatorGuidance: () => readOperatorGuidance,
+  readOperatorProfile: () => readOperatorProfile,
+  renderOperatorFiles: () => renderOperatorFiles,
+  saveOperatorProfile: () => saveOperatorProfile,
+  scoreOperatorProfile: () => scoreOperatorProfile
+});
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, renameSync, unlinkSync, lstatSync as lstatSync2, openSync, closeSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join3 } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+function exactKeys(value, keys, label) {
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !own(value, key))) throw new Error(`${label} must contain exactly ${keys.join(", ")}.`);
+}
+function scoreOperatorProfile(answers) {
+  if (!record(answers)) throw new Error("Operator answers must be an object.");
+  exactKeys(answers, ITEMS.map((item) => item.id), "Operator answers");
+  const tallies = { focus: {}, density: {}, autonomy: {}, surface: {} };
+  for (const item of ITEMS) {
+    const choice = item.choices.find((candidate) => candidate.id === answers[item.id]);
+    if (!choice) throw new Error(`Invalid answer for ${item.id}; choose ${item.choices.map((candidate) => candidate.id).join(", ")}.`);
+    for (const axis of Object.keys(choice.weights)) {
+      const [label, weight] = choice.weights[axis];
+      tallies[axis][label] = (tallies[axis][label] ?? 0) + weight;
+    }
+  }
+  const operator_profile = { ...DEFAULTS };
+  let tied = false;
+  for (const axis of Object.keys(AXES)) {
+    const maximum = Math.max(0, ...Object.values(tallies[axis]));
+    const winners = AXES[axis].filter((label) => (tallies[axis][label] ?? 0) === maximum);
+    if (winners.length === 1) operator_profile[axis] = winners[0];
+    else tied = true;
+  }
+  const recommended_pack = (tied ? void 0 : Object.keys(PACKS).find((name) => Object.entries(PACKS[name].rule).every(([axis, value]) => operator_profile[axis] === value))) ?? "ops";
+  return { operator_profile, recommended_pack, answers: { q1: answers.q1, q2: answers.q2, q3: answers.q3, q4: answers.q4 }, tallies };
+}
+function createOperatorProfile(answers, enabledPack) {
+  if (enabledPack !== null && !own(PACKS, enabledPack)) throw new Error("Enabled pack must be ship, ops, study, studio, or null.");
+  return { version: 1, ...scoreOperatorProfile(answers), enabled_pack: enabledPack, enabled_skills: enabledPack === null ? [] : [...PACKS[enabledPack].skills] };
+}
+function sameValues(actual, expected) {
+  if (Array.isArray(expected)) return Array.isArray(actual) && expected.length === actual.length && expected.every((value, index) => sameValues(actual[index], value));
+  if (record(expected)) return record(actual) && Object.keys(actual).length === Object.keys(expected).length && Object.keys(expected).every((key) => own(actual, key) && sameValues(actual[key], expected[key]));
+  return actual === expected;
+}
+function validateProfile(value) {
+  if (!record(value)) throw new Error("Profile must be a mapping.");
+  exactKeys(value, ["version", "operator_profile", "recommended_pack", "enabled_pack", "enabled_skills", "answers", "tallies"], "Profile");
+  if (value.version !== 1) throw new Error("Unsupported profile version; expected 1.");
+  if (!record(value.answers)) throw new Error("Profile answers are missing.");
+  const expected = createOperatorProfile(value.answers, value.enabled_pack);
+  if (!sameValues(value, expected)) throw new Error("Profile values do not match its fixed answers and pack skills.");
+  return expected;
+}
+function yamlScalar(value) {
+  return JSON.stringify(value);
+}
+function profileYaml(profile) {
+  const lines = ["# Private Rein operator profile. Rerun rein setup profile to change these preferences.", "version: 1", "operator_profile:"];
+  for (const axis of Object.keys(AXES)) lines.push(`  ${axis}: ${yamlScalar(profile.operator_profile[axis])}`);
+  lines.push(`recommended_pack: ${yamlScalar(profile.recommended_pack)}`, `enabled_pack: ${yamlScalar(profile.enabled_pack)}`, `enabled_skills: ${yamlScalar(profile.enabled_skills)}`, "answers:");
+  for (const item of ITEMS) lines.push(`  ${item.id}: ${yamlScalar(profile.answers[item.id])}`);
+  lines.push("tallies:");
+  for (const axis of Object.keys(AXES)) {
+    lines.push(`  ${axis}:`);
+    for (const [label, value] of Object.entries(profile.tallies[axis])) lines.push(`    ${label}: ${value}`);
+  }
+  return lines.join("\n") + "\n";
+}
+function parseProfileYaml(text) {
+  const result = {};
+  const parents = [{ indent: -2, value: result }];
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    if (/^\s*(?:#.*)?$/.test(line)) continue;
+    const match = /^( *)([a-z][a-z0-9_]*):(?: +(.*))?$/.exec(line);
+    if (!match || match[1].length % 2) throw new Error(`Unsupported YAML on line ${index + 1}.`);
+    const indent = match[1].length, key = match[2], raw = match[3]?.trim();
+    while (parents.length > 1 && parents[parents.length - 1].indent >= indent) parents.pop();
+    const parent = parents[parents.length - 1];
+    if (indent !== parent.indent + 2 || own(parent.value, key) || key === "__proto__" || key === "constructor" || key === "prototype") throw new Error(`Invalid YAML mapping on line ${index + 1}.`);
+    if (!raw) {
+      const child = {};
+      parent.value[key] = child;
+      parents.push({ indent, value: child });
+    } else {
+      try {
+        parent.value[key] = JSON.parse(raw);
+      } catch {
+        if (/^[a-z][a-z0-9_-]*$/.test(raw)) parent.value[key] = raw;
+        else throw new Error(`Unsupported YAML value on line ${index + 1}.`);
+      }
+    }
+  }
+  return result;
+}
+function readOptionalFile(path2) {
+  try {
+    const stat3 = lstatSync2(path2);
+    if (!stat3.isFile() || stat3.isSymbolicLink()) throw new Error(`${path2} must be a regular file, not a link or directory.`);
+    if (stat3.size > MAX_FILE_BYTES) throw new Error(`${path2} is too large; keep operator files below ${MAX_FILE_BYTES / 1024} KiB.`);
+    return readFileSync3(path2, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return void 0;
+    throw error;
+  }
+}
+function assertNoProfileSave(home) {
+  const lock = join3(home, ".operator-profile.lock");
+  try {
+    lstatSync2(lock);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(`Operator-profile save is in progress or was interrupted. Wait for setup to finish. If it stopped, check ${join3(home, ".operator-profile-backups")} and restore a consistent set of original files if needed. Remove ${lock} only after confirming no setup is running, then rerun rein setup profile.`);
+}
+function readOperatorSnapshot(home) {
+  const files = {}, digest3 = createHash("sha256");
+  for (const name of OPERATOR_FILES) {
+    const text = readOptionalFile(join3(home, name));
+    files[name] = text;
+    digest3.update(JSON.stringify([name, text ?? null]));
+  }
+  return { files, fingerprint: digest3.digest("hex") };
+}
+function readStableOperatorSnapshot(home) {
+  assertNoProfileSave(home);
+  const snapshot = readOperatorSnapshot(home);
+  assertNoProfileSave(home);
+  const after = readOperatorSnapshot(home);
+  assertNoProfileSave(home);
+  if (snapshot.fingerprint !== after.fingerprint) throw new Error("Operator files changed while being read. Retry after the edit or setup finishes.");
+  return snapshot;
+}
+function operatorFilesFingerprint(home) {
+  return readStableOperatorSnapshot(profileHome(home)).fingerprint;
+}
+function readOperatorProfile(home) {
+  const dir = profileHome(home), path2 = join3(dir, "profile.yaml");
+  try {
+    const text = readStableOperatorSnapshot(dir).files["profile.yaml"];
+    return text === void 0 ? {} : { profile: validateProfile(parseProfileYaml(text)) };
+  } catch (error) {
+    return { diagnostic: `Could not load ${path2}: ${error instanceof Error ? error.message : String(error)} Run rein setup profile to review and recreate it; original files are preserved until you save.` };
+  }
+}
+function mergeManaged(existing, body, name) {
+  const block = `${START}
+${body.trim()}
+${END}`;
+  if (!existing) return `${block}
+`;
+  const starts = existing.split(START).length - 1, ends = existing.split(END).length - 1;
+  if (!starts && !ends) return `${existing}${existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n"}${block}
+`;
+  if (starts !== 1 || ends !== 1 || existing.indexOf(START) >= existing.indexOf(END)) throw new Error(`${name} has incomplete or duplicate Rein managed markers. Repair those markers before saving; your file was not changed.`);
+  return existing.slice(0, existing.indexOf(START)) + block + existing.slice(existing.indexOf(END) + END.length);
+}
+function documentBodies(profile) {
+  const vector = profile.operator_profile;
+  const density = {
+    terse: "Use concise bullets and stop when the answer is complete. Give critical context before optional detail.",
+    normal: "Use short, connected paragraphs. Explain the result and the next useful step.",
+    walkthrough: "Guide the operator step by step. Explain why each step matters and how to confirm it worked."
+  }[vector.density];
+  const autonomy = {
+    ask: "Ask before consequential changes. Do read-only investigation and prepare a concrete proposal while waiting.",
+    plan: "Present a short plan, then carry out work already authorized by the operator. Pause at any required approval.",
+    yolo: "Within the operator's authorized scope, carry out routine reversible work and report the result. Required approvals still apply."
+  }[vector.autonomy];
+  return {
+    "SOUL.md": `# Rein voice
+
+Be direct, curious, and practical. Address the operator as a collaborator.
+${density}
+Describe observed results and uncertainty accurately. Never claim work or learning that has not happened.`,
+    "USER.md": `# Operator work preferences
+
+These are the operator's explicit work-style choices and can be revised at any time.
+- Main focus: ${vector.focus}.
+- Response density: ${vector.density}.
+- Working autonomy: ${vector.autonomy}.
+- Preferred surface: ${vector.surface}.
+
+${density}
+${autonomy}
+For long tasks, give progress checkpoints and make the next action easy to find. Ask about pacing when needed; do not infer the operator's ability from these choices.`,
+    "AGENTS.md": `# Rein operating brief
+
+Use this private profile alongside the current project's instructions.
+${autonomy}
+
+- Investigate the task, perform authorized work, and verify the outcome.
+- Suggest useful follow-ups from relevant history; let the operator accept, edit, or skip them.
+- Keep durable notes grounded in confirmed decisions. Review proposed changes to this profile with the operator.
+- This profile does not grant tool permissions, start background services, install external software, or connect chat or voice accounts.
+- Existing approval rules and project constraints continue to apply.
+- Recommended skill pack: ${profile.recommended_pack}. Enabled pack: ${profile.enabled_pack ?? "none (skipped)"}.
+- Enabled pack skills: ${profile.enabled_skills.length ? profile.enabled_skills.join(", ") : "none"}.`
+  };
+}
+function renderOperatorFiles(profile, home) {
+  const checked = validateProfile(profile), dir = profileHome(home), bodies = documentBodies(checked);
+  return {
+    "SOUL.md": mergeManaged(readOptionalFile(join3(dir, "SOUL.md")), bodies["SOUL.md"], "SOUL.md"),
+    "USER.md": mergeManaged(readOptionalFile(join3(dir, "USER.md")), bodies["USER.md"], "USER.md"),
+    "AGENTS.md": mergeManaged(readOptionalFile(join3(dir, "AGENTS.md")), bodies["AGENTS.md"], "AGENTS.md"),
+    "profile.yaml": profileYaml(checked)
+  };
+}
+function saveOperatorProfile(profile, options = {}) {
+  validateProfile(profile);
+  const home = profileHome(options.home);
+  mkdirSync2(home, { recursive: true, mode: 448 });
+  const lock = join3(home, ".operator-profile.lock");
+  let lockFd;
+  try {
+    lockFd = openSync(lock, "wx", 384);
+  } catch (error) {
+    if (error.code === "EEXIST") throw new Error("Another operator-profile save is in progress. Retry after it finishes; if it crashed, remove .operator-profile.lock after confirming no setup is running.");
+    throw error;
+  }
+  const originals = /* @__PURE__ */ new Map(), staged = /* @__PURE__ */ new Map(), written = [];
+  let backupDirectory;
+  try {
+    const snapshot = readOperatorSnapshot(home);
+    if (options.expectedFingerprint !== void 0 && options.expectedFingerprint !== snapshot.fingerprint) throw new Error("Operator files changed after the preview. Nothing was saved. Restart the profile preview with rein setup profile and review the new contents.");
+    for (const name of OPERATOR_FILES) originals.set(name, snapshot.files[name]);
+    const rendered = renderOperatorFiles(profile, home);
+    const changed = OPERATOR_FILES.filter((name) => originals.get(name) !== rendered[name]);
+    const existing = changed.filter((name) => originals.get(name) !== void 0);
+    if (existing.length) {
+      backupDirectory = join3(home, ".operator-profile-backups", `${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${randomUUID()}`);
+      mkdirSync2(backupDirectory, { recursive: true, mode: 448 });
+      for (const name of existing) writeFileSync2(join3(backupDirectory, name), originals.get(name), { flag: "wx", mode: 384 });
+    }
+    for (const name of changed) {
+      const temp = join3(home, `.${name}.${randomUUID()}.tmp`);
+      writeFileSync2(temp, rendered[name], { flag: "wx", mode: 384 });
+      staged.set(name, temp);
+    }
+    for (const name of OPERATOR_FILES) if (readOptionalFile(join3(home, name)) !== originals.get(name)) throw new Error(`${name} changed during setup. Nothing was saved; review the new contents and try again.`);
+    for (const name of changed) {
+      renameSync(staged.get(name), join3(home, name));
+      staged.delete(name);
+      written.push(name);
+    }
+    return { paths: OPERATOR_FILES.map((name) => join3(home, name)), changed, ...backupDirectory ? { backupDirectory } : {} };
+  } catch (error) {
+    for (const name of written.reverse()) {
+      const original = originals.get(name), target = join3(home, name);
+      try {
+        if (original === void 0) unlinkSync(target);
+        else {
+          const temp = join3(home, `.${name}.${randomUUID()}.restore`);
+          writeFileSync2(temp, original, { flag: "wx", mode: 384 });
+          renameSync(temp, target);
+        }
+      } catch {
+        throw new Error(`Operator-profile save could not be restored completely. Recover the original files from ${backupDirectory ?? home}.`);
+      }
+    }
+    throw error;
+  } finally {
+    for (const temp of staged.values()) {
+      try {
+        unlinkSync(temp);
+      } catch {
+      }
+    }
+    closeSync(lockFd);
+    unlinkSync(lock);
+  }
+}
+function prioritizeManagedGuidance(content, name) {
+  const starts = content.split(START).length - 1, ends = content.split(END).length - 1;
+  if (!starts && !ends) return content;
+  const start = content.indexOf(START), end = content.indexOf(END);
+  if (starts !== 1 || ends !== 1 || start >= end) throw new Error(`${name} has incomplete or duplicate Rein managed markers. Repair those markers before loading operator guidance.`);
+  const managed = content.slice(start, end + END.length);
+  const notes = (content.slice(0, start) + content.slice(end + END.length)).trim();
+  return notes ? `${managed}
+
+Additional operator notes:
+${notes}` : managed;
+}
+function readOperatorGuidance(home, maxCharacters = 6e3) {
+  const limit2 = Number.isFinite(maxCharacters) ? Math.max(0, Math.min(12e3, Math.floor(maxCharacters))) : 6e3;
+  const perFile = Math.max(0, Math.floor(limit2 / 3) - 24);
+  try {
+    const snapshot = readStableOperatorSnapshot(profileHome(home));
+    if (snapshot.files["profile.yaml"] === void 0) return { text: "" };
+    validateProfile(parseProfileYaml(snapshot.files["profile.yaml"]));
+    const sections = ["SOUL.md", "USER.md", "AGENTS.md"].flatMap((name) => {
+      const content = snapshot.files[name];
+      if (!content) return [];
+      const prioritized = prioritizeManagedGuidance(content, name);
+      return [`## ${name}
+${prioritized.slice(0, perFile)}${prioritized.length > perFile ? "\n[truncated]" : ""}`];
+    });
+    return { text: sections.join("\n\n").slice(0, limit2) };
+  } catch (error) {
+    return { text: "", diagnostic: `Could not load operator guidance: ${error instanceof Error ? error.message : String(error)} Run rein setup profile to review your private Rein files.` };
+  }
+}
+var AXES, ITEMS, PACKS, OPERATOR_FILES, DEFAULTS, START, END, MAX_FILE_BYTES, profileHome, record, own;
+var init_operator_profile = __esm({
+  "src/harness/operator-profile.ts"() {
+    AXES = {
+      focus: ["coding", "ops", "research", "creative"],
+      density: ["terse", "normal", "walkthrough"],
+      autonomy: ["ask", "plan", "yolo"],
+      surface: ["cli", "chat", "voice"]
+    };
+    ITEMS = [
+      { id: "q1", prompt: "When the agent talks, I want\u2026", choices: [
+        { id: "a", label: "Bullets, then stop", weights: { density: ["terse", 2] } },
+        { id: "b", label: "Short paragraphs", weights: { density: ["normal", 2] } },
+        { id: "c", label: "Step by step, with why", weights: { density: ["walkthrough", 2] } }
+      ] },
+      { id: "q2", prompt: "Most days I will use this for\u2026", choices: [
+        { id: "a", label: "Shipping code", weights: { focus: ["coding", 2] } },
+        { id: "b", label: "Keeping machines and services running", weights: { focus: ["ops", 2] } },
+        { id: "c", label: "Reading, writing, and research", weights: { focus: ["research", 2] } },
+        { id: "d", label: "Images, video, and design", weights: { focus: ["creative", 2] } }
+      ] },
+      { id: "q3", prompt: "When a change is risky, the agent should\u2026", choices: [
+        { id: "a", label: "Ask first", weights: { autonomy: ["ask", 2] } },
+        { id: "b", label: "Show a plan, then do it", weights: { autonomy: ["plan", 2] } },
+        { id: "c", label: "Do it, tell me after", weights: { autonomy: ["yolo", 2] } }
+      ] },
+      { id: "q4", prompt: "I will mostly talk to it from\u2026", choices: [
+        { id: "a", label: "Terminal", weights: { surface: ["cli", 2] } },
+        { id: "b", label: "Slack or chat", weights: { surface: ["chat", 2] } },
+        { id: "c", label: "Voice or phone", weights: { surface: ["voice", 2] } }
+      ] }
+    ];
+    PACKS = {
+      ship: { rule: { focus: "coding", density: "terse", autonomy: "yolo" }, skills: ["github-pr-workflow", "tdd", "caveman"] },
+      ops: { rule: { focus: "ops", density: "terse", autonomy: "plan" }, skills: ["hermes-agent", "fleet-command-ops", "execution-discipline"] },
+      study: { rule: { focus: "research", density: "walkthrough", autonomy: "ask" }, skills: ["grounded-citations", "plan"] },
+      studio: { rule: { focus: "creative", density: "normal", autonomy: "ask" }, skills: ["claude-design", "comfyui"] }
+    };
+    OPERATOR_FILES = ["SOUL.md", "USER.md", "AGENTS.md", "profile.yaml"];
+    DEFAULTS = { focus: "ops", density: "terse", autonomy: "plan", surface: "cli" };
+    START = "<!-- rein:operator-profile:start -->";
+    END = "<!-- rein:operator-profile:end -->";
+    MAX_FILE_BYTES = 256 * 1024;
+    profileHome = (home) => home ?? (process.env.REIN_HOME || join3(homedir2(), ".rein"));
+    record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+  }
+});
+
+// src/util/ansi.ts
+function wrap(open4, close) {
+  return (text) => enabled ? `\x1B[${open4}m${text}\x1B[${close}m` : text;
+}
+var enabled, bold, dim, italic, red, green, yellow, blue, magenta, cyan, gray;
+var init_ansi = __esm({
+  "src/util/ansi.ts"() {
+    enabled = process.stdout.isTTY && !("NO_COLOR" in process.env);
+    bold = wrap(1, 22);
+    dim = wrap(2, 22);
+    italic = wrap(3, 23);
+    red = wrap(31, 39);
+    green = wrap(32, 39);
+    yellow = wrap(33, 39);
+    blue = wrap(34, 39);
+    magenta = wrap(35, 39);
+    cyan = wrap(36, 39);
+    gray = wrap(90, 39);
+  }
+});
+
+// src/hardware/catalog.ts
+function quants(tag, variants = [Q4, Q8]) {
+  return variants.map((q) => ({ ...q, ...q.label === "Q4_K_M" ? { ollama: tag } : {} }));
+}
+function matchCatalog(modelId) {
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const input = norm(modelId);
+  const matches2 = CATALOG.filter((model) => [model.id, model.ollama, model.huggingFace].filter(Boolean).some((alias) => {
+    const a = norm(alias.split("/").pop());
+    const index = input.indexOf(a);
+    if (index < 0) return false;
+    const suffix = input.slice(index + a.length);
+    return !suffix || /^(?:instruct|gguf|q\d|iq\d|fp\d|bf\d|mxfp|udq|uncensored|abliterated)/.test(suffix);
+  }));
+  return matches2.length === 1 ? matches2[0] : void 0;
+}
+var Q4, Q6, Q8, CATALOG;
+var init_catalog = __esm({
+  "src/hardware/catalog.ts"() {
+    Q4 = { label: "Q4_K_M", bytesPerWeight: 0.58 };
+    Q6 = { label: "Q6_K", bytesPerWeight: 0.82 };
+    Q8 = { label: "Q8_0", bytesPerWeight: 1.06 };
+    CATALOG = [
+      {
+        id: "qwen2.5-coder-7b",
+        name: "Qwen2.5-Coder 7B",
+        params: 7618414080,
+        contextLength: 32768,
+        quants: quants("qwen2.5-coder:7b"),
+        ollama: "qwen2.5-coder:7b",
+        huggingFace: "Qwen/Qwen2.5-Coder-7B-Instruct",
+        kv: { layers: 28, heads: 4, headDim: 128 },
+        focus: "coding",
+        note: "Legacy coding option; tool-call support depends on the serving template."
+      },
+      {
+        id: "qwen3-4b",
+        name: "Qwen3 4B",
+        params: 4022468096,
+        contextLength: 40960,
+        quants: quants("qwen3:4b"),
+        ollama: "qwen3:4b",
+        huggingFace: "Qwen/Qwen3-4B",
+        kv: { layers: 36, heads: 8, headDim: 128 },
+        toolUse: true,
+        focus: "general",
+        note: "Small tool-capable starting point; validate edits with project checks."
+      },
+      {
+        id: "qwen3-8b",
+        name: "Qwen3 8B",
+        params: 8172701696,
+        contextLength: 40960,
+        quants: quants("qwen3:8b"),
+        ollama: "qwen3:8b",
+        huggingFace: "Qwen/Qwen3-8B",
+        kv: { layers: 36, heads: 8, headDim: 128 },
+        toolUse: true,
+        focus: "general",
+        note: "General tool use at a modest memory footprint."
+      },
+      {
+        id: "qwen2.5-coder-14b",
+        name: "Qwen2.5-Coder 14B",
+        params: 14777107968,
+        contextLength: 32768,
+        quants: quants("qwen2.5-coder:14b"),
+        ollama: "qwen2.5-coder:14b",
+        huggingFace: "Qwen/Qwen2.5-Coder-14B-Instruct",
+        kv: { layers: 48, heads: 8, headDim: 128 },
+        focus: "coding",
+        note: "Legacy coding option; tool-call support depends on the serving template."
+      },
+      {
+        id: "deepseek-v2-lite-16b",
+        name: "DeepSeek Coder V2 Lite 16B",
+        params: 16310918144,
+        activeParams: 24e8,
+        contextLength: 131072,
+        quants: quants("deepseek-coder-v2:16b", [Q4, Q6]),
+        ollama: "deepseek-coder-v2:16b",
+        huggingFace: "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+        focus: "coding",
+        note: "Legacy MLA model; KV fallback is conservative and runtime-dependent."
+      },
+      {
+        id: "qwen3-30b-a3b",
+        name: "Qwen3 30B-A3B",
+        params: 30532672512,
+        activeParams: 3276819456,
+        contextLength: 40960,
+        quants: quants("qwen3:30b-a3b", [Q4]),
+        ollama: "qwen3:30b-a3b",
+        huggingFace: "Qwen/Qwen3-30B-A3B",
+        kv: { layers: 48, heads: 4, headDim: 128 },
+        toolUse: true,
+        focus: "general",
+        note: "All 30B weights need memory even though only about 3B activate per token."
+      },
+      {
+        id: "qwen3-coder-30b-a3b",
+        name: "Qwen3-Coder 30B-A3B",
+        params: 30532672512,
+        activeParams: 3276819456,
+        contextLength: 262144,
+        quants: quants("qwen3-coder:30b", [Q4]),
+        ollama: "qwen3-coder:30b",
+        huggingFace: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        kv: { layers: 48, heads: 4, headDim: 128 },
+        toolUse: true,
+        focus: "coding",
+        note: "Agentic coding specialist; start with the assessed context instead of allocating the full 256k window."
+      },
+      {
+        id: "gpt-oss-20b",
+        name: "GPT-OSS 20B",
+        params: 21263125504,
+        activeParams: 3558896128,
+        contextLength: 131072,
+        quants: [{ label: "MXFP4", bytesPerWeight: 0.65, ollama: "gpt-oss:20b" }],
+        ollama: "gpt-oss:20b",
+        huggingFace: "openai/gpt-oss-20b",
+        kv: { layers: 24, heads: 8, headDim: 64 },
+        toolUse: true,
+        focus: "general",
+        note: "Native mixed-precision weights; requires Harmony-aware serving and tool parsing."
+      },
+      {
+        id: "qwen2.5-coder-32b",
+        name: "Qwen2.5-Coder 32B",
+        params: 32768210432,
+        contextLength: 32768,
+        quants: quants("qwen2.5-coder:32b", [Q4, Q6, Q8]),
+        ollama: "qwen2.5-coder:32b",
+        huggingFace: "Qwen/Qwen2.5-Coder-32B-Instruct",
+        kv: { layers: 64, heads: 8, headDim: 128 },
+        focus: "coding",
+        note: "Larger dense legacy coder; memory capacity alone does not establish latency or tool support."
+      },
+      {
+        id: "mistral-small-24b",
+        name: "Mistral Small 3.2 24B",
+        params: 24333378048,
+        contextLength: 131072,
+        quants: quants("mistral-small3.2:24b", [Q4, Q6]),
+        ollama: "mistral-small3.2:24b",
+        huggingFace: "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+        kv: { layers: 40, heads: 8, headDim: 128 },
+        toolUse: true,
+        focus: "general",
+        note: "General text/tool model; this estimate excludes vision processing."
+      },
+      {
+        id: "gemma3-27b",
+        name: "Gemma 3 27B",
+        params: 27396375040,
+        contextLength: 131072,
+        quants: quants("gemma3:27b", [Q4, Q6]),
+        ollama: "gemma3:27b",
+        huggingFace: "google/gemma-3-27b-it",
+        focus: "general",
+        note: "Text fit only; gated publisher download and vision overhead require separate checks."
+      },
+      {
+        id: "gpt-oss-120b",
+        name: "GPT-OSS 120B",
+        params: 117172437504,
+        activeParams: 5104399616,
+        contextLength: 131072,
+        quants: [{ label: "MXFP4", bytesPerWeight: 0.56, ollama: "gpt-oss:120b" }],
+        ollama: "gpt-oss:120b",
+        huggingFace: "openai/gpt-oss-120b",
+        kv: { layers: 36, heads: 8, headDim: 64 },
+        toolUse: true,
+        focus: "general",
+        note: "Large mixed-precision tool model; runtime, context and concurrency still need headroom."
+      }
+    ];
+  }
+});
+
 // src/hardware/profile.ts
 var profile_exports = {};
 __export(profile_exports, {
+  appleBandwidth: () => appleBandwidth,
   gb: () => gb,
+  limitContainerMemory: () => limitContainerMemory,
+  parseDarwinGpus: () => parseDarwinGpus,
+  parseNvidiaSmi: () => parseNvidiaSmi,
+  parseVram: () => parseVram,
   profileHardware: () => profileHardware,
   profileLinux: () => profileLinux,
   summarizeHardware: () => summarizeHardware
 });
-import { execFile } from "node:child_process";
+import { execFile as execFile2 } from "node:child_process";
 import { promisify } from "node:util";
-function sh(cmd, args) {
-  return execFileP(cmd, args, { timeout: 15e3, maxBuffer: 4 * 1024 * 1024 }).then((r) => r.stdout.trim());
+import { readFile, readdir } from "node:fs/promises";
+import * as os from "node:os";
+async function sh(cmd, args) {
+  return (await execFileP(cmd, args, { timeout: 5e3, maxBuffer: 2 * 1024 * 1024 })).stdout.trim();
+}
+async function read(path2) {
+  try {
+    return (await readFile(path2, "utf8")).trim();
+  } catch {
+    return void 0;
+  }
 }
 function num(s) {
   if (!s) return void 0;
   const n = Number.parseFloat(s.replace(/,/g, ""));
-  return Number.isFinite(n) ? n : void 0;
+  return Number.isFinite(n) && n >= 0 ? n : void 0;
 }
-function appleBandwidth(cpuName) {
-  for (const [re, gbs, kind] of APPLE_BANDWIDTH) {
-    if (re.test(cpuName)) return { gbs, note: kind === "estimate" ? "estimate" : "spec" };
-  }
-  return {};
+function clamp(value, total) {
+  return Math.max(0, Math.min(value, total));
 }
-function parseSysctlKV(text) {
-  const out = {};
-  for (const line of text.split("\n")) {
-    const idx = line.indexOf(":");
-    if (idx > 0) out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+function appleBandwidth(cpuName, cpuCores) {
+  const name = cpuName.replace(/^Apple\s+/, "").trim();
+  const fixed = {
+    "M1": 68,
+    "M1 Pro": 200,
+    "M1 Max": 400,
+    "M1 Ultra": 800,
+    "M2": 100,
+    "M2 Pro": 200,
+    "M2 Max": 400,
+    "M2 Ultra": 800,
+    "M3": 100,
+    "M3 Pro": 150,
+    "M3 Ultra": 819,
+    "M4": 120,
+    "M4 Pro": 273,
+    "M5": 153,
+    "M5 Pro": 307
+  };
+  const bins = {
+    "M3 Max": { 14: 300, 16: 400 },
+    "M4 Max": { 14: 410, 16: 546 },
+    "M5 Max": { 18: 614 }
+  };
+  if (name === "M5 Max") return { gbs: 460, note: "published lower bin; 460\u2013614 GB/s, GPU variant unverified" };
+  const gbs = fixed[name] ?? (cpuCores == null ? void 0 : bins[name]?.[cpuCores]);
+  return gbs ? { gbs, note: "published peak; not measured" } : {};
+}
+function parseKV(text) {
+  return Object.fromEntries(text.split("\n").flatMap((line) => {
+    const i = line.indexOf(":");
+    return i > 0 ? [[line.slice(0, i).trim(), line.slice(i + 1).trim()]] : [];
+  }));
+}
+function parseVram(text) {
+  if (typeof text !== "string") return void 0;
+  const match = /^([\d.,]+)\s*(GB|MB|GiB|MiB)\b/i.exec(text.trim());
+  if (!match) return void 0;
+  const n = num(match[1]);
+  return n == null ? void 0 : n * (/^G/i.test(match[2]) ? GiB : 1024 ** 2);
+}
+function parseDarwinGpus(json, appleSilicon) {
+  const list = json?.SPDisplaysDataType;
+  if (!Array.isArray(list)) return [];
+  const result = [];
+  for (const group of list) {
+    for (const gpu of Array.isArray(group?._items) ? group._items : [group]) {
+      if (!gpu || typeof gpu !== "object") continue;
+      const name = String(gpu.sppci_model ?? gpu["chipset-model"] ?? gpu["chip-model"] ?? gpu._name ?? "GPU");
+      const apple = appleSilicon && /Apple/i.test(name);
+      const vram = parseVram(gpu["vram-total"] ?? gpu.spdisplays_vram ?? gpu.spdisplays_vram_shared);
+      result.push({
+        name,
+        vendor: apple ? "apple" : /AMD|Radeon/i.test(name) ? "amd" : /Intel/i.test(name) ? "intel" : void 0,
+        ...apple ? { sharedMemory: true } : { vramTotalBytes: vram }
+      });
+    }
   }
-  return out;
+  return result;
 }
 async function profileDarwin() {
   const key = async (k) => {
     try {
-      return (await sh("sysctl", ["-n", k])).trim();
+      return await sh("sysctl", ["-n", k]);
     } catch {
       return void 0;
     }
   };
-  const [memsize, ncpu, physicalcpu, cpuNameRaw] = await Promise.all([
+  const [memsize, ncpu, physicalcpu, cpuNameRaw, arm, cpuFeatures, leaf7] = await Promise.all([
     key("hw.memsize"),
     key("hw.ncpu"),
     key("hw.physicalcpu"),
-    key("machdep.cpu.brand_string")
+    key("machdep.cpu.brand_string"),
+    key("hw.optional.arm64"),
+    key("machdep.cpu.features"),
+    key("machdep.cpu.leaf7_features")
   ]);
-  const cpuName = cpuNameRaw || "Apple CPU";
-  const cores = num(ncpu) ?? 0;
-  const physical = num(physicalcpu) ?? cores;
-  const total = num(memsize) ?? 0;
-  const features = [];
-  const cpuFeatures = await key("machdep.cpu.features") ?? "";
-  if (/\bAVX2\b/i.test(cpuFeatures)) features.push("avx2");
-  if (/\bAVX512F\b/i.test(cpuFeatures)) features.push("avx512");
-  let available = total;
+  const unified = arm === "1" || /^Apple M\d/.test(cpuNameRaw ?? "");
+  const cpuName = cpuNameRaw || os.cpus()[0]?.model || "unknown CPU";
+  const total = num(memsize) ?? os.totalmem();
+  let available = Math.min(os.freemem(), total);
+  const notes = [];
   try {
-    const vmText = await sh("vm_stat", []);
-    const page2 = Number(/page size of (\d+)/.exec(vmText)?.[1]) || 16384;
-    const vm = parseSysctlKV(vmText);
-    const free = num(vm["Pages free"]) ?? 0;
-    const inactive = num(vm["Pages inactive"]) ?? 0;
-    const spec = num(vm["Pages speculative"]) ?? 0;
-    available = (free + inactive + spec) * page2;
+    const text = await sh("vm_stat", []);
+    const pageSize = num(/page size of (\d+)/.exec(text)?.[1]);
+    const vm = parseKV(text);
+    if (!pageSize || vm["Pages free"] == null) throw new Error("incomplete vm_stat");
+    available = ((num(vm["Pages free"]) ?? 0) + (num(vm["Pages inactive"]) ?? 0) + (num(vm["Pages speculative"]) ?? 0)) * pageSize;
+    notes.push("Available macOS memory includes reclaimable inactive pages; Metal allocation limits and memory pressure still apply.");
   } catch {
+    notes.push("Available memory probe incomplete; only free system memory was counted.");
   }
-  const gpus = [];
-  let unified = true;
-  let bw = {};
+  let gpus = [];
   try {
-    const text = await sh("system_profiler", ["SPDisplaysDataType", "-json"]);
-    const json = JSON.parse(text);
-    const items = json?.SPDisplaysDataType ?? [];
-    for (const item of items) {
-      const gpu = item._items?.[0] ?? item;
-      if (!gpu) continue;
-      const name = gpu["_name"] ?? gpu["chipset-model"] ?? gpu["chip-model"] ?? "Apple GPU";
-      const vram = num(gpu["vram-total"]) ?? num(gpu["spdisplays_vram"]);
-      if (vram) {
-        gpus.push({ name, vramTotalBytes: vram * 1024 ** 2 });
-        unified = false;
-      } else {
-        gpus.push({ name });
-      }
-    }
+    gpus = parseDarwinGpus(JSON.parse(await sh("system_profiler", ["SPDisplaysDataType", "-json"])), unified);
   } catch {
+    notes.push("GPU details unavailable; no discrete VRAM inferred.");
   }
-  bw = appleBandwidth(cpuName);
+  if (unified && !gpus.some((g) => g.sharedMemory)) gpus.push({ name: cpuName + " GPU", vendor: "apple", sharedMemory: true });
+  const cores = num(ncpu) ?? os.cpus().length;
+  const bw = unified ? appleBandwidth(cpuName, cores) : {};
   return {
-    os: `darwin ${process.env.DARWIN_VERSION ?? ""}`.trim(),
-    arch: process.arch,
-    cpu: { name: cpuName, cores, physicalCores: physical, features },
-    ram: { totalBytes: total, availableBytes: Math.min(available, total) },
+    os: "darwin",
+    arch: unified ? "arm64" : process.arch,
+    cpu: { name: cpuName, cores, physicalCores: num(physicalcpu) ?? cores, features: ["avx2", "avx512f"].filter((f) => new RegExp(`\\b${f}\\b`, "i").test(`${cpuFeatures} ${leaf7}`)) },
+    ram: { totalBytes: total, availableBytes: clamp(available, total) },
     gpus,
     unifiedMemory: unified,
     memBandwidthGBs: bw.gbs,
-    bandwidthNote: bw.note
+    bandwidthNote: bw.note,
+    notes
   };
 }
-async function profileLinux() {
-  const read = async (p) => {
+function parseNvidiaSmi(text) {
+  return text.split("\n").flatMap((line) => {
+    const parts = line.split(",").map((s) => s.trim());
+    if (![3, 4, 5].includes(parts.length) || !parts[0]) return [];
+    const [name, total, free, compute, uuid] = parts;
+    if (uuid != null && !/^GPU-[a-f\d-]+$/i.test(uuid)) return [];
+    if (!/^(?:[\d.]+|\[?N\/A\]?|\[Not Supported\])$/i.test(total)) return [];
+    const totalMiB = num(total), freeMiB = num(free);
+    return [{
+      name,
+      vendor: "nvidia",
+      vramTotalBytes: totalMiB ? totalMiB * 1024 ** 2 : void 0,
+      vramFreeBytes: totalMiB && freeMiB != null ? Math.min(freeMiB, totalMiB) * 1024 ** 2 : void 0,
+      computeCapability: num(compute),
+      uuid,
+      // GB10 is a physical UMA device; arbitrary CUDA managed memory is not.
+      sharedMemory: /\bGB10\b/i.test(name) || void 0
+    }];
+  });
+}
+async function nvidiaGpus() {
+  for (const fields of ["name,memory.total,memory.free,compute_cap,uuid", "name,memory.total,memory.free,compute_cap", "name,memory.total,memory.free"]) {
     try {
-      const { readFile: readFile2 } = await import("node:fs/promises");
-      return (await readFile2(p, "utf8")).trim();
-    } catch {
-      return void 0;
-    }
-  };
-  const meminfo = parseSysctlKV(await read("/proc/meminfo") ?? "");
-  const total = (num(meminfo.MemTotal) ?? 0) * 1024;
-  const availKB = num(meminfo.MemAvailable) ?? num(meminfo.MemFree) ?? 0;
-  const available = availKB * 1024;
-  const cpuinfo = await read("/proc/cpuinfo") ?? "";
-  const lines = cpuinfo.split("\n");
-  const name = lines.map((l) => l.match(/model name\s*:\s*(.*)/)?.[1]).find(Boolean) ?? "Linux CPU";
-  let cores = lines.filter((l) => l.startsWith("processor")).length;
-  if (cores === 0) {
-    try {
-      cores = num(await sh("nproc", [])) ?? 0;
+      return parseNvidiaSmi(await sh("nvidia-smi", [`--query-gpu=${fields}`, "--format=csv,noheader,nounits"]));
     } catch {
     }
   }
-  const flagsLine = lines.map((l) => l.match(/^flags\s*:\s*(.*)/)?.[1]).find(Boolean) ?? "";
-  const features = ["avx2", "avx512f", "avx512_bf16"].filter((f) => flagsLine.includes(f));
-  const gpus = [];
+  return [];
+}
+async function amdGpus() {
+  const result = [];
   try {
-    const out = await sh("nvidia-smi", [
-      "--query-gpu=name,memory.total,memory.free",
-      "--format=csv,noheader,nounits"
-    ]);
-    for (const line of out.split("\n")) {
-      const parts = line.split(",").map((s) => s.trim());
-      if (parts.length < 3) continue;
-      const [n, tot, free] = parts;
-      const totB = num(tot);
-      if (n && totB) gpus.push({ name: n, vramTotalBytes: totB * 1024 ** 2, vramFreeBytes: (num(free) ?? 0) * 1024 ** 2 });
+    for (const entry of (await readdir("/sys/class/drm")).filter((n) => /^card\d+$/.test(n))) {
+      const dir = `/sys/class/drm/${entry}/device`;
+      if (await read(`${dir}/vendor`) !== "0x1002") continue;
+      const [totalRaw, usedRaw, name] = await Promise.all([read(`${dir}/mem_info_vram_total`), read(`${dir}/mem_info_vram_used`), read(`${dir}/product_name`)]);
+      const total = num(totalRaw), used = num(usedRaw);
+      result.push({
+        name: name ?? `AMD GPU (${entry})`,
+        vendor: "amd",
+        vramTotalBytes: total,
+        vramFreeBytes: total != null && used != null ? Math.max(0, total - used) : void 0
+      });
     }
   } catch {
   }
+  return result;
+}
+function limitContainerMemory(total, available, limitRaw, usedRaw) {
+  const limit2 = num(limitRaw), used = num(usedRaw);
+  if (limit2 != null && limit2 > 0 && limit2 < total) {
+    return { totalBytes: limit2, availableBytes: Math.min(available, Math.max(0, limit2 - (used ?? limit2))) };
+  }
+  return { totalBytes: total, availableBytes: clamp(available, total) };
+}
+async function profileLinux() {
+  const meminfo = parseKV(await read("/proc/meminfo") ?? "");
+  const total = (num(meminfo.MemTotal) ?? 0) * 1024;
+  const available = (num(meminfo.MemAvailable) ?? num(meminfo.MemFree) ?? 0) * 1024;
+  const [limit2, used, v1Limit, v1Used, cpuinfo, nvidia, amd] = await Promise.all([
+    read("/sys/fs/cgroup/memory.max"),
+    read("/sys/fs/cgroup/memory.current"),
+    read("/sys/fs/cgroup/memory/memory.limit_in_bytes"),
+    read("/sys/fs/cgroup/memory/memory.usage_in_bytes"),
+    read("/proc/cpuinfo"),
+    nvidiaGpus(),
+    amdGpus()
+  ]);
+  const blocks = (cpuinfo ?? "").split(/\n\s*\n/).map(parseKV);
+  const logical = blocks.filter((b) => b.processor != null).length;
+  const physicalIds = new Set(blocks.filter((b) => b["core id"] != null).map((b) => `${b["physical id"] ?? "0"}:${b["core id"]}`));
+  const cores = logical || (process.platform === "linux" ? os.cpus().length : 0);
+  const flags = (blocks.find((b) => b.flags || b.Features)?.flags ?? blocks.find((b) => b.Features)?.Features ?? "").split(/\s+/);
+  const gpus = [...nvidia, ...amd];
+  const ram = limitContainerMemory(total, available, limit2 ?? v1Limit, used ?? v1Used);
+  const notes = ["GPU detection uses NVIDIA driver queries and AMD sysfs; missing GPU data does not establish that no accelerator exists."];
+  if (ram.totalBytes < total) notes.push("System RAM is limited to the detected container memory ceiling.");
+  if (nvidia.some((g) => g.sharedMemory)) notes.push("GPU shares physical system memory; system RAM is counted once. Runtime support and allocation limits still require verification.");
   return {
     os: "linux",
     arch: process.arch,
-    cpu: { name, cores, physicalCores: cores, features },
-    ram: { totalBytes: total, availableBytes: available },
+    cpu: {
+      name: blocks.find((b) => b["model name"])?.["model name"] ?? blocks.find((b) => b.Hardware)?.Hardware ?? os.cpus()[0]?.model ?? "Linux CPU",
+      cores,
+      physicalCores: physicalIds.size || cores,
+      features: ["avx2", "avx512f", "avx512_bf16", "asimd"].filter((f) => flags.includes(f))
+    },
+    ram,
     gpus,
-    unifiedMemory: false
+    unifiedMemory: nvidia.some((g) => g.sharedMemory),
+    notes
   };
 }
 async function profileOther() {
-  const os2 = await import("node:os");
   return {
-    os: `${os2.platform()} (${os2.release()})`,
-    arch: os2.arch(),
-    cpu: { name: os2.cpus()[0]?.model ?? "unknown", cores: os2.cpus().length, physicalCores: os2.cpus().length, features: [] },
-    ram: { totalBytes: os2.totalmem(), availableBytes: os2.freemem() },
-    gpus: [],
-    unifiedMemory: false
+    os: `${os.platform()} (${os.release()})`,
+    arch: os.arch(),
+    cpu: { name: os.cpus()[0]?.model ?? "unknown", cores: os.cpus().length, physicalCores: os.cpus().length, features: [] },
+    ram: { totalBytes: os.totalmem(), availableBytes: os.freemem() },
+    gpus: process.platform === "win32" ? await nvidiaGpus() : [],
+    unifiedMemory: false,
+    notes: ["Physical CPU cores and non-NVIDIA GPU memory were not independently measured on this platform."]
   };
 }
 async function profileHardware() {
@@ -641,245 +1778,414 @@ async function profileHardware() {
   return profileOther();
 }
 function gb(bytes, digits = 0) {
-  const v = bytes / GiB;
-  if (v >= 100) return `${Math.round(v)} GB`;
-  return `${v.toFixed(digits)} GB`;
+  return `${(Math.max(0, bytes) / GiB).toFixed(digits)} GiB`;
 }
 function summarizeHardware(p) {
-  const parts = [p.cpu.name, `${p.cpu.cores} cores`];
-  if (p.unifiedMemory) parts.push(`${gb(p.ram.totalBytes)} unified`);
-  else parts.push(`${gb(p.ram.totalBytes)} RAM`);
-  for (const g of p.gpus) {
-    if (g.vramTotalBytes) parts.push(`${g.name} ${gb(g.vramTotalBytes)} VRAM`);
-  }
-  if (p.memBandwidthGBs) parts.push(`~${p.memBandwidthGBs} GB/s${p.bandwidthNote === "estimate" ? " (est)" : ""}`);
+  const parts = [p.cpu.name, `${p.cpu.cores} cores`, `${gb(p.ram.totalBytes)} ${p.unifiedMemory ? "unified" : "RAM"}`];
+  for (const g of p.gpus) if (g.vramTotalBytes && !g.sharedMemory) parts.push(`${g.name} ${gb(g.vramTotalBytes)} VRAM`);
+  if (p.memBandwidthGBs) parts.push(`~${p.memBandwidthGBs} GB/s (${p.bandwidthNote ?? "estimate"})`);
   return parts.join(" \xB7 ");
 }
-var execFileP, GiB, APPLE_BANDWIDTH;
+var execFileP, GiB;
 var init_profile = __esm({
   "src/hardware/profile.ts"() {
-    execFileP = promisify(execFile);
+    execFileP = promisify(execFile2);
     GiB = 1024 ** 3;
-    APPLE_BANDWIDTH = [
-      [/M1 Pro/, 200, "spec"],
-      [/M1 Max/, 400, "spec"],
-      [/M1\b/, 68, "spec"],
-      [/M2 Pro/, 200, "spec"],
-      [/M2 Max/, 400, "spec"],
-      [/M2\b/, 100, "spec"],
-      [/M3 Pro/, 150, "spec"],
-      [/M3 Max/, 300, "spec"],
-      [/M3\b/, 100, "spec"],
-      [/M4 Pro/, 273, "spec"],
-      [/M4 Max/, 546, "spec"],
-      [/M4\b/, 120, "spec"],
-      [/M5 Pro/, 307, "estimate"],
-      [/M5 Max/, 614, "estimate"],
-      [/M5\b/, 153, "estimate"]
-    ];
-  }
-});
-
-// src/hardware/catalog.ts
-function matchCatalog(modelId) {
-  const id = modelId.toLowerCase();
-  for (const m of CATALOG) {
-    if (m.ollama && id === m.ollama.toLowerCase()) return m;
-  }
-  const norm = (s) => s.toLowerCase().replace(/[:.-]/g, "");
-  for (const m of CATALOG) {
-    if (m.ollama && norm(m.ollama).startsWith(norm(id).slice(0, 8))) return m;
-  }
-  return void 0;
-}
-var QUANTS, CATALOG;
-var init_catalog = __esm({
-  "src/hardware/catalog.ts"() {
-    QUANTS = {
-      q4: { label: "Q4_K_M", bytesPerWeight: 0.58 },
-      q6: { label: "Q6_K", bytesPerWeight: 0.82 },
-      q8: { label: "Q8_0", bytesPerWeight: 1.06 }
-    };
-    CATALOG = [
-      {
-        id: "qwen2.5-coder-7b",
-        name: "Qwen2.5-Coder 7B",
-        params: 7618414080,
-        contextLength: 32768,
-        quants: [QUANTS.q4, QUANTS.q8],
-        ollama: "qwen2.5-coder:7b",
-        note: "The default local coder. Fast on anything with 8 GB."
-      },
-      {
-        id: "qwen3-8b",
-        name: "Qwen3 8B",
-        params: 8172701696,
-        contextLength: 40960,
-        quants: [QUANTS.q4, QUANTS.q8],
-        ollama: "qwen3:8b",
-        note: "Thinking-mode toggle; strong general tool use."
-      },
-      {
-        id: "qwen2.5-coder-14b",
-        name: "Qwen2.5-Coder 14B",
-        params: 14777107968,
-        contextLength: 32768,
-        quants: [QUANTS.q4, QUANTS.q8],
-        ollama: "qwen2.5-coder:14b",
-        note: "The 16\u201324 GB sweet spot for coding agents."
-      },
-      {
-        id: "deepseek-v2-lite-16b",
-        name: "DeepSeek Coder V2 Lite 16B",
-        params: 16310918144,
-        contextLength: 131072,
-        quants: [QUANTS.q4, QUANTS.q6],
-        activeParams: 24e8,
-        ollama: "deepseek-coder-v2:16b",
-        note: "128k context; MoE (16.3B total, ~2.4B active) \u2014 fast for its size."
-      },
-      {
-        id: "qwen3-30b-a3b",
-        name: "Qwen3 30B-A3B (MoE)",
-        params: 30532672512,
-        activeParams: 3276819456,
-        contextLength: 40960,
-        quants: [QUANTS.q4],
-        ollama: "qwen3:30b-a3b",
-        note: "30B brain, 3B per token \u2014 near-14B speed if you have 20 GB."
-      },
-      {
-        id: "gpt-oss-20b",
-        name: "GPT-OSS 20B (MoE)",
-        params: 21263125504,
-        activeParams: 3558896128,
-        contextLength: 131072,
-        quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.52 }],
-        ollama: "gpt-oss:20b",
-        note: "Open-weight 20B; 128k context, very fast (3.6B active)."
-      },
-      {
-        id: "qwen2.5-coder-32b",
-        name: "Qwen2.5-Coder 32B",
-        params: 32768210432,
-        contextLength: 32768,
-        quants: [QUANTS.q4, QUANTS.q6, QUANTS.q8],
-        ollama: "qwen2.5-coder:32b",
-        note: "The 32\u201348 GB workhorse; best dense coder in class."
-      },
-      {
-        id: "mistral-small-24b",
-        name: "Mistral Small 3.2 24B",
-        params: 24333378048,
-        contextLength: 131072,
-        quants: [QUANTS.q4, QUANTS.q6],
-        ollama: "mistral-small3.2:24b",
-        note: "128k context; solid generalist tool caller."
-      },
-      {
-        id: "gemma3-27b",
-        name: "Gemma 3 27B",
-        params: 27396375040,
-        contextLength: 131072,
-        quants: [QUANTS.q4, QUANTS.q6],
-        ollama: "gemma3:27b",
-        note: "128k context, vision-capable in some builds."
-      },
-      {
-        id: "gpt-oss-120b",
-        name: "GPT-OSS 120B (MoE)",
-        params: 117172437504,
-        activeParams: 5104399616,
-        contextLength: 131072,
-        quants: [QUANTS.q4, { label: "MXFP4", bytesPerWeight: 0.52 }],
-        ollama: "gpt-oss:120b",
-        note: "Frontier-class in a 60\u201370 GB footprint; 5B active per token."
-      }
-    ];
   }
 });
 
 // src/hardware/fit.ts
-var fit_exports = {};
-__export(fit_exports, {
-  assessCatalog: () => assessCatalog,
-  assessFit: () => assessFit,
-  bestAssessment: () => bestAssessment,
-  verdictMark: () => verdictMark
-});
-function reserveFor(poolBytes) {
-  return Math.max(poolBytes / 10, 2 * GiB2);
+function planContext(contextTokens, maximum = DEFAULT_PLAN_CONTEXT) {
+  if (contextTokens == null) return Math.min(DEFAULT_PLAN_CONTEXT, maximum);
+  if (!Number.isFinite(contextTokens) || contextTokens < 1) throw new Error("Context length must be a positive finite number.");
+  return Math.min(Math.floor(contextTokens), maximum);
 }
-function assessFit(profile, model, quant) {
-  const active2 = model.activeParams ?? model.params;
+function reserveFor(capacity, gpu) {
+  return Math.max(capacity / 10, (gpu ? 1 : 2) * GiB2);
+}
+function finiteBytes(n) {
+  return n != null && Number.isFinite(n) && n > 0 ? n : 0;
+}
+function assessFit(profile, model, quant, opts = {}) {
+  const contextTokens = planContext(opts.contextTokens, model.contextLength);
   const weightsBytes = model.params * quant.bytesPerWeight * 1.05;
-  const kvBytes = model.params * KV_PER_PARAM * (PLAN_CONTEXT / 4096);
-  const totalBytes = weightsBytes + kvBytes;
-  const pools = [];
-  if (profile.unifiedMemory) {
-    pools.push({ name: "unified", capacity: profile.ram.totalBytes, available: Math.min(profile.ram.availableBytes, profile.ram.totalBytes) });
-  } else {
-    for (const g of profile.gpus) {
-      if (g.vramTotalBytes) pools.push({ name: "gpu", capacity: g.vramTotalBytes, available: Math.min(g.vramFreeBytes ?? g.vramTotalBytes, g.vramTotalBytes) });
-    }
-    pools.push({ name: "ram", capacity: profile.ram.totalBytes, available: Math.min(profile.ram.availableBytes, profile.ram.totalBytes) });
-  }
-  let verdict = "no";
-  let placement = "ram";
-  let usedReserve = 0;
-  for (const pool of pools) {
-    const reserve = reserveFor(pool.capacity);
-    if (totalBytes + reserve <= pool.available) {
-      verdict = "fits";
-      placement = pool.name;
-      usedReserve = reserve;
-      if (pool.name === "gpu" || pool.name === "unified") break;
-    } else if (verdict === "no" && totalBytes + reserve <= pool.capacity * 0.95) {
-      verdict = "tight";
-      placement = pool.name;
-      usedReserve = reserve;
-    }
-  }
-  const estTokS = profile.memBandwidthGBs && verdict !== "no" ? Math.round(profile.memBandwidthGBs * 1e9 / (active2 * quant.bytesPerWeight) * EFFICIENCY) : void 0;
-  const estimate = `weights ${gb(totalBytes - kvBytes)} + KV ~${gb(kvBytes)} @ ${PLAN_CONTEXT / 1024}k ctx, after ${gb(usedReserve || reserveFor(8 * GiB2))} reserve`;
+  const kvBytes = model.kv ? 2 * 2 * model.kv.layers * model.kv.heads * model.kv.headDim * contextTokens : Math.max(0.5 * GiB2, model.params * 0.18) * contextTokens / DEFAULT_PLAN_CONTEXT;
+  const runtimeBytes = Math.max(0.5 * GiB2, weightsBytes * 0.05);
+  const totalBytes = weightsBytes + kvBytes + runtimeBytes;
+  const limitations = ["One sequence, f16 KV; concurrent requests, vision, load-time buffers and runtime allocation limits can require more memory."];
+  if (!model.kv) limitations.push("Architecture-specific KV geometry unavailable; conservative fallback estimate used.");
+  if (model.activeParams) limitations.push("MoE keeps all weights resident. Expert routing and kernels make bandwidth-only speed estimates unreliable.");
+  if (opts.contextTokens && opts.contextTokens > contextTokens) limitations.push(`Requested context was capped at the model's ${contextTokens}-token limit.`);
+  const ramTotal = finiteBytes(profile.ram.totalBytes), ramAvailable = Math.min(finiteBytes(profile.ram.availableBytes), ramTotal);
+  const pools = profile.unifiedMemory ? [{ placement: "unified", capacity: ramTotal, available: ramAvailable, known: true }] : [
+    ...profile.gpus.flatMap((g, gpuIndex) => g.vramTotalBytes && !g.sharedMemory ? [{
+      placement: "gpu",
+      capacity: finiteBytes(g.vramTotalBytes),
+      available: Math.min(finiteBytes(g.vramFreeBytes), finiteBytes(g.vramTotalBytes)),
+      known: g.vramFreeBytes != null,
+      gpuIndex
+    }] : []),
+    { placement: "ram", capacity: ramTotal, available: ramAvailable, known: true }
+  ];
+  const candidates = pools.map((pool) => {
+    const reserve = reserveFor(pool.capacity, pool.placement === "gpu");
+    const verdict = pool.known && totalBytes + reserve <= pool.available ? "fits" : totalBytes + reserve <= pool.capacity ? "tight" : "no";
+    return { ...pool, reserve, verdict };
+  }).sort((a, b) => {
+    const order = { fits: 0, tight: 1, no: 2 };
+    return order[a.verdict] - order[b.verdict] || Number(a.placement === "ram") - Number(b.placement === "ram") || b.available - a.available;
+  });
+  const chosen = candidates[0];
+  if (!chosen.known) limitations.push("Free memory in the selected GPU pool is unknown; fit requires a runtime check.");
+  if (profile.gpus.length > 1) limitations.push("Each GPU is assessed separately. Multi-GPU sharding and CPU/GPU offload need an explicit engine plan.");
+  if (chosen.placement === "ram") limitations.push("RAM placement means CPU inference; it does not establish GPU acceleration or interactive speed.");
+  if (profile.unifiedMemory) limitations.push("Unified RAM is counted once; driver/Metal allocation limits may be lower than physical RAM.");
+  const estTokS = !model.activeParams && chosen.verdict === "fits" && chosen.placement === "unified" && profile.os.startsWith("darwin") && profile.memBandwidthGBs ? Math.max(1, Math.round(profile.memBandwidthGBs * 1e9 * 0.35 / (weightsBytes + kvBytes))) : void 0;
+  if (estTokS) limitations.push("Decode speed is a low-confidence bandwidth estimate, not a measurement; prompt processing and kernel overhead are excluded.");
   return {
     model,
     quant,
     weightsBytes,
     kvBytes,
+    runtimeBytes,
     totalBytes,
-    placement,
-    verdict,
+    contextTokens,
+    placement: chosen.placement,
+    gpuIndex: chosen.gpuIndex,
+    verdict: chosen.verdict,
+    reserveBytes: chosen.reserve,
+    capacityBytes: chosen.capacity,
+    availableBytes: chosen.available,
     estTokS,
-    estimate
+    estimate: `weights ~${gb(weightsBytes, 1)} + KV ~${gb(kvBytes, 1)} + runtime ~${gb(runtimeBytes, 1)} @ ${contextTokens} ctx; ${gb(chosen.reserve, 1)} reserve`,
+    confidence: "planning-estimate",
+    limitations
   };
 }
-async function assessCatalog() {
-  const profile = await profileHardware();
-  return { profile, all: CATALOG.map((m) => ({ model: m, a: bestAssessment(profile, m) })) };
-}
-function bestAssessment(profile, model) {
-  const ranked = model.quants.map((q) => assessFit(profile, model, q)).sort((a, b) => {
+function bestAssessment(profile, model, opts = {}) {
+  if (!model.quants.length) throw new Error(`No quantizations available for ${model.id}.`);
+  return model.quants.map((q) => assessFit(profile, model, q, opts)).sort((a, b) => {
     const order = { fits: 0, tight: 1, no: 2 };
-    if (order[a.verdict] !== order[b.verdict]) return order[a.verdict] - order[b.verdict];
-    return a.totalBytes - b.totalBytes;
-  });
-  return ranked[0];
+    return order[a.verdict] - order[b.verdict] || Number(a.placement === "ram") - Number(b.placement === "ram") || a.totalBytes - b.totalBytes;
+  })[0];
 }
 function verdictMark(a) {
-  if (a.verdict === "fits") return a.estTokS ? `\u2713 ~${a.estTokS} tok/s` : "\u2713 fits";
-  if (a.verdict === "tight") return "\u25B3 tight";
-  return "\u2717 won't fit";
+  return a.verdict === "fits" ? "\u2713 fits estimate" : a.verdict === "tight" ? "\u25B3 verify memory" : "\u2717 beyond estimate";
 }
-var GiB2, PLAN_CONTEXT, KV_PER_PARAM, EFFICIENCY;
+var GiB2, DEFAULT_PLAN_CONTEXT;
 var init_fit = __esm({
   "src/hardware/fit.ts"() {
     init_catalog();
     init_profile();
     GiB2 = 1024 ** 3;
-    PLAN_CONTEXT = 16384;
-    KV_PER_PARAM = 0.045;
-    EFFICIENCY = 0.55;
+    DEFAULT_PLAN_CONTEXT = 16384;
+  }
+});
+
+// src/hardware/recipes.ts
+var recipes_exports = {};
+__export(recipes_exports, {
+  probeServingTools: () => probeServingTools,
+  servingRecommendations: () => servingRecommendations
+});
+import { access, constants } from "node:fs/promises";
+import { delimiter, join as join4 } from "node:path";
+function preference(id, focus) {
+  const i = (focus === "coding" ? CODING_ORDER : GENERAL_ORDER).indexOf(id);
+  return i < 0 ? 100 : i;
+}
+function rank(a, b, focus) {
+  const va = { fits: 0, tight: 1, no: 2 };
+  return va[a.assessment.verdict] - va[b.assessment.verdict] || Number(a.assessment.placement === "ram") - Number(b.assessment.placement === "ram") || Number(!a.model.toolUse) - Number(!b.model.toolUse) || (a.assessment.placement === "ram" && b.assessment.placement === "ram" ? a.assessment.totalBytes - b.assessment.totalBytes : preference(a.model.id, focus) - preference(b.model.id, focus)) || a.assessment.totalBytes - b.assessment.totalBytes;
+}
+function reason(model, assessment, focus) {
+  const task = focus === "coding" && model.focus === "coding" && model.toolUse ? "Tool-capable coding specialist" : model.toolUse ? "Tool-capable general assistant" : "Legacy option; verify tool support";
+  const residency = assessment.placement === "ram" ? "CPU/RAM starting point; latency needs a real trial" : `${assessment.placement === "gpu" ? "one GPU" : "one shared memory pool"} with planned headroom`;
+  return `${task}; ${residency}. Selected by task fit and memory, not by benchmark rank.`;
+}
+function commandEnv(values, command, windows) {
+  return windows ? [...Object.entries(values).map(([k, v]) => `$env:${k}='${v}'`), command] : [`${Object.entries(values).map(([k, v]) => `${k}=${v}`).join(" ")} ${command}`];
+}
+function recipeBase(model, assessment, baseUrl) {
+  return {
+    model,
+    assessment,
+    baseUrl,
+    checks: [`curl --fail ${baseUrl}/models`, "rein setup", "rein doctor"],
+    notes: [
+      "Run the server in one terminal, then use another terminal for Rein setup. Reuse an existing server instead of starting a second copy.",
+      "The model ID must be returned by /v1/models. Test a short chat and a tool call before enabling autonomous jobs.",
+      "Loopback serves this machine. For another machine, bind to its chosen LAN/mesh interface with access controls, or use an SSH tunnel; use that route in Rein setup."
+    ]
+  };
+}
+function servingRecommendations(profile, opts = {}) {
+  const focus = opts.focus ?? "coding";
+  const largestPool = Math.max(profile.ram.totalBytes, ...profile.gpus.map((g) => g.vramTotalBytes ?? 0));
+  const contextTokens = planContext(opts.contextTokens ?? (largestPool <= 12 * 1024 ** 3 ? 8192 : 16384), 262144);
+  const recommendations = CATALOG.map((model) => {
+    const assessment = bestAssessment(profile, model, { contextTokens });
+    return { model, assessment, reason: reason(model, assessment, focus) };
+  }).sort((a, b) => rank(a, b, focus));
+  const best = recommendations.find((r) => r.assessment.verdict === "fits" && r.model.toolUse);
+  const notes = [
+    "This profile describes the machine running Rein. A remote API, SSH tunnel, container gateway or cloud model does not reveal the serving host's hardware. Run rein hardware on that host too.",
+    "Recipes are suggestions. No models are downloaded, no services are started, and no existing server configuration is changed.",
+    "Memory fit does not establish model quality, tool-call correctness, installed weights, disk space, or engine/driver support. Confirm all of these before serving."
+  ];
+  if (!best) notes.push("No tool-capable catalog model has measured memory headroom at this context. Close unused model loads, lower context, or use a discovered remote/cloud server.");
+  if (profile.gpus.length > 1) notes.push("VRAM is not added across cards. A multi-GPU recipe needs compatible devices, partitioning and runtime tests.");
+  const recipes = [];
+  const darwin = profile.os.startsWith("darwin"), linux = profile.os.startsWith("linux"), windows = profile.os.startsWith("win32");
+  if (best) {
+    const { model, assessment } = best;
+    if (model.ollama && assessment.quant.ollama && (darwin || linux || windows)) {
+      recipes.push({
+        ...recipeBase(model, assessment, "http://127.0.0.1:11434/v1"),
+        engine: "ollama",
+        title: "Ollama \u2014 managed local model server",
+        prerequisites: [
+          "Install or update Ollama from https://ollama.com/download for this OS/architecture; confirm the GPU is supported.",
+          `Download the ${assessment.quant.label} artifact and check available disk space. Inspect ollama show before relying on a mutable tag.`,
+          "If Ollama is already running as an app/service, apply these environment values to that service and restart it deliberately; do not run a duplicate server."
+        ],
+        commands: [...commandEnv({ OLLAMA_HOST: "127.0.0.1:11434", OLLAMA_CONTEXT_LENGTH: String(assessment.contextTokens), OLLAMA_NUM_PARALLEL: "1" }, "ollama serve", windows), `ollama pull ${assessment.quant.ollama}`],
+        checks: ["ollama --version", `ollama show ${assessment.quant.ollama}`, "ollama ps", ...recipeBase(model, assessment, "http://127.0.0.1:11434/v1").checks],
+        sources: ["https://docs.ollama.com/faq", "https://docs.ollama.com/api/openai-compatibility", `https://ollama.com/library/${model.ollama}`]
+      });
+    }
+    const lmSupported = darwin && profile.arch === "arm64" || (linux || windows) && profile.arch === "x64" && profile.cpu.features.includes("avx2");
+    if (lmSupported) {
+      const base2 = recipeBase(model, assessment, "http://127.0.0.1:1234/v1");
+      recipes.push({
+        ...base2,
+        engine: "lmstudio",
+        title: "LM Studio \u2014 guided download and native server",
+        prerequisites: [
+          "Install the supported native LM Studio app and enable the lms CLI. Use its supported GPU runtime.",
+          `Search for ${model.name}; download the assessed ${assessment.quant.label} GGUF artifact. Select its actual model key from lms ls.`,
+          "The placeholder MODEL_KEY_FROM_LMS_LS below must be replaced with the downloaded key. Weights and runtime are not assumed installed."
+        ],
+        commands: ["lms ls", `lms load MODEL_KEY_FROM_LMS_LS --estimate-only --context-length ${assessment.contextTokens}`, `lms load MODEL_KEY_FROM_LMS_LS --context-length ${assessment.contextTokens} --identifier rein-local`, "lms server start --port 1234 --bind 127.0.0.1"],
+        checks: ["lms server status", "lms ps", ...base2.checks],
+        sources: ["https://lmstudio.ai/docs/app/system-requirements", "https://lmstudio.ai/docs/cli/local-models/load", "https://lmstudio.ai/docs/cli/serve/server-start"]
+      });
+    }
+    const base = recipeBase(model, assessment, "http://127.0.0.1:8080/v1");
+    recipes.push({
+      ...base,
+      engine: "llama.cpp",
+      title: "llama.cpp \u2014 explicit portable GGUF server",
+      prerequisites: [
+        "Install/build llama-server with the backend for this machine: Metal on Apple Silicon, CUDA for supported NVIDIA, Vulkan/HIP for supported AMD, or CPU.",
+        `Download a compatible ${model.name} ${assessment.quant.label} GGUF with its chat/tool template. Replace MODEL_FILE.gguf with its path; no artifact is auto-selected or downloaded.`,
+        ...assessment.placement === "gpu" ? [`Use llama-server --list-devices to find ${profile.gpus[assessment.gpuIndex ?? 0]?.name ?? "the assessed GPU"}; replace DEVICE_FROM_LLAMA_LIST with its backend device ID. System inventory ordinals may differ.`] : [],
+        "Verify the server build supports this architecture, quantization and tool parser before running. The example uses one sequence."
+      ],
+      commands: [`llama-server --model MODEL_FILE.gguf --ctx-size ${assessment.contextTokens} --parallel 1 --n-gpu-layers ${assessment.placement === "ram" ? 0 : 999}${assessment.placement === "gpu" ? " --device DEVICE_FROM_LLAMA_LIST --split-mode none --main-gpu 0" : ""} --jinja --host 127.0.0.1 --port 8080`],
+      checks: ["llama-server --version", "llama-server --list-devices", ...base.checks],
+      sources: ["https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md", "https://github.com/ggml-org/llama.cpp/tree/master/tools/server"]
+    });
+  }
+  const cuda = profile.gpus.map((gpu, index) => ({ gpu, index })).filter(({ gpu }) => gpu.vendor === "nvidia" && (gpu.computeCapability ?? 0) >= 7.5);
+  if (linux && cuda.length) {
+    const vllmPicks = CATALOG.filter((m) => m.huggingFace?.startsWith("Qwen/Qwen3") && m.toolUse).flatMap((model) => cuda.map(({ gpu, index }) => {
+      const assessment = assessFit({ ...profile, gpus: [gpu], unifiedMemory: Boolean(gpu.sharedMemory) }, model, { label: (gpu.computeCapability ?? 0) >= 8 ? "BF16" : "FP16", bytesPerWeight: 2 }, { contextTokens });
+      assessment.gpuIndex = index;
+      return { model, assessment, reason: reason(model, assessment, focus) };
+    })).filter((r) => r.assessment.verdict === "fits" && r.assessment.placement !== "ram" && r.assessment.totalBytes <= r.assessment.capacityBytes * 0.8 && r.assessment.availableBytes >= r.assessment.capacityBytes * 0.8).sort((a, b) => rank(a, b, focus));
+    const pick = vllmPicks[0];
+    if (pick) {
+      const base = recipeBase(pick.model, pick.assessment, "http://127.0.0.1:8000/v1");
+      const parser = pick.model.id === "qwen3-coder-30b-a3b" ? "qwen3_xml" : "hermes";
+      recipes.push({
+        ...base,
+        engine: "vllm",
+        title: `vLLM \u2014 single CUDA GPU, publisher ${pick.assessment.quant.label} weights`,
+        prerequisites: [
+          "Linux, a supported Python version, NVIDIA driver/CUDA and vLLM build for this GPU and CPU architecture. Check upstream requirements; a detected GPU is not a validated build.",
+          `Obtain ${pick.model.huggingFace} weights and check disk space. This recipe needs ${pick.assessment.quant.label} memory, independently assessed from GGUF/Q4.`,
+          ...profile.gpus[pick.assessment.gpuIndex ?? 0]?.uuid ? [] : ["The GPU UUID was not reported; replace CUDA_DEVICE_ID_FROM_NVIDIA_SMI with the assessed GPU UUID from nvidia-smi -L. Do not assume its ordinal matches CUDA ordering."],
+          "Use one GPU and one sequence first. Only add tensor parallelism after validating compatible devices and the runtime."
+        ],
+        commands: [`CUDA_VISIBLE_DEVICES=${profile.gpus[pick.assessment.gpuIndex ?? 0]?.uuid ?? "CUDA_DEVICE_ID_FROM_NVIDIA_SMI"} vllm serve ${pick.model.huggingFace} --dtype ${pick.assessment.quant.label === "BF16" ? "bfloat16" : "float16"} --host 127.0.0.1 --port 8000 --max-model-len ${pick.assessment.contextTokens} --max-num-seqs 1 --gpu-memory-utilization 0.8 --enforce-eager --enable-auto-tool-choice --tool-call-parser ${parser}`],
+        checks: ["nvidia-smi", "vllm --version", ...base.checks],
+        sources: ["https://docs.vllm.ai/en/stable/getting_started/installation/gpu/", "https://docs.vllm.ai/en/stable/features/tool_calling/", `https://huggingface.co/${pick.model.huggingFace}`]
+      });
+    } else notes.push("No single supported CUDA device fits the checked publisher FP16/BF16 vLLM recipes. A fitting GGUF does not imply these weights fit.");
+  } else if (linux && profile.gpus.some((g) => g.vendor === "nvidia")) {
+    notes.push("CUDA compute capability was unavailable or below the current vLLM minimum; no unverified vLLM launch recipe was generated.");
+  }
+  return { scope: "current-machine", focus, contextTokens, recommendations, best, recipes, notes };
+}
+async function probeServingTools() {
+  const names = { ollama: "ollama", lmstudio: "lms", "llama.cpp": "llama-server", vllm: "vllm" };
+  return Object.fromEntries(await Promise.all(Object.entries(names).map(async ([engine, binary]) => {
+    const paths = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+    const suffixes = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
+    const candidates = await Promise.all(paths.flatMap((dir) => suffixes.map(async (ext) => {
+      try {
+        await access(join4(dir, binary + ext), constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    })));
+    return [engine, { onPath: candidates.some(Boolean) }];
+  })));
+}
+var CODING_ORDER, GENERAL_ORDER;
+var init_recipes = __esm({
+  "src/hardware/recipes.ts"() {
+    init_catalog();
+    init_fit();
+    CODING_ORDER = ["qwen3-coder-30b-a3b", "gpt-oss-20b", "qwen3-8b", "qwen3-4b", "qwen3-30b-a3b", "gpt-oss-120b", "mistral-small-24b"];
+    GENERAL_ORDER = ["gpt-oss-120b", "gpt-oss-20b", "qwen3-30b-a3b", "qwen3-8b", "qwen3-4b", "mistral-small-24b", "qwen3-coder-30b-a3b"];
+  }
+});
+
+// src/hardware/report.ts
+var report_exports = {};
+__export(report_exports, {
+  hardwareReportLines: () => hardwareReportLines,
+  printHardwareReport: () => printHardwareReport
+});
+function hardwareReportLines(profile, plan, tools) {
+  const lines = [
+    bold("rein hardware \u2014 this machine"),
+    `  ${summarizeHardware(profile)}`,
+    `  ${gb(profile.ram.availableBytes, 1)} system memory available now`,
+    `  Plan: ${plan.contextTokens} context tokens, one concurrent request, f16 KV. Focus: ${plan.focus}.`,
+    ""
+  ];
+  for (const g of profile.gpus) {
+    if (g.vramTotalBytes && !g.sharedMemory) lines.push(`  ${g.name}: ${gb(g.vramTotalBytes, 1)} VRAM, ${g.vramFreeBytes == null ? "free memory unknown" : gb(g.vramFreeBytes, 1) + " free"}`);
+    else lines.push(`  ${g.name}: ${g.sharedMemory ? "shared system memory" : "VRAM unavailable"}`);
+  }
+  for (const note of profile.notes ?? []) lines.push(`  ${dim(note)}`);
+  lines.push("", bold("model memory estimates"));
+  for (const { model, assessment: a } of plan.recommendations) {
+    const plain = verdictMark(a).padEnd(19);
+    const mark = a.verdict === "fits" ? green(plain) : a.verdict === "tight" ? yellow(plain) : red(plain);
+    lines.push(`  ${mark} ${model.name.padEnd(27)} ${a.quant.label.padEnd(7)} ${gb(a.totalBytes, 1).padStart(9)} ${a.placement}${a.gpuIndex == null ? "" : ` #${a.gpuIndex}`}`);
+  }
+  if (plan.best) {
+    lines.push("", `suggested starting model: ${bold(plan.best.model.name)}`, `  ${plan.best.reason}`, `  ${plan.best.assessment.estimate}`);
+    if (plan.best.assessment.estTokS) lines.push(`  Low-confidence decode estimate: ~${plan.best.assessment.estTokS} tok/s. This is not a benchmark.`);
+  }
+  lines.push("", bold("serving recipes \u2014 run only the one you choose"));
+  if (!plan.recipes.length) lines.push("  No launch recipe has sufficient assessed memory headroom. The notes below describe the next step.");
+  for (const recipe of plan.recipes) {
+    lines.push(
+      "",
+      `  ${bold(recipe.title)} (${tools[recipe.engine]?.onPath ? "CLI found on PATH; runtime unverified" : "CLI not found on PATH"})`,
+      `  Model: ${recipe.model.name}, ${recipe.assessment.quant.label}, ${recipe.assessment.contextTokens} context tokens`,
+      `  ${recipe.assessment.estimate}`,
+      `  Chat Completions base URL: ${recipe.baseUrl}`
+    );
+    for (const prerequisite of recipe.prerequisites) lines.push(`    Before: ${prerequisite}`);
+    for (const command of recipe.commands) lines.push(`    ${command}`);
+    lines.push(`    Check: ${recipe.checks.join(" \u2192 ")}`);
+    for (const note of recipe.notes) lines.push(`    ${dim(note)}`);
+    lines.push(`    Docs: ${recipe.sources.join(" ")}`);
+  }
+  lines.push("", ...plan.notes.map((note) => dim(note)));
+  return lines;
+}
+async function printHardwareReport(opts = {}) {
+  const log = opts.log ?? console.log;
+  const [profile, tools] = await Promise.all([profileHardware(), probeServingTools()]);
+  const plan = servingRecommendations(profile, opts);
+  if (opts.json) {
+    log(JSON.stringify({
+      scope: plan.scope,
+      hardware: { ...profile, ram: { total: profile.ram.totalBytes, available: profile.ram.availableBytes } },
+      contextTokens: plan.contextTokens,
+      focus: plan.focus,
+      tools,
+      models: plan.recommendations.map(({ model, assessment: a, reason: reason2 }) => ({
+        id: model.id,
+        name: model.name,
+        params: model.params,
+        activeParams: model.activeParams,
+        quant: a.quant.label,
+        footprint: Math.round(a.totalBytes),
+        weightsBytes: Math.round(a.weightsBytes),
+        kvBytes: Math.round(a.kvBytes),
+        runtimeBytes: Math.round(a.runtimeBytes),
+        reserveBytes: Math.round(a.reserveBytes),
+        contextTokens: a.contextTokens,
+        placement: a.placement,
+        gpuIndex: a.gpuIndex,
+        verdict: a.verdict,
+        estTokS: a.estTokS,
+        confidence: a.confidence,
+        limitations: a.limitations,
+        ollama: a.quant.ollama,
+        reason: reason2
+      })),
+      best: plan.best?.model.id,
+      recipes: plan.recipes,
+      notes: plan.notes
+    }, null, 2));
+  } else {
+    for (const line of hardwareReportLines(profile, plan, tools)) log(line);
+  }
+  return 0;
+}
+var init_report = __esm({
+  "src/hardware/report.ts"() {
+    init_ansi();
+    init_fit();
+    init_profile();
+    init_recipes();
+  }
+});
+
+// src/harness/server-setup.ts
+var server_setup_exports = {};
+__export(server_setup_exports, {
+  printDiscoverySummary: () => printDiscoverySummary,
+  printServingAdvice: () => printServingAdvice
+});
+function printDiscoverySummary(report, log = console.log) {
+  log(`Discovery: ${report.servers.length} reachable server(s), ${report.scanned}/${report.candidateCount} endpoints checked${report.timedOut ? "; time limit reached" : ""}${report.truncated ? "; candidate limit reached" : ""}.`);
+  if (report.network) {
+    const peers = report.sources.filter((s) => ["neighbors", "netbird", "tailscale"].includes(s.source));
+    for (const source of peers) log(`  ${source.source}: ${source.status === "ok" ? `${source.peers} known peer(s)` : source.status}`);
+    log("Known peers only; this does not sweep a subnet. An unknown host or unusual port may need its URL entered manually.");
+  }
+  for (const result of report.results.filter((r) => ["configured", "environment", "explicit"].includes(r.source) && !["ready", "auth-required", "no-models"].includes(r.status))) {
+    log(`  ${result.baseUrl}: ${result.status}${result.error ? ` \u2014 ${result.error}` : ""}`);
+  }
+  if (!report.servers.length) log("No model API found. Start a server, choose hosting recipes, or enter its host and port. A remote loopback-only server needs an SSH connection.");
+  else log("ready = models listed; auth-required = key needed; no-models = server reachable, load a model. Setup tests a chat reply before saving an HTTP connection.");
+}
+async function printServingAdvice(detailed = false, log = console.log) {
+  try {
+    const { readOperatorProfile: readOperatorProfile2 } = await Promise.resolve().then(() => (init_operator_profile(), operator_profile_exports));
+    const focus = readOperatorProfile2().profile?.operator_profile.focus;
+    if (detailed) {
+      const { printHardwareReport: printHardwareReport2 } = await Promise.resolve().then(() => (init_report(), report_exports));
+      await printHardwareReport2({ log, focus });
+      return;
+    }
+    const { profileHardware: profileHardware2, summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
+    const { servingRecommendations: servingRecommendations2 } = await Promise.resolve().then(() => (init_recipes(), recipes_exports));
+    const hardware = await profileHardware2();
+    const advice = servingRecommendations2(hardware, { focus });
+    log(`
+This machine: ${summarizeHardware2(hardware)}`);
+    if (advice.best) log(`Suggested local model: ${advice.best.model.name} \u2014 ${advice.best.reason}`);
+    else log("No catalog model has comfortable headroom on this machine right now. A remote server or cloud connection is available below.");
+    log(`Fit estimates use ${advice.contextTokens.toLocaleString()} context tokens. Run rein hardware for memory assumptions and serving recipes.`);
+    log("For a remote model host, run rein hardware on that host. This gateway's memory does not describe the remote server.\n");
+  } catch (error) {
+    log(`Hardware advice unavailable: ${error.message}. You can still connect a server or cloud account.`);
+  }
+}
+var init_server_setup = __esm({
+  "src/harness/server-setup.ts"() {
   }
 });
 
@@ -892,7 +2198,7 @@ __export(update_exports, {
 import { spawn as spawn2 } from "node:child_process";
 import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join as join2 } from "node:path";
+import { join as join5 } from "node:path";
 function runProgram(command, args, signal, timeoutMs) {
   signal.throwIfAborted();
   return new Promise((resolve22, reject) => {
@@ -914,9 +2220,9 @@ function runProgram(command, args, signal, timeoutMs) {
       else if (code !== 0) reject(new Error(`${command} exited ${code ?? "after a signal"}.`));
       else resolve22();
     };
-    const stop = (reason) => {
+    const stop = (reason2) => {
       if (error) return;
-      error = reason;
+      error = reason2;
       kill("SIGTERM");
       escalation = setTimeout(() => {
         kill("SIGKILL");
@@ -955,8 +2261,8 @@ async function runUpdate() {
   for (const [signal, handler] of signals) process.on(signal, handler);
   let directory;
   try {
-    directory = await mkdtemp(join2(tmpdir(), "rein-update-"));
-    const installer = join2(directory, "install.sh");
+    directory = await mkdtemp(join5(tmpdir(), "rein-update-"));
+    const installer = join5(directory, "install.sh");
     console.log(`Downloading the latest Rein installer from ${INSTALLER_URL}`);
     await runProgram("curl", [
       "--fail",
@@ -1085,12 +2391,12 @@ __export(tmux_exports, {
   createTmuxTool: () => createTmuxTool,
   shellQuote: () => shellQuote
 });
-import { execFile as execFile2, spawn as spawn3 } from "node:child_process";
+import { execFile as execFile3, spawn as spawn3 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
-import { createHash, randomUUID } from "node:crypto";
-import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { resolve, join as join3, delimiter } from "node:path";
+import { createHash as createHash2, randomUUID as randomUUID2 } from "node:crypto";
+import { accessSync, constants as constants2, realpathSync, statSync } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { resolve, join as join6, delimiter as delimiter2 } from "node:path";
 function validateInput(text) {
   if (typeof text !== "string" || text.length > 32e3 || text.includes("\0")) throw new Error("Shell input must be at most 32000 characters and contain no NUL bytes.");
 }
@@ -1142,8 +2448,8 @@ var exec, digest, validId, shellQuote, TmuxShells;
 var init_tmux = __esm({
   "src/harness/tmux.ts"() {
     init_Truncation();
-    exec = promisify2(execFile2);
-    digest = (text) => createHash("sha256").update(text).digest("hex").slice(0, 20);
+    exec = promisify2(execFile3);
+    digest = (text) => createHash2("sha256").update(text).digest("hex").slice(0, 20);
     validId = (id) => /^rein-[a-f0-9]{20}-[a-f0-9]{12}$/.test(id);
     shellQuote = (text) => "'" + text.replace(/'/g, "'\\''") + "'";
     TmuxShells = class {
@@ -1154,13 +2460,13 @@ var init_tmux = __esm({
         if (kind !== "shell" && kind !== "visual") throw new Error("Unknown Rein tmux session kind.");
         this.cwd = realpathSync(resolve(cwd));
         this.scope = digest(this.cwd);
-        this.socket = `rein-${kind === "visual" ? "view-" : ""}${digest(resolve(process.env.REIN_HOME || join3(homedir2(), ".rein")))}`;
+        this.socket = `rein-${kind === "visual" ? "view-" : ""}${digest(resolve(process.env.REIN_HOME || join6(homedir3(), ".rein")))}`;
       }
       executable() {
-        for (const directory of (process.env.PATH ?? "/usr/bin:/bin").split(delimiter)) {
+        for (const directory of (process.env.PATH ?? "/usr/bin:/bin").split(delimiter2)) {
           const path2 = resolve(this.cwd, directory || ".", "tmux");
           try {
-            accessSync(path2, constants.X_OK);
+            accessSync(path2, constants2.X_OK);
             if (statSync(path2).isFile()) return path2;
           } catch {
           }
@@ -1232,7 +2538,7 @@ var init_tmux = __esm({
       async start(command, signal, environment = {}) {
         if (command !== void 0) validateInput(command);
         const current = this.environment(environment);
-        const id = `rein-${this.scope}-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+        const id = `rein-${this.scope}-${randomUUID2().replaceAll("-", "").slice(0, 12)}`;
         try {
           await this.command(["new-session", "-d", "-s", id, "-c", this.cwd, "-x", "120", "-y", "36", "/usr/bin/env", "-i", "/bin/sleep", "30"], signal);
           await this.command(["set-option", "-t", id, "@rein-workspace", this.scope], signal);
@@ -1318,38 +2624,38 @@ __export(surface_exports, {
   remoteDesktopSession: () => remoteDesktopSession,
   shouldOpenDesktop: () => shouldOpenDesktop
 });
-import { existsSync as existsSync2, lstatSync, mkdirSync, readFileSync as readFileSync2, renameSync, writeFileSync, unlinkSync } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { dirname, join as join4, resolve as resolve2 } from "node:path";
-import { execFile as execFile3 } from "node:child_process";
+import { existsSync as existsSync3, lstatSync as lstatSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync4, renameSync as renameSync2, writeFileSync as writeFileSync3, unlinkSync as unlinkSync2 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { dirname, join as join7, resolve as resolve2 } from "node:path";
+import { execFile as execFile4 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 function remoteDesktopSession(env = process.env) {
   return !!(env.SSH_CONNECTION || env.SSH_TTY || /[/\\]\.nodeterm[/\\]hook-endpoint-[^/\\]+\.env$/.test(env.NODETERM_HOOK_ENDPOINT ?? ""));
 }
-function desktopAvailable(env = process.env, platform = process.platform) {
-  return platform === "darwin" && !env.CI && !remoteDesktopSession(env);
+function desktopAvailable(env = process.env, platform2 = process.platform) {
+  return platform2 === "darwin" && !env.CI && !remoteDesktopSession(env);
 }
-function nativeApp(home = homedir3()) {
-  return [join4(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find((path2) => existsSync2(join4(path2, "Contents/MacOS/nodeterm")));
+function nativeApp(home = homedir4()) {
+  return [join7(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find((path2) => existsSync3(join7(path2, "Contents/MacOS/nodeterm")));
 }
 function preferredSurface(home = desktopHome()) {
   try {
-    return JSON.parse(readFileSync2(join4(home, "desktop.json"), "utf8")).surface === "terminal" ? "terminal" : "nodeterm";
+    return JSON.parse(readFileSync4(join7(home, "desktop.json"), "utf8")).surface === "terminal" ? "terminal" : "nodeterm";
   } catch {
     return "nodeterm";
   }
 }
 function preferSurface(surface, home = desktopHome()) {
-  mkdirSync(home, { recursive: true, mode: 448 });
-  const file = join4(home, "desktop.json");
-  if (existsSync2(file) && lstatSync(file).isSymbolicLink()) throw new Error("Desktop preferences must not be a symlink.");
-  const temp = `${file}.${randomUUID2()}.tmp`;
+  mkdirSync3(home, { recursive: true, mode: 448 });
+  const file = join7(home, "desktop.json");
+  if (existsSync3(file) && lstatSync3(file).isSymbolicLink()) throw new Error("Desktop preferences must not be a symlink.");
+  const temp = `${file}.${randomUUID3()}.tmp`;
   try {
-    writeFileSync(temp, JSON.stringify({ surface }, null, 2) + "\n", { flag: "wx", mode: 384 });
-    renameSync(temp, file);
+    writeFileSync3(temp, JSON.stringify({ surface }, null, 2) + "\n", { flag: "wx", mode: 384 });
+    renameSync2(temp, file);
   } finally {
-    if (existsSync2(temp)) unlinkSync(temp);
+    if (existsSync3(temp)) unlinkSync2(temp);
   }
 }
 async function nodeTermRunning() {
@@ -1377,19 +2683,19 @@ function registeredSettings(current, launchCmd) {
 async function registerRein(options = {}) {
   const running = options.running ?? nodeTermRunning;
   if (await running()) return "NodeTerm is running, so its settings were preserved. Close it when convenient and run rein desktop install --no-launch to register Rein as the default agent. For now, run rein --terminal in a NodeTerm terminal node.";
-  const file = options.settingsFile ?? join4(homedir3(), "Library/Application Support/node-terminal/settings.json");
-  if (existsSync2(file) && (!lstatSync(file).isFile() || lstatSync(file).isSymbolicLink())) throw new Error("NodeTerm settings must be an ordinary file.");
-  const before = existsSync2(file) ? readFileSync2(file, "utf8") : void 0;
+  const file = options.settingsFile ?? join7(homedir4(), "Library/Application Support/node-terminal/settings.json");
+  if (existsSync3(file) && (!lstatSync3(file).isFile() || lstatSync3(file).isSymbolicLink())) throw new Error("NodeTerm settings must be an ordinary file.");
+  const before = existsSync3(file) ? readFileSync4(file, "utf8") : void 0;
   const command = [options.node ?? "node", options.cli ?? resolve2(process.argv[1]), "--terminal"].map(shellQuote).join(" ");
   const next = registeredSettings(before === void 0 ? {} : JSON.parse(before), command);
-  mkdirSync(dirname(file), { recursive: true, mode: 448 });
-  const temp = `${file}.${randomUUID2()}.tmp`;
+  mkdirSync3(dirname(file), { recursive: true, mode: 448 });
+  const temp = `${file}.${randomUUID3()}.tmp`;
   try {
-    writeFileSync(temp, JSON.stringify(next, null, 2) + "\n", { flag: "wx", mode: 384 });
-    if (await running() || (existsSync2(file) ? readFileSync2(file, "utf8") : void 0) !== before) throw new Error("NodeTerm settings changed during registration. Close the app and retry.");
-    renameSync(temp, file);
+    writeFileSync3(temp, JSON.stringify(next, null, 2) + "\n", { flag: "wx", mode: 384 });
+    if (await running() || (existsSync3(file) ? readFileSync4(file, "utf8") : void 0) !== before) throw new Error("NodeTerm settings changed during registration. Close the app and retry.");
+    renameSync2(temp, file);
   } finally {
-    if (existsSync2(temp)) unlinkSync(temp);
+    if (existsSync3(temp)) unlinkSync2(temp);
   }
   return "Rein is registered as NodeTerm's default agent. Open a project and add an agent node to start Rein.";
 }
@@ -1404,9 +2710,9 @@ var exec2, REIN_AGENT_ID, desktopHome;
 var init_surface = __esm({
   "src/harness/desktop/surface.ts"() {
     init_tmux();
-    exec2 = promisify3(execFile3);
+    exec2 = promisify3(execFile4);
     REIN_AGENT_ID = "custom:749611bd-a3c7-4b35-b0e1-70cf837648b2";
-    desktopHome = () => resolve2(process.env.REIN_HOME || join4(homedir3(), ".rein"));
+    desktopHome = () => resolve2(process.env.REIN_HOME || join7(homedir4(), ".rein"));
   }
 });
 
@@ -1419,24 +2725,24 @@ __export(install_exports, {
   nodeTermArtifact: () => nodeTermArtifact,
   verifyNodeTermDownload: () => verifyNodeTermDownload
 });
-import { execFile as execFile4 } from "node:child_process";
-import { createHash as createHash2 } from "node:crypto";
-import { constants as constants2, createReadStream } from "node:fs";
-import { access, lstat, mkdir, mkdtemp as mkdtemp2, rename, rm as rm2, stat as stat2 } from "node:fs/promises";
-import { homedir as homedir4, tmpdir as tmpdir2 } from "node:os";
-import { join as join5 } from "node:path";
+import { execFile as execFile5 } from "node:child_process";
+import { createHash as createHash3 } from "node:crypto";
+import { constants as constants3, createReadStream } from "node:fs";
+import { access as access2, lstat, mkdir, mkdtemp as mkdtemp2, rename, rm as rm2, stat as stat2 } from "node:fs/promises";
+import { homedir as homedir5, tmpdir as tmpdir2 } from "node:os";
+import { join as join8 } from "node:path";
 import { promisify as promisify4 } from "node:util";
-function nodeTermArtifact(platform, arch) {
-  if (platform !== "darwin") return void 0;
+function nodeTermArtifact(platform2, arch2) {
+  if (platform2 !== "darwin") return void 0;
   const assets = {
     arm64: [`nodeterm-${NODETERM_VERSION}-arm64.dmg`, "44d575d65d6b8cbfb92d1a2e7eca5996ff6918bc94db127548f1b6a13a6b554a"],
     x64: [`nodeterm-${NODETERM_VERSION}.dmg`, "43de9d36b510a65b85fb483868d8899024ad05e14a9a33693187a763985b1e27"]
   };
-  const asset = assets[arch];
+  const asset = assets[arch2];
   return asset && { url: `https://github.com/eneskirca/nodeterm/releases/download/v${NODETERM_VERSION}/${asset[0]}`, sha256: asset[1] };
 }
 async function verifyNodeTermDownload(file, expected) {
-  const hash2 = createHash2("sha256");
+  const hash2 = createHash3("sha256");
   for await (const chunk of createReadStream(file)) hash2.update(chunk);
   if (hash2.digest("hex") !== expected) throw new Error("NodeTerm download checksum did not match the official release; installation stopped.");
 }
@@ -1451,9 +2757,9 @@ async function exists(path2) {
 }
 async function usableApp(path2) {
   try {
-    const executable2 = join5(path2, "Contents", "MacOS", "nodeterm");
-    if (!(await stat2(path2)).isDirectory() || !(await stat2(executable2)).isFile() || !(await stat2(join5(path2, "Contents", "Info.plist"))).isFile()) return false;
-    await access(executable2, constants2.X_OK);
+    const executable2 = join8(path2, "Contents", "MacOS", "nodeterm");
+    if (!(await stat2(path2)).isDirectory() || !(await stat2(executable2)).isFile() || !(await stat2(join8(path2, "Contents", "Info.plist"))).isFile()) return false;
+    await access2(executable2, constants3.X_OK);
     return true;
   } catch {
     return false;
@@ -1469,9 +2775,9 @@ function createNodeTermInstaller(deps) {
     let mount, mounted = false, appPath;
     let detail = "";
     try {
-      const applications = join5(deps.home, "Applications");
-      const destination = join5(applications, "nodeterm.app");
-      for (const candidate of [join5(deps.systemApplications, "nodeterm.app"), destination]) {
+      const applications = join8(deps.home, "Applications");
+      const destination = join8(applications, "nodeterm.app");
+      for (const candidate of [join8(deps.systemApplications, "nodeterm.app"), destination]) {
         if (!await exists(candidate)) continue;
         if (!await usableApp(candidate)) throw new Error(`An incomplete or unusable NodeTerm app exists at ${candidate}. It was preserved. Move it aside before retrying installation.`);
         appPath = candidate;
@@ -1482,7 +2788,7 @@ function createNodeTermInstaller(deps) {
         const artifact = deps.artifact(deps.platform, deps.arch);
         if (!artifact) return { installed: false, detail: `No supported NodeTerm download for macOS ${deps.arch}. See https://nodeterm.dev/releases.` };
         await mkdir(applications, { recursive: true });
-        const lockPath = join5(applications, ".rein-nodeterm-install.lock");
+        const lockPath = join8(applications, ".rein-nodeterm-install.lock");
         try {
           await mkdir(lockPath, { mode: 448 });
           lock = lockPath;
@@ -1490,8 +2796,8 @@ function createNodeTermInstaller(deps) {
           if (error.code === "EEXIST") throw new Error("Another NodeTerm installation may be running. Retry when it finishes.");
           throw error;
         }
-        temporary = await mkdtemp2(join5(deps.temporaryRoot, "rein-nodeterm-"));
-        const download2 = join5(temporary, "nodeterm.dmg");
+        temporary = await mkdtemp2(join8(deps.temporaryRoot, "rein-nodeterm-"));
+        const download2 = join8(temporary, "nodeterm.dmg");
         await deps.run("curl", [
           "--fail",
           "--silent",
@@ -1514,16 +2820,16 @@ function createNodeTermInstaller(deps) {
         const downloaded = await stat2(download2);
         if (!downloaded.isFile() || downloaded.size === 0 || downloaded.size > 536870912) throw new Error("The NodeTerm download is empty or exceeds the expected size limit.");
         await verifyNodeTermDownload(download2, artifact.sha256);
-        mount = join5(temporary, "mount");
+        mount = join8(temporary, "mount");
         await mkdir(mount);
         mounted = true;
         await deps.run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, download2], 6e4);
-        const source = join5(mount, "nodeterm.app");
+        const source = join8(mount, "nodeterm.app");
         if (!(await lstat(source)).isDirectory()) throw new Error("The release disk image does not contain nodeterm.app.");
         await deps.run("codesign", ["--verify", "--deep", "--strict", source], 6e4);
         await deps.run("spctl", ["--assess", "--type", "execute", source], 6e4);
-        staging = await mkdtemp2(join5(applications, ".rein-nodeterm-stage-"));
-        const stagedApp = join5(staging, "nodeterm.app");
+        staging = await mkdtemp2(join8(applications, ".rein-nodeterm-stage-"));
+        const stagedApp = join8(staging, "nodeterm.app");
         await deps.run("ditto", [source, stagedApp], 12e4);
         await deps.run("codesign", ["--verify", "--deep", "--strict", stagedApp], 6e4);
         if (await exists(destination)) throw new Error("A NodeTerm installation appeared while downloading. It was preserved; retry to use it.");
@@ -1568,14 +2874,14 @@ var NODETERM_VERSION, exec3, run, installNodeTerm;
 var init_install = __esm({
   "src/harness/desktop/install.ts"() {
     NODETERM_VERSION = "0.3.4";
-    exec3 = promisify4(execFile4);
+    exec3 = promisify4(execFile5);
     run = async (command, args, timeout) => {
       await exec3(command, args, { timeout, maxBuffer: 1024 * 1024, killSignal: "SIGKILL" });
     };
     installNodeTerm = createNodeTermInstaller({
       platform: process.platform,
       arch: process.arch,
-      home: homedir4(),
+      home: homedir5(),
       temporaryRoot: tmpdir2(),
       systemApplications: "/Applications",
       run,
@@ -2285,18 +3591,19 @@ Rules for tool blocks:
 
 // src/ai/cli-provider.ts
 import { spawn as spawn4 } from "node:child_process";
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, mkdtempSync, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { homedir as homedir5, tmpdir as tmpdir3 } from "node:os";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, mkdtempSync, rmSync, writeFileSync as writeFileSync4 } from "node:fs";
+import { homedir as homedir6, tmpdir as tmpdir3 } from "node:os";
+import { join as join9 } from "node:path";
 function cliAuthDirectory(provider, env = process.env) {
-  return join6(env.REIN_HOME || join6(homedir5(), ".rein"), "cli-auth", provider);
+  return join9(env.REIN_HOME || join9(homedir6(), ".rein"), "cli-auth", provider);
 }
 function cliEnvironment(provider, overrides = {}) {
   const env = { ...process.env, ...overrides };
   for (const key of Object.keys(env)) if (key.startsWith("COPILOT_PROVIDER_")) delete env[key];
-  for (const key of ["ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "COPILOT_ALLOW_ALL", "NODE_OPTIONS", "BASH_ENV", "ENV"]) delete env[key];
+  for (const key of ["ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_KEY", "XAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "COPILOT_ALLOW_ALL", "NODE_OPTIONS", "BASH_ENV", "ENV"]) delete env[key];
+  if (provider === "grok") return grokEnvironment(env, cliAuthDirectory(provider, env));
   env[provider === "codex" ? "CODEX_HOME" : "COPILOT_HOME"] = cliAuthDirectory(provider, env);
-  if (provider === "copilot") env.GH_CONFIG_DIR = join6(cliAuthDirectory(provider, env), "gh");
+  if (provider === "copilot") env.GH_CONFIG_DIR = join9(cliAuthDirectory(provider, env), "gh");
   env.GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS = "false";
   env.GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS = "false";
   return env;
@@ -2312,16 +3619,18 @@ The JSON below contains the system instructions, available Rein tools, and conve
 ${JSON.stringify(context)}`;
 }
 function cliArguments(provider, model, _prompt = "") {
+  if (provider === "grok") return grokArguments(model, _prompt);
   if (provider === "codex") return ["exec", "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-c", 'approval_policy="never"', "-c", 'web_search="disabled"', "-c", "mcp_servers={}", "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false", ...CODEX_DISABLED_FEATURES.flatMap((name) => ["-c", `features.${name}=false`]), ...model && model !== "default" ? ["--model", model] : [], "-"];
   return ["--agent", "rein-bridge", "--silent", "--no-color", "--no-ask-user", "--no-custom-instructions", "--no-auto-update", "--no-bash-env", "--no-experimental", "--no-remote", "--no-remote-export", "--disable-builtin-mcps", "--deny-tool", "shell,write,read,url,memory", ...model && model !== "default" ? ["--model", model] : []];
 }
-function prepareProfile(provider, env) {
+function prepareCliProfile(provider, env) {
   const directory = cliAuthDirectory(provider, env);
-  mkdirSync2(directory, { recursive: true, mode: 448 });
+  mkdirSync4(directory, { recursive: true, mode: 448 });
+  if (provider === "grok") return prepareGrokProfile(directory);
   if (provider !== "copilot") return;
   for (const name of ["mcp-config.json", "hooks.json", "hooks", "plugins", "agents", "extensions"]) {
-    const path2 = join6(directory, name);
-    if (existsSync3(path2)) throw new Error(`Rein's isolated Copilot profile contains custom ${name}. Remove that customization from ${directory} or use the native CLI directly.`);
+    const path2 = join9(directory, name);
+    if (existsSync4(path2)) throw new Error(`Rein's isolated Copilot profile contains custom ${name}. Remove that customization from ${directory} or use the native CLI directly.`);
   }
 }
 function streamCli(model, context, options = {}) {
@@ -2331,20 +3640,30 @@ function streamCli(model, context, options = {}) {
   void (async () => {
     let directory;
     try {
-      if (model.provider !== "codex" && model.provider !== "copilot") throw new Error(`Unsupported CLI provider: ${model.provider}`);
+      if (model.provider !== "codex" && model.provider !== "copilot" && model.provider !== "grok") throw new Error(`Unsupported CLI provider: ${model.provider}`);
       const provider = model.provider;
       if (options.signal?.aborted) throw new Error("Operation aborted");
       const env = cliEnvironment(provider, options.env);
-      prepareProfile(provider, env);
+      prepareCliProfile(provider, env);
       const prompt = renderCliPrompt(context);
       if (Buffer.byteLength(prompt) > 8e6) throw new Error(`${provider} CLI prompt exceeds its transport size limit. Start a fresh context window or use an API provider.`);
-      directory = mkdtempSync(join6(tmpdir3(), "rein-cli-"));
+      directory = mkdtempSync(join9(tmpdir3(), "rein-cli-"));
       if (provider === "copilot") {
-        mkdirSync2(join6(directory, ".github", "agents"), { recursive: true });
-        writeFileSync2(join6(directory, ".github", "agents", "rein-bridge.agent.md"), "---\nname: rein-bridge\ndescription: Generate the next Rein assistant message without native tools\ntools: []\n---\nUse only the Rein text-tool protocol in the supplied conversation. Never call native tools.\n", { mode: 384 });
+        mkdirSync4(join9(directory, ".github", "agents"), { recursive: true });
+        writeFileSync4(join9(directory, ".github", "agents", "rein-bridge.agent.md"), "---\nname: rein-bridge\ndescription: Generate the next Rein assistant message without native tools\ntools: []\n---\nUse only the Rein text-tool protocol in the supplied conversation. Never call native tools.\n", { mode: 384 });
       }
-      const result = await runCliProcess(provider, cliArguments(provider, model.id, prompt), prompt, directory, env, options);
+      let promptArgument = prompt;
+      if (provider === "grok") {
+        promptArgument = join9(directory, "prompt.txt");
+        writeFileSync4(promptArgument, prompt, { flag: "wx", mode: 384 });
+      }
+      const result = await runCliProcess(provider, cliArguments(provider, model.id, promptArgument), provider === "grok" ? "" : prompt, directory, env, options);
       let text = result;
+      if (provider === "grok") {
+        const parsed2 = grokOutput(result);
+        text = parsed2.text;
+        if (parsed2.usage) message.usage = parsed2.usage;
+      }
       if (provider === "codex") {
         const parts = [];
         for (const line of result.split(/\r?\n/).filter(Boolean)) {
@@ -2403,9 +3722,9 @@ function runCliProcess(provider, args, input, cwd, env, options) {
       } catch {
       }
     };
-    const stop = (reason) => {
+    const stop = (reason2) => {
       if (error) return;
-      error = new Error(reason);
+      error = new Error(reason2);
       kill("SIGTERM");
       forceKill = setTimeout(() => {
         kill("SIGKILL");
@@ -2436,11 +3755,20 @@ function runCliProcess(provider, args, input, cwd, env, options) {
         return;
       }
       stdout += data;
-      if (provider === "codex") {
+      if (provider === "codex" || provider === "grok") {
         pendingLine += data;
         const lines = pendingLine.split("\n");
         pendingLine = lines.pop() ?? "";
         for (const line of lines) {
+          if (provider === "grok") {
+            if (!line.trim()) continue;
+            try {
+              grokEvent(line);
+            } catch (error2) {
+              stop(error2 instanceof Error ? error2.message : String(error2));
+            }
+            continue;
+          }
           try {
             const event = JSON.parse(line);
             if (/command_execution|file_change|mcp_tool_call|web_search|image_generation|browser|computer/.test(event.item?.type ?? "")) stop("Codex attempted a native tool. The bridge canceled this turn; Rein tools must use text tool blocks.");
@@ -2475,9 +3803,11 @@ var init_cli_provider = __esm({
   "src/ai/cli-provider.ts"() {
     init_event_stream();
     init_openai_completions();
+    init_xai();
     CLI_PROVIDERS = {
       codex: { label: "ChatGPT subscription via Codex CLI", command: "codex", installCommand: "npm install -g @openai/codex", loginUrl: "https://auth.openai.com/codex/device", defaultModel: "default", baseUrl: "cli://codex" },
-      copilot: { label: "GitHub Copilot subscription via Copilot CLI", command: "copilot", installCommand: "npm install -g @github/copilot", loginUrl: "https://github.com/login/device", defaultModel: "default", baseUrl: "cli://copilot" }
+      copilot: { label: "GitHub Copilot subscription via Copilot CLI", command: "copilot", installCommand: "npm install -g @github/copilot", loginUrl: "https://github.com/login/device", defaultModel: "default", baseUrl: "cli://copilot" },
+      grok: GROK_CLI
     };
     CODEX_DISABLED_FEATURES = ["shell_tool", "unified_exec", "apply_patch_freeform", "view_image", "apps", "plugins", "hooks", "codex_hooks", "plugin_hooks", "multi_agent", "multi_agent_v2", "browser_use", "computer_use", "image_generation", "imagegenext", "js_repl", "code_mode", "code_mode_host", "memory_tool", "memories", "tool_suggest", "skill_search", "skill_mcp_dependency_install", "remote_plugin", "workspace_dependencies", "in_app_browser", "in_app_chat", "in_app_local_automation"];
   }
@@ -2490,8 +3820,8 @@ __export(auth_exports, {
   checkCliAuth: () => checkCliAuth,
   loginCli: () => loginCli
 });
-import { spawn as spawn5, execFile as execFile5 } from "node:child_process";
-import { mkdirSync as mkdirSync3 } from "node:fs";
+import { spawn as spawn5, execFile as execFile6 } from "node:child_process";
+import { mkdirSync as mkdirSync5 } from "node:fs";
 function openLoginPage(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
   const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
@@ -2506,13 +3836,38 @@ async function loginCli(provider, options = {}) {
   if (options.signal?.aborted) return { ok: false, detail: "Login canceled" };
   const env = cliEnvironment(provider, options.env);
   const directory = cliAuthDirectory(provider, env);
-  mkdirSync3(directory, { recursive: true, mode: 448 });
-  const device = options.deviceAuth !== false;
-  const args = ["login", ...device ? [provider === "codex" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
+  mkdirSync5(directory, { recursive: true, mode: 448 });
+  if (provider === "grok") {
+    try {
+      prepareCliProfile(provider, env);
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  const device = options.deviceAuth !== false || provider === "grok" && options.openBrowser === false;
+  const args = ["login", ...device ? [provider !== "copilot" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
   return new Promise((resolve22) => {
-    const child = spawn5(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: "inherit", shell: false });
+    const captureDeviceLink = provider === "grok" && device;
+    const child = spawn5(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: captureDeviceLink ? ["inherit", "pipe", "pipe"] : "inherit", shell: false });
+    let loginOutput = "", openedDevicePage = false;
+    const relay = (data, output) => {
+      output.write(data);
+      if (openedDevicePage || options.openBrowser === false) return;
+      loginOutput = (loginOutput + data.toString()).slice(-8e3);
+      const lastLine = loginOutput.lastIndexOf("\n");
+      if (lastLine < 0) return;
+      const url = grokDeviceLoginUrl(loginOutput.slice(0, lastLine));
+      if (url) {
+        openedDevicePage = true;
+        openLoginPage(url);
+      }
+    };
+    if (captureDeviceLink) {
+      child.stdout?.on("data", (data) => relay(data, process.stdout));
+      child.stderr?.on("data", (data) => relay(data, process.stderr));
+    }
     child.once("spawn", () => {
-      if (device && options.openBrowser !== false) openLoginPage(CLI_PROVIDERS[provider].loginUrl);
+      if (device && options.openBrowser !== false && provider !== "grok") openLoginPage(CLI_PROVIDERS[provider].loginUrl);
     });
     let timedOut = false;
     let forceKill;
@@ -2548,10 +3903,11 @@ async function checkCliAuth(provider, options = {}) {
   if (!(provider in CLI_PROVIDERS)) return { available: false, authenticated: false, detail: `Unknown CLI provider: ${provider}` };
   const env = cliEnvironment(provider, options.env);
   const run3 = (args) => new Promise((resolve22) => {
-    execFile5(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve22({ ok: !error, missing: error?.code === "ENOENT" }));
+    execFile6(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve22({ ok: !error, missing: error?.code === "ENOENT" }));
   });
   const version = await run3(["--version"]);
   if (!version.ok) return { available: false, authenticated: false, detail: version.missing ? missingCli(provider) : `${provider} CLI could not be checked. Update it and try again.` };
+  if (provider === "grok") return { available: true, authenticated: null, detail: "Grok Build CLI is installed. Authentication cannot be checked without starting a session; run 'rein login grok' for SuperGrok or X Premium+ sign-in." };
   if (provider === "copilot") return { available: true, authenticated: null, detail: "Copilot CLI is installed. Authentication cannot be checked without starting a session; run 'rein login copilot' if needed." };
   const status2 = await run3(["login", "status"]);
   return { available: true, authenticated: status2.ok, detail: status2.ok ? "Codex CLI reports authenticated in Rein's isolated profile." : "Codex CLI is not authenticated in Rein's profile. Run 'rein login codex'." };
@@ -2559,6 +3915,7 @@ async function checkCliAuth(provider, options = {}) {
 var init_auth = __esm({
   "src/harness/auth.ts"() {
     init_cli_provider();
+    init_xai();
   }
 });
 
@@ -2570,24 +3927,24 @@ __export(setup_exports, {
   runSetup: () => runSetup,
   testConnection: () => testConnection
 });
-import { mkdirSync as mkdirSync4, renameSync as renameSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync3 } from "node:fs";
-import { homedir as homedir6 } from "node:os";
-import { dirname as dirname2, join as join7 } from "node:path";
-import { randomUUID as randomUUID3 } from "node:crypto";
-import { execFile as execFile6 } from "node:child_process";
+import { mkdirSync as mkdirSync6, renameSync as renameSync3, unlinkSync as unlinkSync3, writeFileSync as writeFileSync5 } from "node:fs";
+import { homedir as homedir7 } from "node:os";
+import { dirname as dirname2, join as join10 } from "node:path";
+import { randomUUID as randomUUID4 } from "node:crypto";
+import { execFile as execFile7 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 function saveConfig(config) {
   const path2 = configPath();
-  mkdirSync4(dirname2(path2), { recursive: true, mode: 448 });
-  const temp = `${path2}.${randomUUID3()}.tmp`;
+  mkdirSync6(dirname2(path2), { recursive: true, mode: 448 });
+  const temp = `${path2}.${randomUUID4()}.tmp`;
   try {
-    writeFileSync3(temp, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 384 });
-    renameSync2(temp, path2);
+    writeFileSync5(temp, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 384 });
+    renameSync3(temp, path2);
   } finally {
     try {
-      unlinkSync2(temp);
+      unlinkSync3(temp);
     } catch {
     }
   }
@@ -2647,7 +4004,7 @@ async function openBrowser(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   try {
-    await promisify5(execFile6)(command, args, { timeout: 5e3 });
+    await promisify5(execFile7)(command, args, { timeout: 5e3 });
     return true;
   } catch {
     return false;
@@ -2756,29 +4113,43 @@ API key: ${config.apiKey ? "saved (hidden)" : "not saved"}`);
       return result2.ok ? 0 : 1;
     }
     if (opts.auth !== void 0 && opts.auth !== "api-key" && opts.auth !== "cli") throw new Error("--auth must be api-key or cli.");
-    if (opts.cliProvider && !(opts.cliProvider in CLI_PROVIDERS)) throw new Error("--cli-provider must be codex or copilot.");
+    const cliProviders = Object.keys(CLI_PROVIDERS);
+    if (opts.cliProvider && !cliProviders.includes(opts.cliProvider)) throw new Error(`--cli-provider must be ${cliProviders.join(", ")}.`);
     const envBase = process.env.REIN_BASE_URL?.trim() || void 0;
     const envModel = process.env.REIN_MODEL?.trim() || void 0;
     const selectedProvider = opts.provider?.trim().toLowerCase() || void 0;
     const explicitSelection = Boolean(selectedProvider || opts.baseUrl || opts.auth || opts.cliProvider || opts.sshHost || envBase);
     let selection = { label: "selected endpoint", provider: selectedProvider, baseUrl: opts.baseUrl?.trim() || (selectedProvider ? PROVIDER_PRESETS[selectedProvider]?.baseUrl : void 0) || envBase, model: opts.model?.trim() || envModel };
-    const cli = opts.cliProvider ?? (selection.provider === "codex" || selection.provider === "copilot" ? selection.provider : void 0);
+    const cli = opts.cliProvider ?? (cliProviders.includes(selection.provider) ? selection.provider : void 0);
     if (opts.auth === "api-key" && cli) throw new Error("CLI providers use --auth cli; API-key setup requires an HTTP provider or --base-url.");
     if ((opts.auth === "cli" || cli) && (opts.baseUrl || opts.sshHost || envBase)) throw new Error("CLI account setup does not accept --base-url, REIN_BASE_URL or --ssh; choose an HTTP API connection for those options.");
     if (opts.auth === "cli" || cli) {
       selection.cli = cli;
-      if (!selection.cli && opts.yes) throw new Error("CLI setup needs --cli-provider codex or --cli-provider copilot.");
-      if (!selection.cli) selection.cli = ["codex", "copilot"][await choose(getPrompt(), log, "Choose CLI account", [CLI_PROVIDERS.codex.label, CLI_PROVIDERS.copilot.label])];
+      if (!selection.cli && opts.yes) throw new Error(`CLI setup needs --cli-provider ${cliProviders.join(" | ")}.`);
+      if (!selection.cli) selection.cli = cliProviders[await choose(getPrompt(), log, "Choose CLI account", cliProviders.map((p) => CLI_PROVIDERS[p].label))];
     } else if (!explicitSelection && opts.yes && config.auth?.type === "cli") {
       selection.cli = config.auth.provider;
     } else if (!explicitSelection && !opts.yes) {
       log("rein setup \u2014 local server, remote host, cloud API, or CLI account");
-      const locals = await (dependencies.discover ?? discoverLocalServers)();
-      const choices = locals.map((server) => ({ ...server, label: `${server.provider} \u2014 ${server.baseUrl}` }));
-      choices.push({ label: "Custom Chat Completions API / remote host (LAN, VPN, mesh)", provider: "custom" });
-      choices.push(...["codex", "copilot"].map((provider2) => ({ label: CLI_PROVIDERS[provider2].label, cli: provider2 })));
-      for (const [provider2, preset] of Object.entries(PROVIDER_PRESETS)) if (!LOCAL.has(provider2) && provider2 !== "github") choices.push({ label: `${provider2} \u2014 cloud API key`, provider: provider2, baseUrl: preset.baseUrl });
-      selection = { ...choices[await choose(getPrompt(), log, "Choose connection", choices.map((c) => c.label))], model: selection.model };
+      await (dependencies.servingAdvice ?? printServingAdvice)(false, log);
+      for (; ; ) {
+        log(opts.discoverNetwork === false ? "Checking localhost and configured endpoints\u2026" : "Checking localhost, configured endpoints, and known LAN/mesh peers (up to 10 seconds)\u2026");
+        const report = dependencies.discover && !dependencies.discoverServers ? void 0 : await (dependencies.discoverServers ?? discoverServers2)({ network: opts.discoverNetwork !== false, hosts: opts.discoverHosts, ports: opts.discoverPorts });
+        if (report) printDiscoverySummary(report, log);
+        const servers = report?.servers ?? await dependencies.discover();
+        const choices = servers.map((server) => ({ ...server, label: `${server.provider} \u2014 ${server.baseUrl}${server.sshHost ? ` via SSH ${server.sshHost}` : ""}${"status" in server ? ` [${server.status}]` : ""}` }));
+        choices.push({ label: "Custom Chat Completions API / remote host (LAN, VPN, mesh)", provider: "custom" });
+        choices.push(...cliProviders.map((provider2) => ({ label: CLI_PROVIDERS[provider2].label, cli: provider2 })));
+        for (const [provider2, preset] of Object.entries(PROVIDER_PRESETS)) if (!LOCAL.has(provider2)) choices.push({ label: `${provider2} \u2014 cloud API key`, provider: provider2, baseUrl: preset.baseUrl });
+        choices.push({ label: "Help me host a model \u2014 hardware fit and serving recipes", hardware: true });
+        const picked = choices[await choose(getPrompt(), log, "Choose connection", choices.map((c) => c.label))];
+        if (!picked.hardware) {
+          selection = { ...picked, model: selection.model };
+          break;
+        }
+        await (dependencies.servingAdvice ?? printServingAdvice)(true, log);
+        await getPrompt().ask("Start a server using a recipe in another terminal, then press Enter to scan again (or choose a cloud connection next): ");
+      }
     }
     if (selection.cli) {
       if (requestedApi !== void 0) throw new Error("Chat Completions requires an HTTP API provider. CLI subscriptions manage their own transport.");
@@ -2810,16 +4181,20 @@ Install with: ${info.installCommand}`);
     }
     validateHttpApi(requestedApi ?? config.api);
     if (selection.provider === "github") throw new Error(GITHUB_MODELS_RETIRED);
-    if (selection.provider && selection.provider !== "custom" && !PROVIDER_PRESETS[selection.provider]) throw new Error(`Unknown API provider "${selection.provider}". Use --base-url for a custom host.`);
+    if (selection.provider && !["custom", "openai-compatible"].includes(selection.provider) && !PROVIDER_PRESETS[selection.provider]) throw new Error(`Unknown API provider "${selection.provider}". Use --base-url for a custom host.`);
     selection.baseUrl ??= selection.provider && PROVIDER_PRESETS[selection.provider]?.baseUrl;
     if (!selection.baseUrl && opts.yes && !opts.provider) {
       selection.baseUrl = config.auth?.type !== "cli" ? config.baseUrl : void 0;
       selection.provider ??= config.provider;
       if (!selection.baseUrl) {
-        const local = (await (dependencies.discover ?? discoverLocalServers)())[0];
+        const expanded = opts.discoverNetwork || opts.discoverHosts?.length || opts.discoverPorts?.length;
+        const report = expanded ? await (dependencies.discoverServers ?? discoverServers2)({ network: opts.discoverNetwork === true, hosts: opts.discoverHosts, ports: opts.discoverPorts }) : void 0;
+        if (report) printDiscoverySummary(report, log);
+        const local = report ? report.servers.find((s) => s.status === "ready") : (await (dependencies.discover ?? discoverLocalServers)())[0];
         if (local) {
           selection.baseUrl = local.baseUrl;
           selection.provider = local.provider;
+          if ("sshHost" in local && typeof local.sshHost === "string") selection.sshHost = local.sshHost;
         }
       }
     }
@@ -2829,26 +4204,33 @@ Install with: ${info.installCommand}`);
       selection.baseUrl = await getPrompt().ask("Server URL or host:port: ");
     }
     let baseUrl = normalizeBaseUrl(selection.baseUrl);
-    const inferredProvider = Object.entries(PROVIDER_PRESETS).find(([, preset]) => normalizeBaseUrl(preset.baseUrl) === baseUrl)?.[0];
-    let provider = (!selection.provider || selection.provider === "custom" ? inferredProvider : selection.provider) ?? "custom";
+    const inferredProvider = Object.entries(PROVIDER_PRESETS).find(([name, preset]) => !LOCAL.has(name) && normalizeBaseUrl(preset.baseUrl) === baseUrl)?.[0];
+    let provider = (!selection.provider || ["custom", "openai-compatible"].includes(selection.provider) ? inferredProvider : selection.provider) ?? "custom";
     let sameEndpoint = false;
     try {
-      sameEndpoint = Boolean(config.baseUrl && config.auth?.type !== "cli" && normalizeBaseUrl(config.baseUrl) === baseUrl && (!config.provider || config.provider === provider || provider === "custom"));
+      sameEndpoint = Boolean(config.baseUrl && config.auth?.type !== "cli" && normalizeBaseUrl(config.baseUrl) === baseUrl);
     } catch {
     }
-    let sshHost = opts.sshHost ?? (sameEndpoint ? config.sshHost : void 0);
-    if (!opts.yes && !sshHost && provider === "custom") {
+    let sshHost = opts.sshHost ?? selection.sshHost ?? (sameEndpoint ? config.sshHost : void 0);
+    if (!opts.yes && !sshHost && provider === "custom" && !selection.status) {
       log("If the remote API listens only on 127.0.0.1, Rein can reach it through an SSH host from your SSH config (for example, model-host).");
       sshHost = await getPrompt().ask("SSH host (optional; Enter for direct LAN or mesh access): ") || void 0;
     }
     const sameConnection = sameEndpoint && (config.sshHost ?? void 0) === sshHost;
     let model = selection.model ?? (sameConnection ? config.model : void 0);
-    let key = keyFor2(provider, baseUrl, sshHost);
-    if (!sameConnection && key === config.apiKey && !process.env.REIN_API_KEY && !process.env[PROVIDER_PRESETS[provider]?.keyEnv ?? "REIN_API_KEY"]) key = void 0;
+    const credentialProvider = provider === "custom" && !sshHost ? Object.entries(PROVIDER_PRESETS).find(([name, preset]) => LOCAL.has(name) && normalizeBaseUrl(preset.baseUrl) === baseUrl)?.[0] ?? provider : provider;
+    let key = keyFor2(credentialProvider, baseUrl, sshHost);
+    if (!sameConnection && key === config.apiKey && !process.env.REIN_API_KEY && !process.env[PROVIDER_PRESETS[credentialProvider]?.keyEnv ?? "REIN_API_KEY"]) key = void 0;
     if (key) secrets.add(key);
     let saveKey = sameConnection && key === config.apiKey ? config.apiKey : void 0;
-    const keyEnv = PROVIDER_PRESETS[provider]?.keyEnv ?? "REIN_API_KEY";
+    const keyEnv = PROVIDER_PRESETS[credentialProvider]?.keyEnv ?? "REIN_API_KEY";
     if (process.env.REIN_API_KEY || process.env[keyEnv]) saveKey = void 0;
+    if (selection.status === "auth-required" && key && /Authentication was rejected/.test(selection.error ?? "")) {
+      if (process.env.REIN_API_KEY === key || process.env[keyEnv] === key) throw new Error(`This server rejected the environment credential. Correct or unset ${process.env.REIN_API_KEY === key ? "REIN_API_KEY" : keyEnv}, then rerun setup.`);
+      log("The server rejected its saved credential. Enter a replacement key; the existing configuration stays intact until a chat reply passes.");
+      key = void 0;
+      saveKey = void 0;
+    }
     const cloud = Boolean(PROVIDER_PRESETS[provider] && !LOCAL.has(provider));
     if (!key && !opts.yes) {
       const url = API_KEY_PAGES[provider];
@@ -2862,7 +4244,7 @@ Install with: ${info.installCommand}`);
         saveKey = key;
       }
     }
-    if (cloud && !key) throw new Error(`No API key for ${provider}. Set ${keyEnv} and rerun setup; API keys are separate from CLI subscriptions.`);
+    if (cloud && !key) throw new Error(`No API key for ${provider}. Set ${keyEnv} and rerun setup${provider === "xai" ? ", or choose --provider grok for SuperGrok / X Premium+ CLI sign-in" : "; choose a supported CLI provider for subscription sign-in"}.`);
     const endpoint = await detect(baseUrl, { provider, apiKey: key, sshHost });
     baseUrl = endpoint.baseUrl;
     provider = endpoint.provider;
@@ -2901,6 +4283,8 @@ var init_setup = __esm({
   "src/harness/setup.ts"() {
     init_models();
     init_auth();
+    init_xai();
+    init_server_setup();
     init_ssh();
     init_chat_request();
     init_endpoints();
@@ -2908,6 +4292,7 @@ var init_setup = __esm({
     LOCAL = /* @__PURE__ */ new Set(["ollama", "lmstudio", "llamacpp", "vllm"]);
     API_KEY_PAGES = {
       openai: "https://platform.openai.com/api-keys",
+      xai: XAI_API_KEY_PAGE,
       deepseek: "https://platform.deepseek.com/api_keys",
       groq: "https://console.groq.com/keys",
       together: "https://api.together.ai/settings/api-keys",
@@ -2918,380 +4303,31 @@ var init_setup = __esm({
       huggingface: "https://huggingface.co/settings/tokens",
       gemini: "https://aistudio.google.com/apikey"
     };
-    configPath = () => join7(process.env.REIN_HOME || join7(homedir6(), ".rein"), "config.json");
-  }
-});
-
-// src/harness/operator-profile.ts
-import { mkdirSync as mkdirSync5, readFileSync as readFileSync3, writeFileSync as writeFileSync4, renameSync as renameSync3, unlinkSync as unlinkSync3, lstatSync as lstatSync2, openSync, closeSync } from "node:fs";
-import { homedir as homedir7 } from "node:os";
-import { join as join8 } from "node:path";
-import { createHash as createHash3, randomUUID as randomUUID4 } from "node:crypto";
-function exactKeys(value, keys, label) {
-  if (Object.keys(value).length !== keys.length || keys.some((key) => !own(value, key))) throw new Error(`${label} must contain exactly ${keys.join(", ")}.`);
-}
-function scoreOperatorProfile(answers) {
-  if (!record(answers)) throw new Error("Operator answers must be an object.");
-  exactKeys(answers, ITEMS.map((item) => item.id), "Operator answers");
-  const tallies = { focus: {}, density: {}, autonomy: {}, surface: {} };
-  for (const item of ITEMS) {
-    const choice = item.choices.find((candidate) => candidate.id === answers[item.id]);
-    if (!choice) throw new Error(`Invalid answer for ${item.id}; choose ${item.choices.map((candidate) => candidate.id).join(", ")}.`);
-    for (const axis of Object.keys(choice.weights)) {
-      const [label, weight] = choice.weights[axis];
-      tallies[axis][label] = (tallies[axis][label] ?? 0) + weight;
-    }
-  }
-  const operator_profile = { ...DEFAULTS };
-  let tied = false;
-  for (const axis of Object.keys(AXES)) {
-    const maximum = Math.max(0, ...Object.values(tallies[axis]));
-    const winners = AXES[axis].filter((label) => (tallies[axis][label] ?? 0) === maximum);
-    if (winners.length === 1) operator_profile[axis] = winners[0];
-    else tied = true;
-  }
-  const recommended_pack = (tied ? void 0 : Object.keys(PACKS).find((name) => Object.entries(PACKS[name].rule).every(([axis, value]) => operator_profile[axis] === value))) ?? "ops";
-  return { operator_profile, recommended_pack, answers: { q1: answers.q1, q2: answers.q2, q3: answers.q3, q4: answers.q4 }, tallies };
-}
-function createOperatorProfile(answers, enabledPack) {
-  if (enabledPack !== null && !own(PACKS, enabledPack)) throw new Error("Enabled pack must be ship, ops, study, studio, or null.");
-  return { version: 1, ...scoreOperatorProfile(answers), enabled_pack: enabledPack, enabled_skills: enabledPack === null ? [] : [...PACKS[enabledPack].skills] };
-}
-function sameValues(actual, expected) {
-  if (Array.isArray(expected)) return Array.isArray(actual) && expected.length === actual.length && expected.every((value, index) => sameValues(actual[index], value));
-  if (record(expected)) return record(actual) && Object.keys(actual).length === Object.keys(expected).length && Object.keys(expected).every((key) => own(actual, key) && sameValues(actual[key], expected[key]));
-  return actual === expected;
-}
-function validateProfile(value) {
-  if (!record(value)) throw new Error("Profile must be a mapping.");
-  exactKeys(value, ["version", "operator_profile", "recommended_pack", "enabled_pack", "enabled_skills", "answers", "tallies"], "Profile");
-  if (value.version !== 1) throw new Error("Unsupported profile version; expected 1.");
-  if (!record(value.answers)) throw new Error("Profile answers are missing.");
-  const expected = createOperatorProfile(value.answers, value.enabled_pack);
-  if (!sameValues(value, expected)) throw new Error("Profile values do not match its fixed answers and pack skills.");
-  return expected;
-}
-function yamlScalar(value) {
-  return JSON.stringify(value);
-}
-function profileYaml(profile) {
-  const lines = ["# Private Rein operator profile. Rerun rein setup profile to change these preferences.", "version: 1", "operator_profile:"];
-  for (const axis of Object.keys(AXES)) lines.push(`  ${axis}: ${yamlScalar(profile.operator_profile[axis])}`);
-  lines.push(`recommended_pack: ${yamlScalar(profile.recommended_pack)}`, `enabled_pack: ${yamlScalar(profile.enabled_pack)}`, `enabled_skills: ${yamlScalar(profile.enabled_skills)}`, "answers:");
-  for (const item of ITEMS) lines.push(`  ${item.id}: ${yamlScalar(profile.answers[item.id])}`);
-  lines.push("tallies:");
-  for (const axis of Object.keys(AXES)) {
-    lines.push(`  ${axis}:`);
-    for (const [label, value] of Object.entries(profile.tallies[axis])) lines.push(`    ${label}: ${value}`);
-  }
-  return lines.join("\n") + "\n";
-}
-function parseProfileYaml(text) {
-  const result = {};
-  const parents = [{ indent: -2, value: result }];
-  for (const [index, line] of text.split(/\r?\n/).entries()) {
-    if (/^\s*(?:#.*)?$/.test(line)) continue;
-    const match = /^( *)([a-z][a-z0-9_]*):(?: +(.*))?$/.exec(line);
-    if (!match || match[1].length % 2) throw new Error(`Unsupported YAML on line ${index + 1}.`);
-    const indent = match[1].length, key = match[2], raw = match[3]?.trim();
-    while (parents.length > 1 && parents[parents.length - 1].indent >= indent) parents.pop();
-    const parent = parents[parents.length - 1];
-    if (indent !== parent.indent + 2 || own(parent.value, key) || key === "__proto__" || key === "constructor" || key === "prototype") throw new Error(`Invalid YAML mapping on line ${index + 1}.`);
-    if (!raw) {
-      const child = {};
-      parent.value[key] = child;
-      parents.push({ indent, value: child });
-    } else {
-      try {
-        parent.value[key] = JSON.parse(raw);
-      } catch {
-        if (/^[a-z][a-z0-9_-]*$/.test(raw)) parent.value[key] = raw;
-        else throw new Error(`Unsupported YAML value on line ${index + 1}.`);
-      }
-    }
-  }
-  return result;
-}
-function readOptionalFile(path2) {
-  try {
-    const stat3 = lstatSync2(path2);
-    if (!stat3.isFile() || stat3.isSymbolicLink()) throw new Error(`${path2} must be a regular file, not a link or directory.`);
-    if (stat3.size > MAX_FILE_BYTES) throw new Error(`${path2} is too large; keep operator files below ${MAX_FILE_BYTES / 1024} KiB.`);
-    return readFileSync3(path2, "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return void 0;
-    throw error;
-  }
-}
-function assertNoProfileSave(home) {
-  const lock = join8(home, ".operator-profile.lock");
-  try {
-    lstatSync2(lock);
-  } catch (error) {
-    if (error.code === "ENOENT") return;
-    throw error;
-  }
-  throw new Error(`Operator-profile save is in progress or was interrupted. Wait for setup to finish. If it stopped, check ${join8(home, ".operator-profile-backups")} and restore a consistent set of original files if needed. Remove ${lock} only after confirming no setup is running, then rerun rein setup profile.`);
-}
-function readOperatorSnapshot(home) {
-  const files = {}, digest3 = createHash3("sha256");
-  for (const name of OPERATOR_FILES) {
-    const text = readOptionalFile(join8(home, name));
-    files[name] = text;
-    digest3.update(JSON.stringify([name, text ?? null]));
-  }
-  return { files, fingerprint: digest3.digest("hex") };
-}
-function readStableOperatorSnapshot(home) {
-  assertNoProfileSave(home);
-  const snapshot = readOperatorSnapshot(home);
-  assertNoProfileSave(home);
-  const after = readOperatorSnapshot(home);
-  assertNoProfileSave(home);
-  if (snapshot.fingerprint !== after.fingerprint) throw new Error("Operator files changed while being read. Retry after the edit or setup finishes.");
-  return snapshot;
-}
-function operatorFilesFingerprint(home) {
-  return readStableOperatorSnapshot(profileHome(home)).fingerprint;
-}
-function readOperatorProfile(home) {
-  const dir = profileHome(home), path2 = join8(dir, "profile.yaml");
-  try {
-    const text = readStableOperatorSnapshot(dir).files["profile.yaml"];
-    return text === void 0 ? {} : { profile: validateProfile(parseProfileYaml(text)) };
-  } catch (error) {
-    return { diagnostic: `Could not load ${path2}: ${error instanceof Error ? error.message : String(error)} Run rein setup profile to review and recreate it; original files are preserved until you save.` };
-  }
-}
-function mergeManaged(existing, body, name) {
-  const block = `${START}
-${body.trim()}
-${END}`;
-  if (!existing) return `${block}
-`;
-  const starts = existing.split(START).length - 1, ends = existing.split(END).length - 1;
-  if (!starts && !ends) return `${existing}${existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n"}${block}
-`;
-  if (starts !== 1 || ends !== 1 || existing.indexOf(START) >= existing.indexOf(END)) throw new Error(`${name} has incomplete or duplicate Rein managed markers. Repair those markers before saving; your file was not changed.`);
-  return existing.slice(0, existing.indexOf(START)) + block + existing.slice(existing.indexOf(END) + END.length);
-}
-function documentBodies(profile) {
-  const vector = profile.operator_profile;
-  const density = {
-    terse: "Use concise bullets and stop when the answer is complete. Give critical context before optional detail.",
-    normal: "Use short, connected paragraphs. Explain the result and the next useful step.",
-    walkthrough: "Guide the operator step by step. Explain why each step matters and how to confirm it worked."
-  }[vector.density];
-  const autonomy = {
-    ask: "Ask before consequential changes. Do read-only investigation and prepare a concrete proposal while waiting.",
-    plan: "Present a short plan, then carry out work already authorized by the operator. Pause at any required approval.",
-    yolo: "Within the operator's authorized scope, carry out routine reversible work and report the result. Required approvals still apply."
-  }[vector.autonomy];
-  return {
-    "SOUL.md": `# Rein voice
-
-Be direct, curious, and practical. Address the operator as a collaborator.
-${density}
-Describe observed results and uncertainty accurately. Never claim work or learning that has not happened.`,
-    "USER.md": `# Operator work preferences
-
-These are the operator's explicit work-style choices and can be revised at any time.
-- Main focus: ${vector.focus}.
-- Response density: ${vector.density}.
-- Working autonomy: ${vector.autonomy}.
-- Preferred surface: ${vector.surface}.
-
-${density}
-${autonomy}
-For long tasks, give progress checkpoints and make the next action easy to find. Ask about pacing when needed; do not infer the operator's ability from these choices.`,
-    "AGENTS.md": `# Rein operating brief
-
-Use this private profile alongside the current project's instructions.
-${autonomy}
-
-- Investigate the task, perform authorized work, and verify the outcome.
-- Suggest useful follow-ups from relevant history; let the operator accept, edit, or skip them.
-- Keep durable notes grounded in confirmed decisions. Review proposed changes to this profile with the operator.
-- This profile does not grant tool permissions, start background services, install external software, or connect chat or voice accounts.
-- Existing approval rules and project constraints continue to apply.
-- Recommended skill pack: ${profile.recommended_pack}. Enabled pack: ${profile.enabled_pack ?? "none (skipped)"}.
-- Enabled pack skills: ${profile.enabled_skills.length ? profile.enabled_skills.join(", ") : "none"}.`
-  };
-}
-function renderOperatorFiles(profile, home) {
-  const checked = validateProfile(profile), dir = profileHome(home), bodies = documentBodies(checked);
-  return {
-    "SOUL.md": mergeManaged(readOptionalFile(join8(dir, "SOUL.md")), bodies["SOUL.md"], "SOUL.md"),
-    "USER.md": mergeManaged(readOptionalFile(join8(dir, "USER.md")), bodies["USER.md"], "USER.md"),
-    "AGENTS.md": mergeManaged(readOptionalFile(join8(dir, "AGENTS.md")), bodies["AGENTS.md"], "AGENTS.md"),
-    "profile.yaml": profileYaml(checked)
-  };
-}
-function saveOperatorProfile(profile, options = {}) {
-  validateProfile(profile);
-  const home = profileHome(options.home);
-  mkdirSync5(home, { recursive: true, mode: 448 });
-  const lock = join8(home, ".operator-profile.lock");
-  let lockFd;
-  try {
-    lockFd = openSync(lock, "wx", 384);
-  } catch (error) {
-    if (error.code === "EEXIST") throw new Error("Another operator-profile save is in progress. Retry after it finishes; if it crashed, remove .operator-profile.lock after confirming no setup is running.");
-    throw error;
-  }
-  const originals = /* @__PURE__ */ new Map(), staged = /* @__PURE__ */ new Map(), written = [];
-  let backupDirectory;
-  try {
-    const snapshot = readOperatorSnapshot(home);
-    if (options.expectedFingerprint !== void 0 && options.expectedFingerprint !== snapshot.fingerprint) throw new Error("Operator files changed after the preview. Nothing was saved. Restart the profile preview with rein setup profile and review the new contents.");
-    for (const name of OPERATOR_FILES) originals.set(name, snapshot.files[name]);
-    const rendered = renderOperatorFiles(profile, home);
-    const changed = OPERATOR_FILES.filter((name) => originals.get(name) !== rendered[name]);
-    const existing = changed.filter((name) => originals.get(name) !== void 0);
-    if (existing.length) {
-      backupDirectory = join8(home, ".operator-profile-backups", `${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${randomUUID4()}`);
-      mkdirSync5(backupDirectory, { recursive: true, mode: 448 });
-      for (const name of existing) writeFileSync4(join8(backupDirectory, name), originals.get(name), { flag: "wx", mode: 384 });
-    }
-    for (const name of changed) {
-      const temp = join8(home, `.${name}.${randomUUID4()}.tmp`);
-      writeFileSync4(temp, rendered[name], { flag: "wx", mode: 384 });
-      staged.set(name, temp);
-    }
-    for (const name of OPERATOR_FILES) if (readOptionalFile(join8(home, name)) !== originals.get(name)) throw new Error(`${name} changed during setup. Nothing was saved; review the new contents and try again.`);
-    for (const name of changed) {
-      renameSync3(staged.get(name), join8(home, name));
-      staged.delete(name);
-      written.push(name);
-    }
-    return { paths: OPERATOR_FILES.map((name) => join8(home, name)), changed, ...backupDirectory ? { backupDirectory } : {} };
-  } catch (error) {
-    for (const name of written.reverse()) {
-      const original = originals.get(name), target = join8(home, name);
-      try {
-        if (original === void 0) unlinkSync3(target);
-        else {
-          const temp = join8(home, `.${name}.${randomUUID4()}.restore`);
-          writeFileSync4(temp, original, { flag: "wx", mode: 384 });
-          renameSync3(temp, target);
-        }
-      } catch {
-        throw new Error(`Operator-profile save could not be restored completely. Recover the original files from ${backupDirectory ?? home}.`);
-      }
-    }
-    throw error;
-  } finally {
-    for (const temp of staged.values()) {
-      try {
-        unlinkSync3(temp);
-      } catch {
-      }
-    }
-    closeSync(lockFd);
-    unlinkSync3(lock);
-  }
-}
-function prioritizeManagedGuidance(content, name) {
-  const starts = content.split(START).length - 1, ends = content.split(END).length - 1;
-  if (!starts && !ends) return content;
-  const start = content.indexOf(START), end = content.indexOf(END);
-  if (starts !== 1 || ends !== 1 || start >= end) throw new Error(`${name} has incomplete or duplicate Rein managed markers. Repair those markers before loading operator guidance.`);
-  const managed = content.slice(start, end + END.length);
-  const notes = (content.slice(0, start) + content.slice(end + END.length)).trim();
-  return notes ? `${managed}
-
-Additional operator notes:
-${notes}` : managed;
-}
-function readOperatorGuidance(home, maxCharacters = 6e3) {
-  const limit = Number.isFinite(maxCharacters) ? Math.max(0, Math.min(12e3, Math.floor(maxCharacters))) : 6e3;
-  const perFile = Math.max(0, Math.floor(limit / 3) - 24);
-  try {
-    const snapshot = readStableOperatorSnapshot(profileHome(home));
-    if (snapshot.files["profile.yaml"] === void 0) return { text: "" };
-    validateProfile(parseProfileYaml(snapshot.files["profile.yaml"]));
-    const sections = ["SOUL.md", "USER.md", "AGENTS.md"].flatMap((name) => {
-      const content = snapshot.files[name];
-      if (!content) return [];
-      const prioritized = prioritizeManagedGuidance(content, name);
-      return [`## ${name}
-${prioritized.slice(0, perFile)}${prioritized.length > perFile ? "\n[truncated]" : ""}`];
-    });
-    return { text: sections.join("\n\n").slice(0, limit) };
-  } catch (error) {
-    return { text: "", diagnostic: `Could not load operator guidance: ${error instanceof Error ? error.message : String(error)} Run rein setup profile to review your private Rein files.` };
-  }
-}
-var AXES, ITEMS, PACKS, OPERATOR_FILES, DEFAULTS, START, END, MAX_FILE_BYTES, profileHome, record, own;
-var init_operator_profile = __esm({
-  "src/harness/operator-profile.ts"() {
-    AXES = {
-      focus: ["coding", "ops", "research", "creative"],
-      density: ["terse", "normal", "walkthrough"],
-      autonomy: ["ask", "plan", "yolo"],
-      surface: ["cli", "chat", "voice"]
-    };
-    ITEMS = [
-      { id: "q1", prompt: "When the agent talks, I want\u2026", choices: [
-        { id: "a", label: "Bullets, then stop", weights: { density: ["terse", 2] } },
-        { id: "b", label: "Short paragraphs", weights: { density: ["normal", 2] } },
-        { id: "c", label: "Step by step, with why", weights: { density: ["walkthrough", 2] } }
-      ] },
-      { id: "q2", prompt: "Most days I will use this for\u2026", choices: [
-        { id: "a", label: "Shipping code", weights: { focus: ["coding", 2] } },
-        { id: "b", label: "Keeping machines and services running", weights: { focus: ["ops", 2] } },
-        { id: "c", label: "Reading, writing, and research", weights: { focus: ["research", 2] } },
-        { id: "d", label: "Images, video, and design", weights: { focus: ["creative", 2] } }
-      ] },
-      { id: "q3", prompt: "When a change is risky, the agent should\u2026", choices: [
-        { id: "a", label: "Ask first", weights: { autonomy: ["ask", 2] } },
-        { id: "b", label: "Show a plan, then do it", weights: { autonomy: ["plan", 2] } },
-        { id: "c", label: "Do it, tell me after", weights: { autonomy: ["yolo", 2] } }
-      ] },
-      { id: "q4", prompt: "I will mostly talk to it from\u2026", choices: [
-        { id: "a", label: "Terminal", weights: { surface: ["cli", 2] } },
-        { id: "b", label: "Slack or chat", weights: { surface: ["chat", 2] } },
-        { id: "c", label: "Voice or phone", weights: { surface: ["voice", 2] } }
-      ] }
-    ];
-    PACKS = {
-      ship: { rule: { focus: "coding", density: "terse", autonomy: "yolo" }, skills: ["github-pr-workflow", "tdd", "caveman"] },
-      ops: { rule: { focus: "ops", density: "terse", autonomy: "plan" }, skills: ["hermes-agent", "fleet-command-ops", "execution-discipline"] },
-      study: { rule: { focus: "research", density: "walkthrough", autonomy: "ask" }, skills: ["grounded-citations", "plan"] },
-      studio: { rule: { focus: "creative", density: "normal", autonomy: "ask" }, skills: ["claude-design", "comfyui"] }
-    };
-    OPERATOR_FILES = ["SOUL.md", "USER.md", "AGENTS.md", "profile.yaml"];
-    DEFAULTS = { focus: "ops", density: "terse", autonomy: "plan", surface: "cli" };
-    START = "<!-- rein:operator-profile:start -->";
-    END = "<!-- rein:operator-profile:end -->";
-    MAX_FILE_BYTES = 256 * 1024;
-    profileHome = (home) => home ?? (process.env.REIN_HOME || join8(homedir7(), ".rein"));
-    record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-    own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+    configPath = () => join10(process.env.REIN_HOME || join10(homedir7(), ".rein"), "config.json");
   }
 });
 
 // src/harness/autonomy/state.ts
-import { existsSync as existsSync4, linkSync, lstatSync as lstatSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync4, realpathSync as realpathSync2, renameSync as renameSync4, statSync as statSync2, unlinkSync as unlinkSync4, writeFileSync as writeFileSync5 } from "node:fs";
+import { existsSync as existsSync5, linkSync, lstatSync as lstatSync4, mkdirSync as mkdirSync7, readFileSync as readFileSync5, realpathSync as realpathSync2, renameSync as renameSync4, statSync as statSync2, unlinkSync as unlinkSync4, writeFileSync as writeFileSync6 } from "node:fs";
 import { homedir as homedir8 } from "node:os";
-import { join as join9, resolve as resolve3 } from "node:path";
+import { join as join11, resolve as resolve3 } from "node:path";
 import { createHash as createHash4, randomUUID as randomUUID5 } from "node:crypto";
 function privateDirectory() {
   const directory = autonomyDirectory();
-  mkdirSync6(directory, { recursive: true, mode: 448 });
-  if (lstatSync3(directory).isSymbolicLink() || !lstatSync3(directory).isDirectory()) throw new Error("Autonomy state must be an ordinary directory.");
+  mkdirSync7(directory, { recursive: true, mode: 448 });
+  if (lstatSync4(directory).isSymbolicLink() || !lstatSync4(directory).isDirectory()) throw new Error("Autonomy state must be an ordinary directory.");
   return directory;
 }
 function regularFile(path2, lock = false) {
-  const stat3 = lstatSync3(path2);
+  const stat3 = lstatSync4(path2);
   if (!stat3.isFile() || stat3.isSymbolicLink() || !lock && stat3.nlink !== 1 || stat3.size > (lock ? 1024 : 4e6)) throw new Error("Autonomy state must be a bounded regular file without links.");
 }
 function readState() {
-  if (existsSync4(autonomyDirectory()) && lstatSync3(autonomyDirectory()).isSymbolicLink()) throw new Error("Autonomy state directory cannot be a symbolic link.");
-  const path2 = join9(autonomyDirectory(), "state.json");
-  if (!existsSync4(path2)) return initialState();
+  if (existsSync5(autonomyDirectory()) && lstatSync4(autonomyDirectory()).isSymbolicLink()) throw new Error("Autonomy state directory cannot be a symbolic link.");
+  const path2 = join11(autonomyDirectory(), "state.json");
+  if (!existsSync5(path2)) return initialState();
   regularFile(path2);
-  const state = JSON.parse(readFileSync4(path2, "utf8"));
+  const state = JSON.parse(readFileSync5(path2, "utf8"));
   return validateState(state);
 }
 function validateState(state) {
@@ -3316,7 +4352,7 @@ function validateState(state) {
 function deadLockOwner(path2, minimumAge) {
   try {
     regularFile(path2, true);
-    const owner = JSON.parse(readFileSync4(path2, "utf8"));
+    const owner = JSON.parse(readFileSync5(path2, "utf8"));
     if (!Number.isSafeInteger(owner.pid) || owner.pid < 1 || typeof owner.token !== "string" || Date.now() - statSync2(path2).mtimeMs < minimumAge) return false;
     try {
       process.kill(owner.pid, 0);
@@ -3331,15 +4367,15 @@ function deadLockOwner(path2, minimumAge) {
 function releaseOwnedLock(path2, token2) {
   try {
     regularFile(path2, true);
-    if (JSON.parse(readFileSync4(path2, "utf8")).token === token2) unlinkSync4(path2);
+    if (JSON.parse(readFileSync5(path2, "utf8")).token === token2) unlinkSync4(path2);
   } catch {
   }
 }
 function acquireLock(name) {
-  const path2 = join9(privateDirectory(), `${name}.lock`);
+  const path2 = join11(privateDirectory(), `${name}.lock`);
   const token2 = randomUUID5();
   const temp = `${path2}.${token2}.tmp`;
-  writeFileSync5(temp, JSON.stringify({ pid: process.pid, token: token2 }), { flag: "wx", mode: 384 });
+  writeFileSync6(temp, JSON.stringify({ pid: process.pid, token: token2 }), { flag: "wx", mode: 384 });
   try {
     try {
       linkSync(temp, path2);
@@ -3383,14 +4419,14 @@ async function updateState(change) {
     if (!unlock) await new Promise((resolve22) => setTimeout(resolve22, 100));
   }
   if (!unlock) throw new Error("Autonomy state is busy. Try again shortly.");
-  const temp = join9(autonomyDirectory(), `state-${randomUUID5()}.tmp`);
+  const temp = join11(autonomyDirectory(), `state-${randomUUID5()}.tmp`);
   try {
     const state = readState();
     change(state);
     state.runs = state.runs.slice(-200);
     validateState(state);
-    writeFileSync5(temp, JSON.stringify(state, null, 2) + "\n", { flag: "wx", mode: 384 });
-    renameSync4(temp, join9(autonomyDirectory(), "state.json"));
+    writeFileSync6(temp, JSON.stringify(state, null, 2) + "\n", { flag: "wx", mode: 384 });
+    renameSync4(temp, join11(autonomyDirectory(), "state.json"));
     return state;
   } finally {
     try {
@@ -3418,8 +4454,8 @@ async function decideProposal(id, status2, allowWrites = false) {
 var autonomyHome, autonomyDirectory, initialState, runsToday, proposalId;
 var init_state = __esm({
   "src/harness/autonomy/state.ts"() {
-    autonomyHome = () => resolve3(process.env.REIN_HOME || join9(homedir8(), ".rein"));
-    autonomyDirectory = () => join9(autonomyHome(), "autonomy");
+    autonomyHome = () => resolve3(process.env.REIN_HOME || join11(homedir8(), ".rein"));
+    autonomyDirectory = () => join11(autonomyHome(), "autonomy");
     initialState = () => ({ version: 1, paused: true, controlRevision: 0, workspaces: [], intervalMinutes: 60, maxRunsPerDay: 6, maxTurns: 8, timeoutSeconds: 180, proposals: [], runs: [] });
     runsToday = (state, now = Date.now()) => state.runs.filter((run3) => run3.started >= now - 864e5).length;
     proposalId = (draft) => createHash4("sha256").update(`${draft.workspace}
@@ -3431,8 +4467,8 @@ ${draft.title.trim().toLowerCase()}`).digest("hex").slice(0, 16);
 // src/agent/workspace.ts
 import { execFileSync } from "node:child_process";
 import { createHash as createHash5, randomUUID as randomUUID6 } from "node:crypto";
-import { lstatSync as lstatSync4, readFileSync as readFileSync5, realpathSync as realpathSync3 } from "node:fs";
-import { dirname as dirname3, join as join10, resolve as resolve4, sep } from "node:path";
+import { lstatSync as lstatSync5, readFileSync as readFileSync6, realpathSync as realpathSync3 } from "node:fs";
+import { dirname as dirname3, join as join12, resolve as resolve4, sep } from "node:path";
 function digest2(value) {
   return createHash5("sha256").update(value).digest("hex").slice(0, 24);
 }
@@ -3490,15 +4526,15 @@ function sharedNotesRoot(cwd) {
 }
 function sharedMemory(cwd, maxChars) {
   const root2 = sharedNotesRoot(cwd);
-  const path2 = join10(root2, ".pi", "notes", "MEMORY.md");
+  const path2 = join12(root2, ".pi", "notes", "MEMORY.md");
   try {
-    for (const directory of [root2, join10(root2, ".pi"), join10(root2, ".pi", "notes")]) {
-      const stat4 = lstatSync4(directory);
+    for (const directory of [root2, join12(root2, ".pi"), join12(root2, ".pi", "notes")]) {
+      const stat4 = lstatSync5(directory);
       if (!stat4.isDirectory() || stat4.isSymbolicLink()) return void 0;
     }
-    const stat3 = lstatSync4(path2);
+    const stat3 = lstatSync5(path2);
     if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink > 1) return void 0;
-    const text = readFileSync5(path2, "utf8").trim();
+    const text = readFileSync6(path2, "utf8").trim();
     return text ? text.slice(0, maxChars) : void 0;
   } catch {
     return void 0;
@@ -3506,9 +4542,9 @@ function sharedMemory(cwd, maxChars) {
 }
 function trimBlock(label, body, remaining) {
   if (!body?.trim() || remaining < label.length + 64) return void 0;
-  const limit = Math.max(0, remaining - label.length - 48);
+  const limit2 = Math.max(0, remaining - label.length - 48);
   return `${label}
-${body.length > limit ? body.slice(0, limit) + "\n[truncated; inspect with git/history]" : body}`;
+${body.length > limit2 ? body.slice(0, limit2) + "\n[truncated; inspect with git/history]" : body}`;
 }
 function diff(cwd, args) {
   return git(cwd, args, 2 * 1024 * 1024);
@@ -3557,27 +4593,27 @@ var init_workspace = __esm({
 });
 
 // src/agent/session.ts
-import { appendFileSync, existsSync as existsSync5, mkdirSync as mkdirSync7, readFileSync as readFileSync6, readdirSync, statSync as statSync3, writeFileSync as writeFileSync6 } from "node:fs";
+import { appendFileSync, existsSync as existsSync6, mkdirSync as mkdirSync8, readFileSync as readFileSync7, readdirSync as readdirSync2, statSync as statSync3, writeFileSync as writeFileSync7 } from "node:fs";
 import { homedir as homedir9 } from "node:os";
-import { join as join11 } from "node:path";
+import { join as join13 } from "node:path";
 import { randomUUID as randomUUID7, createHash as createHash6 } from "node:crypto";
 function newSessionId() {
   return `session-${Date.now()}-${randomUUID7().slice(0, 8)}`;
 }
 function sessionPath(id) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(id)) throw new Error("Invalid session id. Use the full id from /sessions.");
-  return join11(sessionsDir(), `${id}.jsonl`);
+  return join13(sessionsDir(), `${id}.jsonl`);
 }
 function createSession(opts) {
-  mkdirSync7(sessionsDir(), { recursive: true });
+  mkdirSync8(sessionsDir(), { recursive: true });
   const id = opts.id ?? newSessionId();
   const header = { ...opts, type: "header", version: 1, id, created: (/* @__PURE__ */ new Date()).toISOString() };
-  writeFileSync6(sessionPath(id), JSON.stringify(header) + "\n", { flag: "wx", mode: 384 });
+  writeFileSync7(sessionPath(id), JSON.stringify(header) + "\n", { flag: "wx", mode: 384 });
   return id;
 }
 function appendSessionEntry(sessionId, entry) {
   const path2 = sessionPath(sessionId);
-  if (!existsSync5(path2)) throw new Error(`No such session: ${sessionId}`);
+  if (!existsSync6(path2)) throw new Error(`No such session: ${sessionId}`);
   appendFileSync(path2, "\n" + JSON.stringify(entry) + "\n");
 }
 function windowMessage(window) {
@@ -3623,12 +4659,12 @@ function validWindowStart(messages, start) {
 }
 function loadSession(sessionId) {
   const path2 = sessionPath(sessionId);
-  if (!existsSync5(path2)) throw new Error(`No such session: ${sessionId}`);
+  if (!existsSync6(path2)) throw new Error(`No such session: ${sessionId}`);
   let header = null;
   const messages = [];
   const entries = [];
   let window;
-  for (const [index, line] of readFileSync6(path2, "utf8").split("\n").entries()) {
+  for (const [index, line] of readFileSync7(path2, "utf8").split("\n").entries()) {
     if (!line.trim()) continue;
     try {
       const obj = JSON.parse(line);
@@ -3657,7 +4693,7 @@ function loadSession(sessionId) {
 function latestWorkspaceSnapshot(entries) {
   return entries.filter(isWorkspaceSnapshot).at(-1);
 }
-function workspaceMemoryRecords(scope, excludeSessionId, limit = 8) {
+function workspaceMemoryRecords(scope, excludeSessionId, limit2 = 8) {
   const records = [];
   for (const session of listSessions(Number.MAX_SAFE_INTEGER)) {
     if (session.id === excludeSessionId) continue;
@@ -3670,12 +4706,12 @@ function workspaceMemoryRecords(scope, excludeSessionId, limit = 8) {
     } catch {
     }
   }
-  return records.sort((a, b) => b.snapshot.timestamp - a.snapshot.timestamp).slice(0, limit);
+  return records.sort((a, b) => b.snapshot.timestamp - a.snapshot.timestamp).slice(0, limit2);
 }
-function listSessions(limit = 20) {
+function listSessions(limit2 = 20) {
   let files;
   try {
-    files = readdirSync(sessionsDir()).filter((f) => f.endsWith(".jsonl"));
+    files = readdirSync2(sessionsDir()).filter((f) => f.endsWith(".jsonl"));
   } catch {
     return [];
   }
@@ -3688,7 +4724,7 @@ function listSessions(limit = 20) {
     } catch {
     }
   }
-  return out.sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, limit);
+  return out.sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, limit2);
 }
 function branchSession(sourceId, upToMessageIndex, newId) {
   const { header, entries, messages } = loadSession(sourceId);
@@ -3706,7 +4742,7 @@ var sessionsDir;
 var init_session = __esm({
   "src/agent/session.ts"() {
     init_workspace();
-    sessionsDir = () => join11(process.env.REIN_HOME || join11(homedir9(), ".rein"), "sessions");
+    sessionsDir = () => join13(process.env.REIN_HOME || join13(homedir9(), ".rein"), "sessions");
   }
 });
 
@@ -3818,8 +4854,8 @@ async function agentLoop(prompts, context, config, signal, emit) {
   }
   const maxTurns = config.maxTurns ?? 60;
   let repeatState = initialDoomLoopState;
-  const stopIncomplete = async (reason) => {
-    const stopped = { role: "assistant", content: [], stopReason: "error", errorMessage: `Harness stopped: ${reason}. Work may be incomplete. Review the last results before continuing.`, model: config.model.id, provider: config.model.provider, usage: { input: 0, output: 0, totalTokens: 0 }, timestamp: Date.now() };
+  const stopIncomplete = async (reason2) => {
+    const stopped = { role: "assistant", content: [], stopReason: "error", errorMessage: `Harness stopped: ${reason2}. Work may be incomplete. Review the last results before continuing.`, model: config.model.id, provider: config.model.provider, usage: { input: 0, output: 0, totalTokens: 0 }, timestamp: Date.now() };
     ctx.messages.push(stopped);
     newMessages.push(stopped);
     await emit({ type: "message_start", message: stopped });
@@ -3940,12 +4976,12 @@ async function streamAssistantResponse(ctx, config, signal, emit) {
   await emit({ type: "message_end", message: final });
   return final;
 }
-async function failTruncatedToolCalls(toolCalls, ctx, emit, reason = "the response hit the output token limit, so its arguments may be truncated") {
+async function failTruncatedToolCalls(toolCalls, ctx, emit, reason2 = "the response hit the output token limit, so its arguments may be truncated") {
   const messages = [];
   for (const tc of toolCalls) {
     await emit({ type: "tool_execution_start", toolCallId: tc.id, toolName: tc.name, args: tc.arguments });
     const result = {
-      content: `Tool call "${tc.name}" was not executed: ${reason}. Re-issue it with complete arguments.`,
+      content: `Tool call "${tc.name}" was not executed: ${reason2}. Re-issue it with complete arguments.`,
       isError: true
     };
     await emit({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError: true });
@@ -4070,12 +5106,12 @@ var init_agent_loop = __esm({
 });
 
 // src/ai/compat.ts
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync7, mkdirSync as mkdirSync8, existsSync as existsSync6 } from "node:fs";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync8, mkdirSync as mkdirSync9, existsSync as existsSync7 } from "node:fs";
 import { homedir as homedir10 } from "node:os";
-import { join as join12 } from "node:path";
+import { join as join14 } from "node:path";
 function readStore() {
   try {
-    if (existsSync6(storePath())) return JSON.parse(readFileSync7(storePath(), "utf8"));
+    if (existsSync7(storePath())) return JSON.parse(readFileSync8(storePath(), "utf8"));
   } catch {
   }
   return {};
@@ -4089,9 +5125,9 @@ function decideToolMode(provider, modelId, forced = "auto") {
   if (forced !== "auto") {
     const mode = { mode: forced, source: "forced" };
     try {
-      mkdirSync8(reinHome(), { recursive: true });
+      mkdirSync9(reinHome(), { recursive: true });
       store[key] = mode;
-      writeFileSync7(storePath(), JSON.stringify(store, null, 2));
+      writeFileSync8(storePath(), JSON.stringify(store, null, 2));
     } catch {
     }
     return mode;
@@ -4105,10 +5141,10 @@ function decideToolMode(provider, modelId, forced = "auto") {
 }
 function recordDecision(provider, modelId, mode, source) {
   try {
-    mkdirSync8(reinHome(), { recursive: true });
+    mkdirSync9(reinHome(), { recursive: true });
     const store = readStore();
     store[keyFor(provider, modelId)] = { mode, source };
-    writeFileSync7(storePath(), JSON.stringify(store, null, 2));
+    writeFileSync8(storePath(), JSON.stringify(store, null, 2));
   } catch {
   }
 }
@@ -4162,23 +5198,23 @@ var init_compat = __esm({
       /openchat[-_]?3\.5/i,
       /starcoder[-_]?1b/i
     ];
-    reinHome = () => process.env.REIN_HOME || join12(homedir10(), ".rein");
-    storePath = () => join12(reinHome(), "capabilities.json");
+    reinHome = () => process.env.REIN_HOME || join14(homedir10(), ".rein");
+    storePath = () => join14(reinHome(), "capabilities.json");
   }
 });
 
 // src/harness/system-prompt.ts
-import { existsSync as existsSync7 } from "node:fs";
-import { readFileSync as readFileSync8 } from "node:fs";
+import { existsSync as existsSync8 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 import { homedir as homedir11 } from "node:os";
-import { join as join13, resolve as resolve5 } from "node:path";
+import { join as join15, resolve as resolve5 } from "node:path";
 function readProjectInstructions(cwd) {
-  const privateHome2 = resolve5(process.env.REIN_HOME || join13(homedir11(), ".rein"));
+  const privateHome2 = resolve5(process.env.REIN_HOME || join15(homedir11(), ".rein"));
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
     if (name === "AGENTS.md" && resolve5(cwd) === privateHome2) continue;
-    const path2 = join13(cwd, name);
-    if (existsSync7(path2)) {
-      const text = readFileSync8(path2, "utf8").trim();
+    const path2 = join15(cwd, name);
+    if (existsSync8(path2)) {
+      const text = readFileSync9(path2, "utf8").trim();
       if (text) return `Project instructions:
 ${text}`;
     }
@@ -4186,9 +5222,9 @@ ${text}`;
   return void 0;
 }
 function readLessons(cwd) {
-  const path2 = join13(cwd, "LESSONS.md");
-  if (!existsSync7(path2)) return void 0;
-  const text = readFileSync8(path2, "utf8").trim();
+  const path2 = join15(cwd, "LESSONS.md");
+  if (!existsSync8(path2)) return void 0;
+  const text = readFileSync9(path2, "utf8").trim();
   if (!text) return void 0;
   return `Lessons from previous sessions (trust but verify):
 ${text.slice(0, 4e3)}`;
@@ -4281,15 +5317,15 @@ var init_system_prompt = __esm({
 - The notes tool provides persistent repository memory: use notes op=read path=MEMORY.md (stored in .pi/notes/MEMORY.md). List notes when unsure of a name; write or append to create a missing note. Save concise, verified facts, decisions, constraints, and next steps when useful across sessions. Do not store secrets or speculative claims.
 - Reopening an archived session supplies a current workspace overlay and a bounded squashed Git diff in a fresh context window. It supersedes old transcript assumptions. Use history for exact prior tool calls; do not replay them blindly.
 - Provider KV cache is opportunistic and exists only while the server keeps a matching prompt slot. Never claim it persists across a restart or arbitrary week-old session.`;
-    ENV = (cwd, platform) => `Environment:
+    ENV = (cwd, platform2) => `Environment:
 - Working directory: ${cwd}
-- Platform: ${platform}
+- Platform: ${platform2}
 - Today: ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`;
   }
 });
 
 // src/harness/tools/read.ts
-import { readFileSync as readFileSync9 } from "node:fs";
+import { readFileSync as readFileSync10 } from "node:fs";
 var readTool, read_default;
 var init_read = __esm({
   "src/harness/tools/read.ts"() {
@@ -4309,16 +5345,16 @@ var init_read = __esm({
         const path2 = args.path;
         let text;
         try {
-          text = readFileSync9(path2, "utf8");
+          text = readFileSync10(path2, "utf8");
         } catch (err) {
           return { content: `read failed: ${err.message}`, isError: true };
         }
         let lines = text.split("\n");
         const offset = typeof args.offset === "number" ? args.offset : 1;
-        const limit = typeof args.limit === "number" ? args.limit : 2e3;
+        const limit2 = typeof args.limit === "number" ? args.limit : 2e3;
         let sliced = false;
-        if (offset > 1 || limit < lines.length) {
-          lines = lines.slice(offset - 1, offset - 1 + limit);
+        if (offset > 1 || limit2 < lines.length) {
+          lines = lines.slice(offset - 1, offset - 1 + limit2);
           sliced = true;
         }
         let out = lines.map((l, i) => `${String(offset + i).padStart(6)}	${l}`).join("\n");
@@ -4339,7 +5375,7 @@ var init_read = __esm({
 });
 
 // src/harness/tools/write.ts
-import { writeFileSync as writeFileSync8, mkdirSync as mkdirSync9 } from "node:fs";
+import { writeFileSync as writeFileSync9, mkdirSync as mkdirSync10 } from "node:fs";
 import { dirname as dirname4 } from "node:path";
 var writeTool, write_default;
 var init_write = __esm({
@@ -4359,8 +5395,8 @@ var init_write = __esm({
         const path2 = args.path;
         const content = args.content;
         try {
-          mkdirSync9(dirname4(path2), { recursive: true });
-          writeFileSync8(path2, content);
+          mkdirSync10(dirname4(path2), { recursive: true });
+          writeFileSync9(path2, content);
         } catch (err) {
           return { content: `write failed: ${err.message}`, isError: true };
         }
@@ -4373,7 +5409,7 @@ var init_write = __esm({
 });
 
 // src/harness/tools/edit.ts
-import { readFileSync as readFileSync10, writeFileSync as writeFileSync9 } from "node:fs";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync10 } from "node:fs";
 function countOccurrences(text, needle) {
   let count = 0;
   let i = text.indexOf(needle);
@@ -4413,7 +5449,7 @@ var init_edit = __esm({
         const edits = args.edits;
         let text;
         try {
-          text = readFileSync10(path2, "utf8");
+          text = readFileSync11(path2, "utf8");
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -4444,7 +5480,7 @@ var init_edit = __esm({
           text = text.slice(0, r.start) + edit.newText + text.slice(r.end);
         }
         try {
-          writeFileSync9(path2, text);
+          writeFileSync10(path2, text);
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -4461,7 +5497,7 @@ async function runShell(command, cwd, timeout, signal) {
   if (signal?.aborted) return { stdout: "", stderr: "", code: 1, reason: "Operation aborted" };
   return new Promise((resolve22) => {
     const child = spawn6("bash", ["-c", command], { cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "", stderr = "", bytes = 0, code = 1, reason;
+    let stdout = "", stderr = "", bytes = 0, code = 1, reason2;
     let closed = false, settled = false, killTimer;
     const kill = (value) => {
       try {
@@ -4475,11 +5511,11 @@ async function runShell(command, cwd, timeout, signal) {
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
-      resolve22({ stdout, stderr, code, reason });
+      resolve22({ stdout, stderr, code, reason: reason2 });
     };
     const stop = (detail) => {
-      if (reason) return;
-      reason = detail;
+      if (reason2) return;
+      reason2 = detail;
       code = 1;
       kill("SIGTERM");
       killTimer = setTimeout(() => {
@@ -4505,12 +5541,12 @@ async function runShell(command, cwd, timeout, signal) {
       if (bytes > 8 * 1024 * 1024) stop("output exceeded 8MB");
     });
     child.on("error", (error) => {
-      reason ??= error.message;
+      reason2 ??= error.message;
       closed = true;
       finish();
     });
     child.on("close", (exitCode) => {
-      code = reason ? 1 : exitCode ?? 1;
+      code = reason2 ? 1 : exitCode ?? 1;
       closed = true;
       finish();
     });
@@ -4557,12 +5593,12 @@ var init_bash = __esm({
 });
 
 // src/harness/tools/grep.ts
-import { execFile as execFile7 } from "node:child_process";
+import { execFile as execFile8 } from "node:child_process";
 import { promisify as promisify6 } from "node:util";
 var execFileAsync, grepTool, grep_default;
 var init_grep = __esm({
   "src/harness/tools/grep.ts"() {
-    execFileAsync = promisify6(execFile7);
+    execFileAsync = promisify6(execFile8);
     grepTool = {
       name: "grep",
       description: "Search file contents for a pattern (regex or literal). Returns matching lines as path:line:text.",
@@ -4607,7 +5643,7 @@ var init_grep = __esm({
 });
 
 // src/harness/tools/find.ts
-import { execFile as execFile8 } from "node:child_process";
+import { execFile as execFile9 } from "node:child_process";
 import { promisify as promisify7 } from "node:util";
 function shellQuote2(s) {
   return `'${s.replace(/'/g, "'\\''")}'`;
@@ -4615,7 +5651,7 @@ function shellQuote2(s) {
 var execFileAsync2, findTool, find_default;
 var init_find = __esm({
   "src/harness/tools/find.ts"() {
-    execFileAsync2 = promisify7(execFile8);
+    execFileAsync2 = promisify7(execFile9);
     findTool = {
       name: "find",
       description: "Find files by glob pattern. Returns matching paths under the search directory.",
@@ -4629,10 +5665,10 @@ var init_find = __esm({
         required: ["pattern"]
       },
       execute: async (_id, args) => {
-        const limit = typeof args.limit === "number" ? args.limit : 200;
+        const limit2 = typeof args.limit === "number" ? args.limit : 200;
         const path2 = args.path ?? ".";
         try {
-          const { stdout } = await execFileAsync2("bash", ["-c", `command -v fd >/dev/null 2>&1 && fd -g ${shellQuote2(args.pattern)} --max-results ${limit} ${shellQuote2(path2)} || find ${shellQuote2(path2)} -name ${shellQuote2(args.pattern)} -print | head -n ${limit}`], { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
+          const { stdout } = await execFileAsync2("bash", ["-c", `command -v fd >/dev/null 2>&1 && fd -g ${shellQuote2(args.pattern)} --max-results ${limit2} ${shellQuote2(path2)} || find ${shellQuote2(path2)} -name ${shellQuote2(args.pattern)} -print | head -n ${limit2}`], { maxBuffer: 4 * 1024 * 1024, timeout: 3e4 });
           const out = stdout.trimEnd();
           return { content: out || "No matches" };
         } catch (err) {
@@ -4645,8 +5681,8 @@ var init_find = __esm({
 });
 
 // src/harness/tools/ls.ts
-import { readdirSync as readdirSync2, statSync as statSync4 } from "node:fs";
-import { join as join14 } from "node:path";
+import { readdirSync as readdirSync3, statSync as statSync4 } from "node:fs";
+import { join as join16 } from "node:path";
 var lsTool, ls_default;
 var init_ls = __esm({
   "src/harness/tools/ls.ts"() {
@@ -4665,30 +5701,30 @@ var init_ls = __esm({
       execute: async (_id, args) => {
         const path2 = args.path ?? ".";
         const depth = typeof args.depth === "number" ? args.depth : 1;
-        const limit = typeof args.limit === "number" ? args.limit : 300;
+        const limit2 = typeof args.limit === "number" ? args.limit : 300;
         const lines = [];
         const walk = (dir, prefix, d) => {
-          if (lines.length >= limit) return;
+          if (lines.length >= limit2) return;
           let names;
           try {
-            names = readdirSync2(dir, { withFileTypes: true }).map((e) => e.name).sort();
+            names = readdirSync3(dir, { withFileTypes: true }).map((e) => e.name).sort();
           } catch (err) {
             lines.push(`${prefix}${dir}: ${err.message}`);
             return;
           }
           for (const name of names) {
-            if (lines.length >= limit) {
-              lines.push(`\u2026 [truncated at ${limit} entries]`);
+            if (lines.length >= limit2) {
+              lines.push(`\u2026 [truncated at ${limit2} entries]`);
               return;
             }
             let isDir = false;
             try {
-              isDir = statSync4(join14(dir, name)).isDirectory();
+              isDir = statSync4(join16(dir, name)).isDirectory();
             } catch {
               isDir = false;
             }
             lines.push(`${prefix}${name}${isDir ? "/" : ""}`);
-            if (isDir && d > 1) walk(join14(dir, name), prefix + "  ", d - 1);
+            if (isDir && d > 1) walk(join16(dir, name), prefix + "  ", d - 1);
           }
         };
         walk(path2, "", depth);
@@ -4701,26 +5737,26 @@ var init_ls = __esm({
 
 // src/harness/obscura/install.ts
 import { createHash as createHash7 } from "node:crypto";
-import { accessSync as accessSync2, constants as constants3, createReadStream as createReadStream2, existsSync as existsSync8, lstatSync as lstatSync5, readFileSync as readFileSync11, statSync as statSync5 } from "node:fs";
-import { chmod as chmod2, mkdir as mkdir2, mkdtemp as mkdtemp3, open, readFile, rename as rename2, rm as rm3, writeFile } from "node:fs/promises";
+import { accessSync as accessSync2, constants as constants4, createReadStream as createReadStream2, existsSync as existsSync9, lstatSync as lstatSync6, readFileSync as readFileSync12, statSync as statSync5 } from "node:fs";
+import { chmod as chmod2, mkdir as mkdir2, mkdtemp as mkdtemp3, open, readFile as readFile2, rename as rename2, rm as rm3, writeFile } from "node:fs/promises";
 import { homedir as homedir12 } from "node:os";
-import { delimiter as delimiter2, dirname as dirname5, isAbsolute, join as join15, resolve as resolve6 } from "node:path";
+import { delimiter as delimiter3, dirname as dirname5, isAbsolute, join as join17, resolve as resolve6 } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { createGunzip, createInflateRaw } from "node:zlib";
 function manifest() {
   const here5 = dirname5(fileURLToPath(import.meta.url));
-  const path2 = [resolve6(here5, "../../../vendor/obscura/releases.json"), resolve6(here5, "../vendor/obscura/releases.json")].find(existsSync8);
+  const path2 = [resolve6(here5, "../../../vendor/obscura/releases.json"), resolve6(here5, "../vendor/obscura/releases.json")].find(existsSync9);
   if (!path2) throw new Error("Obscura release metadata is missing. Reinstall the complete Rein package.");
-  return JSON.parse(readFileSync11(path2, "utf8"));
+  return JSON.parse(readFileSync12(path2, "utf8"));
 }
-function installRoot(home = process.env.REIN_HOME || join15(homedir12(), ".rein"), platform = process.platform, arch = process.arch) {
-  return join15(resolve6(home), "native", "obscura", OBSCURA_VERSION, `${platform}-${arch}`);
+function installRoot(home = process.env.REIN_HOME || join17(homedir12(), ".rein"), platform2 = process.platform, arch2 = process.arch) {
+  return join17(resolve6(home), "native", "obscura", OBSCURA_VERSION, `${platform2}-${arch2}`);
 }
 function executable(path2) {
   try {
     if (!statSync5(path2).isFile()) return false;
-    accessSync2(path2, process.platform === "win32" ? constants3.F_OK : constants3.X_OK);
+    accessSync2(path2, process.platform === "win32" ? constants4.F_OK : constants4.X_OK);
     return true;
   } catch {
     return false;
@@ -4728,15 +5764,15 @@ function executable(path2) {
 }
 function managedExecutable(directory, asset) {
   try {
-    if (!lstatSync5(directory).isDirectory() || lstatSync5(directory).isSymbolicLink()) return void 0;
-    const installed = JSON.parse(readFileSync11(join15(directory, "install.json"), "utf8"));
+    if (!lstatSync6(directory).isDirectory() || lstatSync6(directory).isSymbolicLink()) return void 0;
+    const installed = JSON.parse(readFileSync12(join17(directory, "install.json"), "utf8"));
     const members = asset?.members ?? (process.platform === "win32" ? ["obscura.exe", "obscura-worker.exe"] : ["obscura", "obscura-worker"]);
     if (installed.version !== OBSCURA_VERSION || asset && installed.sha256 !== asset.sha256) return void 0;
     for (const member of members) {
-      const path2 = join15(directory, member);
-      if (lstatSync5(path2).isSymbolicLink() || !executable(path2)) return void 0;
+      const path2 = join17(directory, member);
+      if (lstatSync6(path2).isSymbolicLink() || !executable(path2)) return void 0;
     }
-    return join15(directory, members[0]);
+    return join17(directory, members[0]);
   } catch {
     return void 0;
   }
@@ -4750,8 +5786,8 @@ function resolveObscura(override) {
   const managed = managedExecutable(installRoot());
   if (managed) return managed;
   const name = process.platform === "win32" ? "obscura.exe" : "obscura";
-  for (const directory of (process.env.PATH || "").split(delimiter2)) {
-    if (isAbsolute(directory) && executable(join15(directory, name))) return join15(directory, name);
+  for (const directory of (process.env.PATH || "").split(delimiter3)) {
+    if (isAbsolute(directory) && executable(join17(directory, name))) return join17(directory, name);
   }
   return void 0;
 }
@@ -4870,7 +5906,7 @@ async function extractTar(path2, stage, asset, signal, maxBytes) {
       const size = octal(header.subarray(124, 136));
       if (!size || size > maxBytes) throw new Error("Invalid Obscura executable size.");
       found.add(name);
-      const output = await open(join15(stage, name), "wx", 448);
+      const output = await open(join17(stage, name), "wx", 448);
       try {
         for (let left = size; left > 0; ) {
           checkAbort(signal);
@@ -4892,7 +5928,7 @@ async function extractTar(path2, stage, asset, signal, maxBytes) {
   }
 }
 async function extractZip(path2, stage, asset, signal, maxBytes) {
-  const bytes = await readFile(path2);
+  const bytes = await readFile2(path2);
   checkAbort(signal);
   let end = -1;
   for (let offset2 = bytes.length - 22; offset2 >= Math.max(0, bytes.length - 65557); offset2--) {
@@ -4919,7 +5955,7 @@ async function extractZip(path2, stage, asset, signal, maxBytes) {
     if (bytes.readUInt16LE(local + 6) !== flags || bytes.readUInt16LE(local + 8) !== method || bytes.subarray(local + 30, local + 30 + localNameLength).toString("utf8") !== name || start + compressed > directoryOffset || spans.some(([a, b]) => local < b && start + compressed > a)) throw new Error("Invalid Obscura ZIP member bounds.");
     spans.push([local, start + compressed]);
     found.add(name);
-    const output = await open(join15(stage, name), "wx", 448);
+    const output = await open(join17(stage, name), "wx", 448);
     let written = 0;
     const source = Readable.from([bytes.subarray(start, start + compressed)]), stream2 = method === 8 ? source.pipe(createInflateRaw()) : source;
     const abort = () => stream2.destroy(signal.reason instanceof Error ? signal.reason : new Error("Obscura installation cancelled."));
@@ -4944,15 +5980,15 @@ async function extractZip(path2, stage, asset, signal, maxBytes) {
 }
 async function installObscura(options = {}, dependencies = {}) {
   options.signal?.throwIfAborted();
-  const platform = dependencies.platform ?? process.platform, arch = dependencies.arch ?? process.arch;
-  const release = dependencies.manifest ?? manifest(), asset = release.assets[`${platform}-${arch}`];
+  const platform2 = dependencies.platform ?? process.platform, arch2 = dependencies.arch ?? process.arch;
+  const release2 = dependencies.manifest ?? manifest(), asset = release2.assets[`${platform2}-${arch2}`];
   const maxArchive = dependencies.maxArchiveBytes ?? MAX_ARCHIVE_BYTES, maxExtracted = dependencies.maxExtractedBytes ?? MAX_EXTRACTED_BYTES;
-  if (!asset) throw new Error(`No pinned Obscura binary is available for ${platform}/${arch}. Install Obscura manually and set OBSCURA_BIN to its absolute executable path.`);
-  const members = platform === "win32" ? ["obscura.exe", "obscura-worker.exe"] : ["obscura", "obscura-worker"];
-  if (release.repository !== REPOSITORY || release.version !== OBSCURA_VERSION || release.tag !== `v${OBSCURA_VERSION}` || !/^[a-f0-9]{40}$/.test(release.commit) || release.variant !== "no-render" || !/^obscura-[a-z0-9_-]+\.(tar\.gz|zip)$/.test(asset.filename) || !/^[a-f0-9]{64}$/.test(asset.sha256) || !Number.isSafeInteger(asset.bytes) || asset.bytes < 1 || asset.bytes > maxArchive || !["tar.gz", "zip"].includes(asset.format) || JSON.stringify(asset.members) !== JSON.stringify(members)) throw new Error("Invalid pinned Obscura release metadata.");
-  const target = installRoot(dependencies.home, platform, arch), existing = managedExecutable(target, asset);
+  if (!asset) throw new Error(`No pinned Obscura binary is available for ${platform2}/${arch2}. Install Obscura manually and set OBSCURA_BIN to its absolute executable path.`);
+  const members = platform2 === "win32" ? ["obscura.exe", "obscura-worker.exe"] : ["obscura", "obscura-worker"];
+  if (release2.repository !== REPOSITORY || release2.version !== OBSCURA_VERSION || release2.tag !== `v${OBSCURA_VERSION}` || !/^[a-f0-9]{40}$/.test(release2.commit) || release2.variant !== "no-render" || !/^obscura-[a-z0-9_-]+\.(tar\.gz|zip)$/.test(asset.filename) || !/^[a-f0-9]{64}$/.test(asset.sha256) || !Number.isSafeInteger(asset.bytes) || asset.bytes < 1 || asset.bytes > maxArchive || !["tar.gz", "zip"].includes(asset.format) || JSON.stringify(asset.members) !== JSON.stringify(members)) throw new Error("Invalid pinned Obscura release metadata.");
+  const target = installRoot(dependencies.home, platform2, arch2), existing = managedExecutable(target, asset);
   if (existing) return existing;
-  if (existsSync8(target)) throw new Error(`The Obscura install is incomplete: ${target}. Move that directory aside and run rein web install again.`);
+  if (existsSync9(target)) throw new Error(`The Obscura install is incomplete: ${target}. Move that directory aside and run rein web install again.`);
   const controller = new AbortController();
   const abort = () => controller.abort(options.signal?.reason instanceof Error ? options.signal.reason : new Error("Obscura installation cancelled."));
   options.signal?.addEventListener("abort", abort, { once: true });
@@ -4961,18 +5997,18 @@ async function installObscura(options = {}, dependencies = {}) {
   try {
     checkAbort(controller.signal);
     await mkdir2(dirname5(target), { recursive: true, mode: 448 });
-    temporary = await mkdtemp3(join15(dirname5(target), ".install-"));
+    temporary = await mkdtemp3(join17(dirname5(target), ".install-"));
     await chmod2(temporary, 448);
-    const archive = join15(temporary, "archive"), stage = join15(temporary, "runtime");
+    const archive = join17(temporary, "archive"), stage = join17(temporary, "runtime");
     await mkdir2(stage, { mode: 448 });
-    options.onProgress?.(`Downloading Obscura ${OBSCURA_VERSION} for ${platform}/${arch} (${Math.ceil(asset.bytes / 1024 / 1024)} MiB)\u2026`);
+    options.onProgress?.(`Downloading Obscura ${OBSCURA_VERSION} for ${platform2}/${arch2} (${Math.ceil(asset.bytes / 1024 / 1024)} MiB)\u2026`);
     await download(asset, archive, controller.signal, dependencies.fetch ?? globalThis.fetch, maxArchive);
     checkAbort(controller.signal);
     options.onProgress?.("Obscura SHA-256 verified. Installing the pinned runtime\u2026");
     if (asset.format === "tar.gz") await extractTar(archive, stage, asset, controller.signal, maxExtracted);
     else await extractZip(archive, stage, asset, controller.signal, maxExtracted);
     checkAbort(controller.signal);
-    await writeFile(join15(stage, "install.json"), JSON.stringify({ version: OBSCURA_VERSION, commit: release.commit, sha256: asset.sha256, asset: asset.filename }) + "\n", { mode: 384, flag: "wx" });
+    await writeFile(join17(stage, "install.json"), JSON.stringify({ version: OBSCURA_VERSION, commit: release2.commit, sha256: asset.sha256, asset: asset.filename }) + "\n", { mode: 384, flag: "wx" });
     checkAbort(controller.signal);
     try {
       await rename2(stage, target);
@@ -4981,7 +6017,7 @@ async function installObscura(options = {}, dependencies = {}) {
       if (concurrent) return concurrent;
       throw error;
     }
-    return join15(target, members[0]);
+    return join17(target, members[0]);
   } finally {
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abort);
@@ -5007,7 +6043,7 @@ var init_install2 = __esm({
 import { spawn as spawn7 } from "node:child_process";
 import { mkdtemp as mkdtemp4, rm as rm4 } from "node:fs/promises";
 import { tmpdir as tmpdir4 } from "node:os";
-import { join as join16 } from "node:path";
+import { join as join18 } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 function webOptions() {
   const config = loadConfig().obscura;
@@ -5040,7 +6076,7 @@ async function evaluatePage(url, expression, signal, onProgress) {
   const options = webOptions();
   const executable2 = await ensureObscura({ bin: options.bin, signal, onProgress });
   signal?.throwIfAborted();
-  const directory = await mkdtemp4(join16(tmpdir4(), "rein-obscura-page-"));
+  const directory = await mkdtemp4(join18(tmpdir4(), "rein-obscura-page-"));
   try {
     signal?.throwIfAborted();
     onProgress?.(`Obscura: reading ${url.hostname}`);
@@ -5322,22 +6358,22 @@ var gates_exports = {};
 __export(gates_exports, {
   default: () => gates_default
 });
-import { execFile as execFile9 } from "node:child_process";
+import { execFile as execFile10 } from "node:child_process";
 import { promisify as promisify8 } from "node:util";
-import { existsSync as existsSync9 } from "node:fs";
-import { dirname as dirname6, isAbsolute as isAbsolute2, join as join17, resolve as resolve7 } from "node:path";
+import { existsSync as existsSync10 } from "node:fs";
+import { dirname as dirname6, isAbsolute as isAbsolute2, join as join19, resolve as resolve7 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var execFileAsync3, here, UNLAZY_CANDIDATES, UNLAZY_DIR, MODES, gatesTool, gates_default;
 var init_gates = __esm({
   "src/harness/tools/gates.ts"() {
     init_truncate();
-    execFileAsync3 = promisify8(execFile9);
+    execFileAsync3 = promisify8(execFile10);
     here = dirname6(fileURLToPath2(import.meta.url));
     UNLAZY_CANDIDATES = [
       resolve7(here, "..", "..", "..", "vendor", "unlazy"),
       resolve7(here, "..", "vendor", "unlazy")
     ];
-    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync9(join17(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
+    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync10(join19(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
     MODES = /* @__PURE__ */ new Set(["status", "approve", "reverify", "lint"]);
     gatesTool = {
       name: "gates",
@@ -5356,11 +6392,11 @@ var init_gates = __esm({
         if (!MODES.has(mode)) return { content: `Unknown mode: ${mode}. Use one of: status, approve, reverify, lint.`, isError: true };
         const file = args.file ? String(args.file) : "GATES.md";
         const root2 = args.root ? resolve7(String(args.root)) : process.cwd();
-        const ledgerPath = isAbsolute2(file) ? file : join17(root2, file);
-        if (!existsSync9(ledgerPath)) {
+        const ledgerPath = isAbsolute2(file) ? file : join19(root2, file);
+        if (!existsSync10(ledgerPath)) {
           return { content: `Ledger not found: ${ledgerPath}. Write it first (template: vendor/unlazy/templates/gates-leaf.md), then run gates with mode=lint.`, isError: true };
         }
-        const scriptPath = join17(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
+        const scriptPath = join19(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
         const cmdArgs = mode === "lint" ? [scriptPath, ledgerPath] : [scriptPath, `--${mode}`, ledgerPath];
         let stdout = "";
         let stderr = "";
@@ -5439,7 +6475,7 @@ var init_tools = __esm({
 // src/harness/nodeterm.ts
 import * as fs from "node:fs";
 import * as http from "node:http";
-import * as os from "node:os";
+import * as os2 from "node:os";
 import * as path from "node:path";
 import { randomUUID as randomUUID8 } from "node:crypto";
 function token() {
@@ -5568,7 +6604,7 @@ var init_nodeterm = __esm({
   "src/harness/nodeterm.ts"() {
     AGENT_ID = "rein";
     active = () => !!(process.env.NODETERM_NODE_ID && (process.env.NODETERM_HOOK_PORT || process.env.NODETERM_HOOK_SOCK));
-    pendingDir = () => process.env.NODETERM_PENDING_DIR ?? path.join(os.homedir(), ".nodeterm", "pending");
+    pendingDir = () => process.env.NODETERM_PENDING_DIR ?? path.join(os2.homedir(), ".nodeterm", "pending");
     status = {
       turnStart: (prompt) => postEvent({ hook_event_name: "UserPromptSubmit", prompt, hookSpecificOutput: { hookEventName: "UserPromptSubmit" } }),
       toolStart: (toolName, toolInput) => postEvent({ hook_event_name: "PreToolUse", tool_name: toolName, tool_input: toolInput, hookSpecificOutput: { hookEventName: "PreToolUse" } }),
@@ -5679,14 +6715,14 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
         return JSON.stringify({ windowId: this.windowId, estimatedTokens: this.used(), contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens, untilRollover: Math.max(0, this.line - this.used()), untilHardLimit: Math.max(0, this.model.contextWindow - this.used()), ...this.usage?.cached === void 0 ? {} : { lastPromptCacheTokens: this.usage.cached }, automatic: this.enabled, estimate: true });
       }
       validateHandoff(handoff) {
-        const limit = this.freshLimit();
-        if (limit < 256) throw new Error("Prompt and tool overhead leave no room for a fresh window. Increase contextWindow or reduce maxTokens/reserveTokens or prompt size.");
-        if (handoff && handoff.length > limit) throw new Error(`Handoff exceeds the ${limit} character budget. Save fuller state in notes and retry with a shorter handoff.`);
+        const limit2 = this.freshLimit();
+        if (limit2 < 256) throw new Error("Prompt and tool overhead leave no room for a fresh window. Increase contextWindow or reduce maxTokens/reserveTokens or prompt size.");
+        if (handoff && handoff.length > limit2) throw new Error(`Handoff exceeds the ${limit2} character budget. Save fuller state in notes and retry with a shorter handoff.`);
       }
-      rollover(handoff, reason = "manual", start = this.messages.length) {
+      rollover(handoff, reason2 = "manual", start = this.messages.length) {
         this.validateHandoff(handoff);
         if (!validWindowStart(this.messages, start) || start < (this.window?.start ?? 0)) throw new Error("Context boundary must follow a complete tool batch and advance within the transcript");
-        const window = { type: "context_window", id: randomUUID9(), timestamp: Date.now(), start, handoff: handoff?.trim() || void 0, reason };
+        const window = { type: "context_window", id: randomUUID9(), timestamp: Date.now(), start, handoff: handoff?.trim() || void 0, reason: reason2 };
         this.store(window);
         this.window = window;
         this.usage = void 0;
@@ -5725,7 +6761,7 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
         if (info.newContext) this.rollover(info.newContext.handoff, "tool");
       }
       /** A bounded input record, never a generated summary or claim of completed work. */
-      recovery(messages, end, limit) {
+      recovery(messages, end, limit2) {
         const start = this.window?.start ?? 0;
         const candidates = [];
         const users = messages.slice(0, end).map((m, i) => ({ m, i })).filter(({ m }) => m.role === "user" && !/^\s*\[(?:posthorse|rein persistent workspace overlay)/i.test(messageText(m)));
@@ -5740,10 +6776,10 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
         }
         const preamble = "Automatic context rollover recovery record. These are recorded inputs, not proof of progress. The newest direct user input defines current scope and overrides older plans. Restore notes and use history to recover omitted or truncated entries. Verify live state before stateful or external work.\n";
         const selected = candidates.slice(0, 20);
-        const allowance = Math.max(0, Math.floor((limit - preamble.length - 160 - selected.reduce((n, r) => n + r.label.length + 8, 0)) / Math.max(1, selected.length)));
+        const allowance = Math.max(0, Math.floor((limit2 - preamble.length - 160 - selected.reduce((n, r) => n + r.label.length + 8, 0)) / Math.max(1, selected.length)));
         const blocks = selected.map((r) => `${r.label}:
 ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [truncated; recover history]" : r.text}`);
-        return (preamble + blocks.join("\n\n") + "\nUse history for all earlier inputs, full tool arguments/results, and any omitted records.").slice(0, limit);
+        return (preamble + blocks.join("\n\n") + "\nUse history for all earlier inputs, full tool arguments/results, and any omitted records.").slice(0, limit2);
       }
       prepare(messages) {
         this.pageTokensAllocated = 0;
@@ -5761,18 +6797,18 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
         this.lastRequestCount = providerMessages(messages).length;
         return active2;
       }
-      autoRollover(messages, reason) {
+      autoRollover(messages, reason2) {
         let end = messages.length;
         if (messages.at(-1)?.role === "assistant" && messages.at(-1).stopReason === "error") end--;
         const errorIndex = end;
         while (end > (this.window?.start ?? 0) && messages[end - 1].role === "user") end--;
         const pending = messages.slice(end, errorIndex);
-        const limit = this.freshLimit(pending);
-        if (limit < 512) return false;
+        const limit2 = this.freshLimit(pending);
+        if (limit2 < 512) return false;
         if (end <= (this.window?.start ?? 0)) return false;
         if (!validWindowStart(this.messages, end)) return false;
-        const handoff = this.recovery(messages, end, limit);
-        this.rollover(handoff, reason, end);
+        const handoff = this.recovery(messages, end, limit2);
+        this.rollover(handoff, reason2, end);
         return true;
       }
       recover(message, messages) {
@@ -5791,8 +6827,8 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
 });
 
 // src/harness/tools/context.ts
-import { constants as constants4, closeSync as closeSync2, existsSync as existsSync10, fstatSync, lstatSync as lstatSync6, mkdirSync as mkdirSync11, openSync as openSync2, readSync, readdirSync as readdirSync3, readFileSync as readFileSync13, realpathSync as realpathSync4, writeFileSync as writeFileSync11, renameSync as renameSync5, unlinkSync as unlinkSync5 } from "node:fs";
-import { dirname as dirname7, isAbsolute as isAbsolute3, join as join19, relative, resolve as resolve9, sep as sep2 } from "node:path";
+import { constants as constants5, closeSync as closeSync2, existsSync as existsSync11, fstatSync, lstatSync as lstatSync7, mkdirSync as mkdirSync12, openSync as openSync2, readSync, readdirSync as readdirSync4, readFileSync as readFileSync14, realpathSync as realpathSync4, writeFileSync as writeFileSync12, renameSync as renameSync5, unlinkSync as unlinkSync5 } from "node:fs";
+import { dirname as dirname7, isAbsolute as isAbsolute3, join as join21, relative, resolve as resolve9, sep as sep2 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { randomUUID as randomUUID10 } from "node:crypto";
 function notesRoot(cwd) {
@@ -5821,9 +6857,9 @@ function safePath(root2, note, checkLeaf = true) {
   const path2 = resolve9(root2, note);
   const rel = relative(root2, path2);
   if (!rel || rel === ".." || rel.startsWith(`..${sep2}`) || isAbsolute3(rel)) throw new Error("Note path must stay inside .pi/notes.");
-  for (const part of [dirname7(root2), root2, ...rel.split(sep2).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join19(root2, ...parts.slice(0, i + 1)))]) {
+  for (const part of [dirname7(root2), root2, ...rel.split(sep2).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join21(root2, ...parts.slice(0, i + 1)))]) {
     try {
-      const stat3 = lstatSync6(part);
+      const stat3 = lstatSync7(part);
       if (stat3.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
       if (part === path2 ? !stat3.isFile() || stat3.nlink > 1 : !stat3.isDirectory()) throw new Error("Notes require regular files without hard links and ordinary directories.");
     } catch (err) {
@@ -5834,10 +6870,10 @@ function safePath(root2, note, checkLeaf = true) {
 }
 function* noteFiles(root2, dir = root2) {
   safePath(root2, ".path-check", false);
-  if (!existsSync10(dir)) return;
-  for (const file of readdirSync3(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  if (!existsSync11(dir)) return;
+  for (const file of readdirSync4(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (file.isSymbolicLink()) continue;
-    const path2 = join19(dir, file.name);
+    const path2 = join21(dir, file.name);
     if (file.isDirectory()) yield* noteFiles(root2, path2);
     else if (file.isFile()) {
       safePath(root2, relative(root2, path2));
@@ -5845,9 +6881,9 @@ function* noteFiles(root2, dir = root2) {
     }
   }
 }
-function page(text, offset, limit, prefix = "") {
+function page(text, offset, limit2, prefix = "") {
   if (offset > text.length) throw new Error(`Offset ${offset} is past the end (${text.length} characters).`);
-  const available = Math.floor(limit) - prefix.length;
+  const available = Math.floor(limit2) - prefix.length;
   if (available < 96) throw new Error("Too little context remains for this page header. Call new_context, then retry.");
   if (text.length - offset <= available) return prefix + text.slice(offset);
   const end = Math.min(text.length, offset + Math.max(1, available - 96));
@@ -5860,7 +6896,7 @@ function offsetOf(args) {
   return offset;
 }
 function contextTools(state, cwd) {
-  const root2 = join19(notesRoot(cwd), ".pi", "notes");
+  const root2 = join21(notesRoot(cwd), ".pi", "notes");
   const outputPage = (text, offset, prefix = "") => page(text, offset, state.pageLimit(offset, Math.max(0, text.length - offset) + prefix.length), prefix);
   const notes = {
     name: "notes",
@@ -5875,11 +6911,11 @@ function contextTools(state, cwd) {
       if (op === "write" || op === "append") {
         const path2 = safePath(root2, required(args.path, "path"));
         if (typeof args.content !== "string") throw new Error('"content" is required; use "" to clear a note.');
-        mkdirSync11(dirname7(path2), { recursive: true });
+        mkdirSync12(dirname7(path2), { recursive: true });
         if (op === "write") {
           const temp = `${path2}.${randomUUID10()}.tmp`;
           try {
-            writeFileSync11(temp, args.content, { flag: "wx", mode: 384 });
+            writeFileSync12(temp, args.content, { flag: "wx", mode: 384 });
             renameSync5(temp, path2);
           } finally {
             try {
@@ -5888,13 +6924,13 @@ function contextTools(state, cwd) {
             }
           }
         } else {
-          const fd = openSync2(path2, constants4.O_RDWR | constants4.O_APPEND | constants4.O_CREAT | (constants4.O_NOFOLLOW ?? 0), 384);
+          const fd = openSync2(path2, constants5.O_RDWR | constants5.O_APPEND | constants5.O_CREAT | (constants5.O_NOFOLLOW ?? 0), 384);
           try {
             const stat3 = fstatSync(fd);
             if (!stat3.isFile() || stat3.nlink > 1) throw new Error("Notes require regular files without hard links.");
             const last = Buffer.alloc(1);
             if (stat3.size) readSync(fd, last, 0, 1, stat3.size - 1);
-            writeFileSync11(fd, `${stat3.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
+            writeFileSync12(fd, `${stat3.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
           } finally {
             closeSync2(fd);
           }
@@ -5903,15 +6939,15 @@ function contextTools(state, cwd) {
       }
       if (op === "read") {
         const path2 = safePath(root2, required(args.path, "path"));
-        if (!existsSync10(path2)) return { isError: true, content: `No note ${relative(root2, path2)}. Use notes op=list to discover existing notes, or op=write/append to save verified facts.` };
-        return { content: outputPage(readFileSync13(path2, "utf8"), offset) };
+        if (!existsSync11(path2)) return { isError: true, content: `No note ${relative(root2, path2)}. Use notes op=list to discover existing notes, or op=write/append to save verified facts.` };
+        return { content: outputPage(readFileSync14(path2, "utf8"), offset) };
       }
       if (op === "list") return { content: outputPage([...noteFiles(root2)].map((p) => relative(root2, p)).join("\n") || "(no notes yet)", offset) };
       const query = required(args.query, "query").toLowerCase();
       const hits = [];
       for (const file of noteFiles(root2)) {
         if (signal?.aborted) throw new Error("Operation aborted");
-        for (const [index, line] of readFileSync13(file, "utf8").split("\n").entries()) {
+        for (const [index, line] of readFileSync14(file, "utf8").split("\n").entries()) {
           const match = line.toLowerCase().indexOf(query);
           if (match >= 0) hits.push(`${relative(root2, file)}:${index + 1}: ${line.slice(Math.max(0, match - 60), match + 240)}`);
           if (hits.length >= 200) break;
@@ -6069,7 +7105,7 @@ __export(skills_exports, {
   skillRoster: () => skillRoster,
   skillTool: () => skillTool
 });
-import { readFileSync as readFileSync14, realpathSync as realpathSync5, existsSync as existsSync11 } from "node:fs";
+import { readFileSync as readFileSync15, realpathSync as realpathSync5, existsSync as existsSync12 } from "node:fs";
 import { dirname as dirname8, resolve as resolve10, sep as sep3 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function enabledSkills(home) {
@@ -6090,9 +7126,9 @@ function loadSkill(skills, name, file = "SKILL.md") {
   const root2 = realpathSync5(resolve10(skillsDir, name));
   const path2 = realpathSync5(resolve10(root2, file));
   if (!path2.startsWith(root2 + sep3)) throw new Error("Skill references must stay inside the selected skill directory.");
-  const manifest2 = JSON.parse(readFileSync14(resolve10(skillsDir, "../manifest.json"), "utf8"));
+  const manifest2 = JSON.parse(readFileSync15(resolve10(skillsDir, "../manifest.json"), "utf8"));
   if (!Object.hasOwn(manifest2.files, `skills/${name}/${file}`)) throw new Error("This file is not a bundled skill reference.");
-  const body = readFileSync14(path2, "utf8");
+  const body = readFileSync15(path2, "utf8");
   if (Buffer.byteLength(body) > 24e3) throw new Error("Skill reference exceeds the 24 KB output limit.");
   return body;
 }
@@ -6151,7 +7187,7 @@ var init_skills = __esm({
       { name: "code-review", description: "Review a change against its requirements and the repository's standards." }
     ].map((skill) => Object.freeze(skill)));
     here2 = dirname8(fileURLToPath3(import.meta.url));
-    skillsDir = [resolve10(here2, "../../vendor/mattpocock/skills"), resolve10(here2, "../vendor/mattpocock/skills")].find((dir) => existsSync11(resolve10(dir, "diagnosing-bugs/SKILL.md")));
+    skillsDir = [resolve10(here2, "../../vendor/mattpocock/skills"), resolve10(here2, "../vendor/mattpocock/skills")].find((dir) => existsSync12(resolve10(dir, "diagnosing-bugs/SKILL.md")));
     skillTool = {
       name: "skill",
       get description() {
@@ -6166,12 +7202,12 @@ var init_skills = __esm({
 });
 
 // src/harness/autonomy/inspect.ts
-import { constants as constants5, lstatSync as lstatSync7 } from "node:fs";
+import { constants as constants6, lstatSync as lstatSync8 } from "node:fs";
 import { lstat as lstat2, open as open2, opendir } from "node:fs/promises";
-import { isAbsolute as isAbsolute4, join as join20, relative as relative2, resolve as resolve11, sep as sep4 } from "node:path";
+import { isAbsolute as isAbsolute4, join as join22, relative as relative2, resolve as resolve11, sep as sep4 } from "node:path";
 function inspectionTools(cwd) {
   const root2 = canonicalWorkspace(cwd);
-  const originalRoot = lstatSync7(root2);
+  const originalRoot = lstatSync8(root2);
   const pathSchema = { type: "string", description: "Path within the enrolled workspace" };
   async function scoped(input, signal) {
     aborted(signal);
@@ -6186,7 +7222,7 @@ function inspectionTools(cwd) {
     let stat3 = rootStat;
     for (const part of rel.split(sep4).filter(Boolean)) {
       if (privateName(part)) throw new Error("Hidden and private configuration paths are excluded from background inspection.");
-      current = join20(current, part);
+      current = join22(current, part);
       stat3 = await lstat2(current);
       aborted(signal);
       if (stat3.isSymbolicLink() || !stat3.isDirectory() && (!stat3.isFile() || stat3.nlink !== 1)) throw new Error("Links and special files are excluded from background inspection.");
@@ -6197,7 +7233,7 @@ function inspectionTools(cwd) {
     const { path: path2, stat: stat3 } = await scoped(input, signal);
     aborted(signal);
     if (!stat3.isFile() || stat3.size > maximum) throw new Error(`Read requires a regular file no larger than ${maximum} bytes.`);
-    const handle = await open2(path2, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0) | (constants5.O_NONBLOCK ?? 0));
+    const handle = await open2(path2, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0) | (constants6.O_NONBLOCK ?? 0));
     try {
       aborted(signal);
       const opened = await handle.stat();
@@ -6227,7 +7263,7 @@ function inspectionTools(cwd) {
         const entry = await directory.read();
         aborted(signal);
         if (!entry) break;
-        yield { entry, path: join20(path2, entry.name) };
+        yield { entry, path: join22(path2, entry.name) };
       }
     } finally {
       await directory.close();
@@ -6320,13 +7356,13 @@ var init_inspect = __esm({
 
 // src/harness/meat/runtime.ts
 import { Worker } from "node:worker_threads";
-import { existsSync as existsSync12 } from "node:fs";
+import { existsSync as existsSync13 } from "node:fs";
 import { dirname as dirname9, resolve as resolve12 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 async function runMeatEngine(options) {
   options.signal?.throwIfAborted();
   if (!root) throw new Error("The embedded Meat runtime is missing. Reinstall the complete Rein package.");
-  const workerPath = existsSync12(resolve12(here3, "worker.ts")) ? resolve12(here3, "worker.ts") : resolve12(here3, "meat-worker.js");
+  const workerPath = existsSync13(resolve12(here3, "worker.ts")) ? resolve12(here3, "worker.ts") : resolve12(here3, "meat-worker.js");
   const worker = new Worker(workerPath, { workerData: { vendor: resolve12(root, "vendor/meat"), input: { Diff: options.diff, Root: options.cwd ?? "", MaxTurns: options.maxTurns ?? 8, ChunkBytes: options.chunkBytes ?? 24e3 } }, execArgv: [] });
   return await new Promise((resolveResult, reject) => {
     let done = false;
@@ -6376,7 +7412,7 @@ var here3, root;
 var init_runtime2 = __esm({
   "src/harness/meat/runtime.ts"() {
     here3 = dirname9(fileURLToPath4(import.meta.url));
-    root = [resolve12(here3, "../../.."), resolve12(here3, "..")].find((path2) => existsSync12(resolve12(path2, "vendor/meat/meat.wasm.gz")));
+    root = [resolve12(here3, "../../.."), resolve12(here3, "..")].find((path2) => existsSync13(resolve12(path2, "vendor/meat/meat.wasm.gz")));
   }
 });
 
@@ -6386,7 +7422,7 @@ __export(review_exports, {
   reviewDiff: () => reviewDiff,
   runMeatReview: () => runMeatReview
 });
-import { execFile as execFile10 } from "node:child_process";
+import { execFile as execFile11 } from "node:child_process";
 import { promisify as promisify9 } from "node:util";
 async function reviewDiff(cwd, options = {}) {
   const refs = options.refs ?? [];
@@ -6492,7 +7528,7 @@ var init_review = __esm({
     init_compat();
     init_inspect();
     init_runtime2();
-    exec4 = promisify9(execFile10);
+    exec4 = promisify9(execFile11);
   }
 });
 
@@ -6808,18 +7844,18 @@ __export(store_exports, {
   newActivityId: () => newActivityId,
   readActivity: () => readActivity
 });
-import { mkdirSync as mkdirSync12, writeFileSync as writeFileSync12, renameSync as renameSync6, openSync as openSync3, readFileSync as readFileSync15, closeSync as closeSync3, fstatSync as fstatSync2, constants as constants6, existsSync as existsSync13, unlinkSync as unlinkSync6 } from "node:fs";
+import { mkdirSync as mkdirSync13, writeFileSync as writeFileSync13, renameSync as renameSync6, openSync as openSync3, readFileSync as readFileSync16, closeSync as closeSync3, fstatSync as fstatSync2, constants as constants7, existsSync as existsSync14, unlinkSync as unlinkSync6 } from "node:fs";
 import { randomUUID as randomUUID11 } from "node:crypto";
 import { homedir as homedir15 } from "node:os";
-import { join as join21, resolve as resolve13 } from "node:path";
+import { join as join23, resolve as resolve13 } from "node:path";
 function activityFile(id) {
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) throw new Error("Use the activity ID printed by rein --visual.");
-  return join21(resolve13(process.env.REIN_HOME ?? join21(homedir15(), ".rein")), "activity", `${id}.json`);
+  return join23(resolve13(process.env.REIN_HOME ?? join23(homedir15(), ".rein")), "activity", `${id}.json`);
 }
 function readActivity(id) {
   let fd;
   try {
-    fd = openSync3(activityFile(id), constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0) | (constants6.O_NONBLOCK ?? 0));
+    fd = openSync3(activityFile(id), constants7.O_RDONLY | (constants7.O_NOFOLLOW ?? 0) | (constants7.O_NONBLOCK ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
@@ -6827,7 +7863,7 @@ function readActivity(id) {
   try {
     const stat3 = fstatSync2(fd);
     if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size > 4 * 1024 * 1024) throw new Error("Activity data is not a bounded ordinary file.");
-    const state = JSON.parse(readFileSync15(fd, "utf8"));
+    const state = JSON.parse(readFileSync16(fd, "utf8"));
     if (state.id !== id || !Array.isArray(state.nodes) || state.nodes.length > 256) throw new Error("Invalid activity data.");
     return state;
   } finally {
@@ -6839,9 +7875,9 @@ var init_store = __esm({
   "src/harness/activity/store.ts"() {
     init_tui();
     newActivityId = () => randomUUID11();
-    visible = (value, limit = 8e3) => {
+    visible = (value, limit2 = 8e3) => {
       const text = terminalText(typeof value === "string" ? value : JSON.stringify(value) ?? "", true);
-      return text.length > limit ? text.slice(0, limit) + "\n[view truncated]" : text;
+      return text.length > limit2 ? text.slice(0, limit2) + "\n[view truncated]" : text;
     };
     ActivityJournal = class {
       snapshot;
@@ -6854,9 +7890,9 @@ var init_store = __esm({
       disabled = false;
       constructor(id, cwd, model) {
         this.file = activityFile(id);
-        mkdirSync12(join21(this.file, ".."), { recursive: true, mode: 448 });
+        mkdirSync13(join23(this.file, ".."), { recursive: true, mode: 448 });
         this.snapshot = { id, cwd: resolve13(cwd), model, updated: Date.now(), state: "idle", nodes: [], omitted: 0 };
-        writeFileSync12(this.file, JSON.stringify(this.snapshot), { flag: "wx", mode: 384 });
+        writeFileSync13(this.file, JSON.stringify(this.snapshot), { flag: "wx", mode: 384 });
       }
       setSession(id) {
         this.snapshot.sessionId = id;
@@ -6957,11 +7993,11 @@ var init_store = __esm({
             this.snapshot.omitted++;
             json = JSON.stringify(this.snapshot);
           }
-          writeFileSync12(temp, json, { flag: "wx", mode: 384 });
+          writeFileSync13(temp, json, { flag: "wx", mode: 384 });
           renameSync6(temp, this.file);
         } catch {
           this.disabled = true;
-          if (existsSync13(temp)) try {
+          if (existsSync14(temp)) try {
             unlinkSync6(temp);
           } catch {
           }
@@ -7165,8 +8201,8 @@ var init_runner = __esm({
 // src/harness/autonomy/history.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { createHash as createHash8 } from "node:crypto";
-import { closeSync as closeSync4, constants as constants7, fstatSync as fstatSync3, lstatSync as lstatSync8, openSync as openSync4, readSync as readSync2, readdirSync as readdirSync4, realpathSync as realpathSync6 } from "node:fs";
-import { join as join22 } from "node:path";
+import { closeSync as closeSync4, constants as constants8, fstatSync as fstatSync3, lstatSync as lstatSync9, openSync as openSync4, readSync as readSync2, readdirSync as readdirSync5, realpathSync as realpathSync6 } from "node:fs";
+import { join as join24 } from "node:path";
 function redact(value) {
   return value.replace(/-----BEGIN [^-]*(?:PRIVATE KEY|OPENSSH)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/g, "[credential omitted]").split("\n").map((line) => {
     if (/(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|passwd|authorization|token|secret)["']?(?:\s*[=:]\s*|\s+is\s+)\S/i.test(line) || /\bBearer\s+[\w./+~-]{8,}/i.test(line) || /\b(?:sk-[\w-]{12,}|gh[pousr]_[\w]{12,}|github_pat_[\w]{12,}|AKIA[A-Z0-9]{16})\b/.test(line) || /https?:\/\/[^\s/@]+:[^\s/@]+@/i.test(line) || /[?&](?:key|token|api_key|secret|password)=[^\s&#]+/i.test(line)) return "[credential omitted]";
@@ -7177,7 +8213,7 @@ function canonicalDirectory(value) {
   if (typeof value !== "string" || !value || value.length > 4096) return void 0;
   try {
     const result = realpathSync6(value);
-    return lstatSync8(result).isDirectory() ? result : void 0;
+    return lstatSync9(result).isDirectory() ? result : void 0;
   } catch {
     return void 0;
   }
@@ -7197,9 +8233,9 @@ function parsedLines(text) {
 function readBoundedSession(path2, allowed) {
   let fd;
   try {
-    const before = lstatSync8(path2);
+    const before = lstatSync9(path2);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) return void 0;
-    fd = openSync4(path2, constants7.O_RDONLY | (constants7.O_NOFOLLOW ?? 0));
+    fd = openSync4(path2, constants8.O_RDONLY | (constants8.O_NOFOLLOW ?? 0));
     const stat3 = fstatSync3(fd);
     if (!stat3.isFile() || stat3.nlink !== 1 || stat3.ino !== before.ino || stat3.dev !== before.dev) return void 0;
     const metadata = Buffer.alloc(Math.min(stat3.size, 8192));
@@ -7250,12 +8286,12 @@ function collectAutonomyEvidence(workspaces, options = {}) {
   const allowed = new Set(enrolled);
   let files = [];
   try {
-    files = readdirSync4(sessionsDir()).filter((file) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}\.jsonl$/.test(file)).sort().reverse().slice(0, 200);
+    files = readdirSync5(sessionsDir()).filter((file) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}\.jsonl$/.test(file)).sort().reverse().slice(0, 200);
   } catch {
   }
   const candidates = [];
   for (const file of files) {
-    const session = readBoundedSession(join22(sessionsDir(), file), allowed);
+    const session = readBoundedSession(join24(sessionsDir(), file), allowed);
     if (!session) continue;
     const workspace = session.workspace;
     const sessionId = file.slice(0, -6);
@@ -7594,9 +8630,9 @@ var init_engine = __esm({
 // src/harness/autonomy/service.ts
 import { spawnSync } from "node:child_process";
 import { createHash as createHash9, randomUUID as randomUUID13 } from "node:crypto";
-import { closeSync as closeSync5, constants as constants8, fstatSync as fstatSync4, lstatSync as lstatSync9, mkdirSync as mkdirSync13, openSync as openSync5, readFileSync as readFileSync16, renameSync as renameSync7, unlinkSync as unlinkSync7, writeFileSync as writeFileSync13 } from "node:fs";
+import { closeSync as closeSync5, constants as constants9, fstatSync as fstatSync4, lstatSync as lstatSync10, mkdirSync as mkdirSync14, openSync as openSync5, readFileSync as readFileSync17, renameSync as renameSync7, unlinkSync as unlinkSync7, writeFileSync as writeFileSync14 } from "node:fs";
 import { homedir as homedir16 } from "node:os";
-import { basename, dirname as dirname10, isAbsolute as isAbsolute5, join as join23, relative as relative3, resolve as resolve14 } from "node:path";
+import { basename, dirname as dirname10, isAbsolute as isAbsolute5, join as join25, relative as relative3, resolve as resolve14 } from "node:path";
 function absolute(value, name) {
   if (!isAbsolute5(value) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${name} must be an absolute path without control characters.`);
   return resolve14(value);
@@ -7607,13 +8643,13 @@ function configuration(options) {
   const nodePath = absolute(options.nodePath ?? process.execPath, "Node executable");
   const cliPath = absolute(options.cliPath, "Rein bundle");
   const uid = options.uid ?? process.getuid?.();
-  const platform = options.platform ?? process.platform;
-  if (platform === "darwin" && (!Number.isSafeInteger(uid) || uid < 0)) throw new Error("A user ID is required for a launchd user agent.");
+  const platform2 = options.platform ?? process.platform;
+  if (platform2 === "darwin" && (!Number.isSafeInteger(uid) || uid < 0)) throw new Error("A user ID is required for a launchd user agent.");
   const scope = createHash9("sha256").update(home).digest("hex").slice(0, 24);
   const label = `dev.rein.autonomy.${scope}`;
-  const paths = [dirname10(nodePath), join23(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  const paths = [dirname10(nodePath), join25(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
   const path2 = [...new Set(paths.filter((p) => isAbsolute5(p) && !/[\x00-\x1f\x7f:]/.test(p)))].join(":");
-  return { home, userHome, nodePath, cliPath, uid, platform, scope, label, path: path2 };
+  return { home, userHome, nodePath, cliPath, uid, platform: platform2, scope, label, path: path2 };
 }
 function xml(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -7629,7 +8665,7 @@ ${body}`;
 function servicePlan(options) {
   const cfg = configuration(options);
   if (cfg.platform === "darwin") {
-    const path2 = join23(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
+    const path2 = join25(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
     const target = `gui/${cfg.uid}/${cfg.label}`;
     const body = `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -7649,7 +8685,7 @@ function servicePlan(options) {
   }
   if (cfg.platform === "linux") {
     const name = `${cfg.label}.service`;
-    const path2 = join23(cfg.userHome, ".config", "systemd", "user", name);
+    const path2 = join25(cfg.userHome, ".config", "systemd", "user", name);
     const body = `[Unit]
 Description=Rein autonomy supervisor
 StartLimitIntervalSec=300
@@ -7683,7 +8719,7 @@ function ownedContent(path2, options) {
   let directory = dirname10(path2);
   for (; ; ) {
     try {
-      const stat3 = lstatSync9(directory);
+      const stat3 = lstatSync10(directory);
       if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory}`);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
@@ -7695,9 +8731,9 @@ function ownedContent(path2, options) {
   }
   let fd;
   try {
-    const stat3 = lstatSync9(path2);
+    const stat3 = lstatSync10(path2);
     if (!stat3.isFile() || stat3.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
-    fd = openSync5(path2, constants8.O_RDONLY | (constants8.O_NOFOLLOW ?? 0));
+    fd = openSync5(path2, constants9.O_RDONLY | (constants9.O_NOFOLLOW ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
@@ -7706,7 +8742,7 @@ function ownedContent(path2, options) {
     const stat3 = fstatSync4(fd);
     const uid = options.uid ?? process.getuid?.();
     if (!stat3.isFile() || stat3.size > 64 * 1024 || stat3.mode & 18 || uid !== void 0 && stat3.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
-    const text = readFileSync16(fd, "utf8");
+    const text = readFileSync17(fd, "utf8");
     const boundary = text.indexOf("\n");
     const body = text.slice(boundary + 1);
     if (boundary < 0 || text !== signedContent(body, cfg.scope, cfg.platform === "darwin")) throw new Error(`Refusing to overwrite or delete a modified or unrelated service file: ${path2}`);
@@ -7719,13 +8755,13 @@ function prepareDirectory(path2, userHome) {
   const components = relative3(userHome, path2).split("/");
   let current = userHome;
   for (const component of components) {
-    current = join23(current, component);
+    current = join25(current, component);
     try {
-      mkdirSync13(current, { mode: 448 });
+      mkdirSync14(current, { mode: 448 });
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
-    const stat3 = lstatSync9(current);
+    const stat3 = lstatSync10(current);
     if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
   }
 }
@@ -7770,14 +8806,14 @@ function installService(options) {
   const cfg = configuration(options);
   const previous = ownedContent(plan.path, options);
   prepareDirectory(dirname10(plan.path), cfg.userHome);
-  mkdirSync13(cfg.home, { recursive: true, mode: 448 });
+  mkdirSync14(cfg.home, { recursive: true, mode: 448 });
   if (previous !== void 0 && plan.manager === "launchd") {
     const result = run2(options, plan.uninstallCommands[0]);
     if ((result.status !== 0 || result.error) && !/could not find service|no such process|service not found/i.test(result.stderr ?? "")) throw new Error(`Cannot unload the existing Rein service: ${result.error?.message || result.stderr || result.status}`);
   }
   const temp = `${plan.path}.${randomUUID13()}.tmp`;
   try {
-    writeFileSync13(temp, plan.content, { flag: "wx", mode: 384 });
+    writeFileSync14(temp, plan.content, { flag: "wx", mode: 384 });
     if (ownedContent(plan.path, options) !== previous) throw new Error("The Rein service file changed while installing; retry the command.");
     renameSync7(temp, plan.path);
   } finally {
@@ -7821,7 +8857,7 @@ import { realpathSync as realpathSync7 } from "node:fs";
 import { resolve as resolve15 } from "node:path";
 function serviceConfigurationIssue(config, env = process.env) {
   const provider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0);
-  const cli = provider === "codex" || provider === "copilot";
+  const cli = provider === "codex" || provider === "copilot" || provider === "grok";
   const configuredBase = config.baseUrl ?? (provider ? PROVIDER_PRESETS[provider]?.baseUrl : void 0);
   const envBase = env.REIN_BASE_URL?.trim();
   const envModel = env.REIN_MODEL?.trim();
@@ -8070,7 +9106,7 @@ __export(onboarding_exports, {
   runProfileWizard: () => runProfileWizard
 });
 import { homedir as homedir17 } from "node:os";
-import { join as join24, resolve as resolve16 } from "node:path";
+import { join as join26, resolve as resolve16 } from "node:path";
 async function menu(prompt, log, question, choices, fallback = 1) {
   log(`
 ${question}`);
@@ -8204,7 +9240,7 @@ async function setupProactivity(prompt, log, connected, dependencies) {
     if (answer.toLowerCase() === "skip") return true;
     let workspace;
     try {
-      workspace = canonicalWorkspace(answer.startsWith("~/") ? join24(homedir17(), answer.slice(2)) : resolve16(answer));
+      workspace = canonicalWorkspace(answer.startsWith("~/") ? join26(homedir17(), answer.slice(2)) : resolve16(answer));
     } catch (error) {
       log(error.message);
       continue;
@@ -8236,7 +9272,7 @@ async function runOnboarding(options = {}, dependencies = {}) {
   }
   let prompt;
   const getPrompt = () => prompt ??= dependencies.prompt ?? createSetupPrompt();
-  const release = () => {
+  const release2 = () => {
     if (!dependencies.prompt) prompt?.close();
     prompt = void 0;
   };
@@ -8248,7 +9284,7 @@ async function runOnboarding(options = {}, dependencies = {}) {
     if (!keep) await runProfileWizard({ ...dependencies, prompt: getPrompt(), log });
     log("\n[2/4] Give Rein a model");
     log("A model is the engine that answers and uses tools. Run one on your hardware, or connect a cloud account.");
-    log("No local server yet? Install LM Studio at https://lmstudio.ai/download or Ollama at https://ollama.com/download, load a model, then start its API server.");
+    log("Connection setup checks this machine's model fit and known LAN/mesh servers. Choose hosting recipes if you need to install LM Studio, Ollama, llama.cpp, or vLLM. For cloud access, choose an API key or an official subscription CLI, including Grok for SuperGrok / X Premium+.");
     const config = loadConfig() ?? {};
     const explicit = options.provider || options.baseUrl || options.model || options.auth || options.cliProvider || options.sshHost || options.api;
     let reuse = !explicit && !!(config.model && (config.baseUrl || config.auth?.type === "cli"));
@@ -8292,7 +9328,7 @@ Try: ${firstTasks[profile?.operator_profile.focus ?? "coding"]}`);
 Run rein setup to continue; saved settings are kept.`);
     return 1;
   } finally {
-    release();
+    release2();
   }
 }
 async function profileCommand(args, flags) {
@@ -8324,7 +9360,7 @@ var init_onboarding = __esm({
     init_state();
     init_command();
     init_tui();
-    privateHome = () => resolve16(process.env.REIN_HOME || join24(homedir17(), ".rein"));
+    privateHome = () => resolve16(process.env.REIN_HOME || join26(homedir17(), ".rein"));
     packIds = Object.keys(PACKS);
     firstTasks = {
       coding: "Read this project and suggest one small improvement. Explain how we would test it before editing.",
@@ -8654,7 +9690,7 @@ __export(debug_exports, {
   analyzeDebugFolder: () => analyzeDebugFolder,
   formatDebugReport: () => formatDebugReport
 });
-import { lstat as lstat3, readdir, realpath, open as open3 } from "node:fs/promises";
+import { lstat as lstat3, readdir as readdir2, realpath, open as open3 } from "node:fs/promises";
 import { resolve as resolve18 } from "node:path";
 function emptyCounts() {
   return {
@@ -8699,7 +9735,7 @@ async function readExport(folder) {
   for (const path2 of [resolve18(root2, "sessions/raw"), resolve18(root2, "raw"), root2]) {
     try {
       if (await realpath(path2) !== path2 || !(await lstat3(path2)).isDirectory()) continue;
-      const entries = await readdir(path2, { withFileTypes: true });
+      const entries = await readdir2(path2, { withFileTypes: true });
       files = entries.filter((e) => e.isFile() && e.name.endsWith(".jsonl")).map((e) => e.name).sort();
       if (files.length) {
         directory = path2;
@@ -8724,14 +9760,14 @@ async function readExport(folder) {
       totalBytes += stat3.size;
       if (!stat3.isFile() || stat3.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
       const bytes = Buffer.alloc(stat3.size + 1);
-      let read = 0;
-      while (read < bytes.length) {
-        const chunk = await handle.read(bytes, read, bytes.length - read, read);
+      let read2 = 0;
+      while (read2 < bytes.length) {
+        const chunk = await handle.read(bytes, read2, bytes.length - read2, read2);
         if (!chunk.bytesRead) break;
-        read += chunk.bytesRead;
+        read2 += chunk.bytesRead;
       }
-      if (read > stat3.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
-      for (const line of bytes.subarray(0, read).toString("utf8").split("\n")) {
+      if (read2 > stat3.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
+      for (const line of bytes.subarray(0, read2).toString("utf8").split("\n")) {
         if (!line.trim()) continue;
         if (Buffer.byteLength(line) > 8 * 1024 * 1024) {
           counts.malformedRecords++;
@@ -8840,121 +9876,6 @@ var init_debug = __esm({
   }
 });
 
-// src/util/ansi.ts
-function wrap(open4, close) {
-  return (text) => enabled ? `\x1B[${open4}m${text}\x1B[${close}m` : text;
-}
-var enabled, bold, dim, italic, red, green, yellow, blue, magenta, cyan, gray;
-var init_ansi = __esm({
-  "src/util/ansi.ts"() {
-    enabled = process.stdout.isTTY && !("NO_COLOR" in process.env);
-    bold = wrap(1, 22);
-    dim = wrap(2, 22);
-    italic = wrap(3, 23);
-    red = wrap(31, 39);
-    green = wrap(32, 39);
-    yellow = wrap(33, 39);
-    blue = wrap(34, 39);
-    magenta = wrap(35, 39);
-    cyan = wrap(36, 39);
-    gray = wrap(90, 39);
-  }
-});
-
-// src/hardware/report.ts
-var report_exports = {};
-__export(report_exports, {
-  printHardwareReport: () => printHardwareReport
-});
-async function printHardwareReport(opts = {}) {
-  const { profile, all: assessments } = await assessCatalog();
-  const fits = assessments.filter((x) => x.a.verdict === "fits");
-  const tight = assessments.filter((x) => x.a.verdict === "tight");
-  const no = assessments.filter((x) => x.a.verdict === "no");
-  if (opts.json) {
-    console.log(
-      JSON.stringify(
-        {
-          hardware: {
-            os: profile.os,
-            cpu: profile.cpu,
-            ram: { total: profile.ram.totalBytes, available: profile.ram.availableBytes },
-            gpus: profile.gpus,
-            unifiedMemory: profile.unifiedMemory,
-            memBandwidthGBs: profile.memBandwidthGBs,
-            bandwidthNote: profile.bandwidthNote
-          },
-          models: assessments.map((x) => ({
-            id: x.model.id,
-            name: x.model.name,
-            params: x.model.params,
-            activeParams: x.model.activeParams,
-            quant: x.a.quant.label,
-            footprint: Math.round(x.a.totalBytes),
-            placement: x.a.placement,
-            verdict: x.a.verdict,
-            estTokS: x.a.estTokS,
-            ollama: x.model.ollama
-          }))
-        },
-        null,
-        2
-      )
-    );
-    return 0;
-  }
-  console.log(bold("rein hardware"));
-  console.log(`  ${profile.cpu.name} \xB7 ${profile.cpu.cores} cores${profile.cpu.features.length ? ` (${profile.cpu.features.join(", ")})` : ""}`);
-  const bwLine = profile.memBandwidthGBs ? ` \xB7 ~${profile.memBandwidthGBs} GB/s${profile.bandwidthNote === "estimate" ? " (est)" : ""}` : "";
-  console.log(
-    profile.unifiedMemory ? `  ${gb(profile.ram.totalBytes)} unified memory (${gb(profile.ram.availableBytes)} available)${bwLine}` : `  ${gb(profile.ram.totalBytes)} RAM (${gb(profile.ram.availableBytes)} available)${bwLine}`
-  );
-  for (const g of profile.gpus) {
-    if (g.vramTotalBytes) console.log(`  ${g.name} \xB7 ${gb(g.vramTotalBytes)} VRAM${g.vramFreeBytes != null ? ` (${gb(g.vramFreeBytes)} free)` : ""}`);
-    else if (!profile.unifiedMemory) console.log(`  ${g.name} (no VRAM reported)`);
-  }
-  console.log("");
-  const row = (x) => {
-    const m = x.model;
-    const moe = m.activeParams ? ` \xB7 ${Math.round(m.activeParams / 1e9)}B active` : "";
-    const markPlain = verdictMark(x.a).padEnd(14);
-    const mark = x.a.verdict === "fits" ? green(markPlain) : x.a.verdict === "tight" ? yellow(markPlain) : red(markPlain);
-    const get = m.ollama ? `  ${dim("ollama pull " + m.ollama)}` : "";
-    console.log(`  ${mark} ${m.name.padEnd(26)} ${Math.round(m.params / 1e9)}B${moe.padEnd(16)} ${x.a.quant.label.padEnd(8)} ${dim(x.a.placement)}${get}`);
-  };
-  if (fits.length > 0) {
-    console.log(bold(`what you can run (${fits.length})`));
-    fits.sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.model.params - a.model.params).forEach(row);
-  }
-  if (tight.length > 0) {
-    console.log("");
-    console.log(bold("tight \u2014 fits only if other memory hogs are closed"));
-    tight.forEach(row);
-  }
-  if (no.length > 0) {
-    console.log("");
-    console.log(dim(`out of reach: ${no.map((x) => x.model.name).join(", ")}`));
-  }
-  if (fits.length > 0) {
-    const best = fits[0];
-    console.log("");
-    console.log(`best pick: ${bold(best.model.name)}`);
-    if (best.model.ollama) console.log(`  ollama pull ${best.model.ollama}`);
-    console.log(`  ${dim(best.a.estimate)}`);
-  }
-  console.log("");
-  console.log(dim("estimates: footprint = weights + KV @ 16k ctx, 10%/2GiB reserve; tok/s = bandwidth \xD7 efficiency \u2014 directional, not a benchmark"));
-  console.log(dim(`summary: ${summarizeHardware(profile)}`));
-  return 0;
-}
-var init_report = __esm({
-  "src/hardware/report.ts"() {
-    init_ansi();
-    init_fit();
-    init_profile();
-  }
-});
-
 // src/harness/doctor.ts
 var doctor_exports = {};
 __export(doctor_exports, {
@@ -8966,9 +9887,9 @@ __export(doctor_exports, {
   usesLocalHardware: () => usesLocalHardware
 });
 import { execFileSync as execFileSync4 } from "node:child_process";
-import { existsSync as existsSync14, lstatSync as lstatSync10, readFileSync as readFileSync17, readdirSync as readdirSync5, realpathSync as realpathSync8, statSync as statSync6 } from "node:fs";
+import { existsSync as existsSync15, lstatSync as lstatSync11, readFileSync as readFileSync18, readdirSync as readdirSync6, realpathSync as realpathSync8, statSync as statSync6 } from "node:fs";
 import { homedir as homedir18 } from "node:os";
-import { dirname as dirname11, join as join25 } from "node:path";
+import { dirname as dirname11, join as join27 } from "node:path";
 function checkNodeRuntime(version = process.versions.node) {
   const major = Number(version.split(".")[0]);
   const supported = Number.isSafeInteger(major) && major >= 18;
@@ -9017,9 +9938,9 @@ function sh2(cmd, opts = {}) {
   }
 }
 function gitRootOf(file, maxDepth = 4) {
-  let dir = existsSync14(file) && statSync6(file).isFile() ? dirname11(file) : file;
+  let dir = existsSync15(file) && statSync6(file).isFile() ? dirname11(file) : file;
   for (let i = 0; i < maxDepth; i++) {
-    if (existsSync14(join25(dir, ".git"))) return dir;
+    if (existsSync15(join27(dir, ".git"))) return dir;
     const up = dirname11(dir);
     if (up === dir) return void 0;
     dir = up;
@@ -9029,9 +9950,9 @@ function gitRootOf(file, maxDepth = 4) {
 function newestMtime(dir) {
   let newest = 0;
   const walk = (d) => {
-    for (const entry of readdirSync5(d, { withFileTypes: true })) {
+    for (const entry of readdirSync6(d, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name === ".git") continue;
-      const p = join25(d, entry.name);
+      const p = join27(d, entry.name);
       if (entry.isDirectory()) walk(p);
       else newest = Math.max(newest, statSync6(p).mtimeMs);
     }
@@ -9050,7 +9971,7 @@ function usesLocalHardware(config) {
 }
 async function checkConfiguredProvider(config) {
   const cli = config.auth?.type === "cli" ? config.auth.provider ?? config.provider : config.provider;
-  if (cli === "codex" || cli === "copilot") {
+  if (cli === "codex" || cli === "copilot" || cli === "grok") {
     const status2 = await checkCliAuth(cli);
     return {
       name: "server",
@@ -9106,10 +10027,10 @@ async function runDoctor(opts = {}) {
       let installedPackage = false;
       try {
         const packageRoot = dirname11(dirname11(real));
-        installedPackage = JSON.parse(readFileSync17(join25(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join25(packageRoot, "dist", "rein.js");
+        installedPackage = JSON.parse(readFileSync18(join27(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join27(packageRoot, "dist", "rein.js");
       } catch {
       }
-      const distOk = installedPackage || repo && existsSync14(join25(repo, "dist", "rein.js"));
+      const distOk = installedPackage || repo && existsSync15(join27(repo, "dist", "rein.js"));
       checks.push({
         name: "bin",
         status: distOk ? "ok" : "fail",
@@ -9139,8 +10060,8 @@ async function runDoctor(opts = {}) {
     }
   }
   if (repo) {
-    const bundle = join25(repo, "dist", "rein.js");
-    if (!existsSync14(bundle)) {
+    const bundle = join27(repo, "dist", "rein.js");
+    if (!existsSync15(bundle)) {
       checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => {
         const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
         if (r.err) throw new Error(r.err);
@@ -9148,7 +10069,7 @@ async function runDoctor(opts = {}) {
       } });
     } else {
       const bundleMtime = statSync6(bundle).mtimeMs;
-      const srcMtime = newestMtime(join25(repo, "src"));
+      const srcMtime = newestMtime(join27(repo, "src"));
       const fresh = bundleMtime >= srcMtime;
       checks.push({
         name: "bundle",
@@ -9182,8 +10103,7 @@ async function runDoctor(opts = {}) {
         const fit = bestAssessment(profile, entry);
         let bestPick = "";
         if (fit.verdict === "no") {
-          const fitting = CATALOG.map((m) => ({ m, a: bestAssessment(profile, m) })).filter(({ a }) => a.verdict === "fits").sort((x, y) => (y.a.estTokS ?? 0) - (x.a.estTokS ?? 0));
-          bestPick = fitting.length ? fitting[0].m.name : "none fits on this machine";
+          bestPick = servingRecommendations(profile).best?.model.name ?? "none fits on this machine";
         }
         checks.push({
           name: "hardware",
@@ -9196,9 +10116,9 @@ async function runDoctor(opts = {}) {
       checks.push({ name: "hardware", status: "warn", detail: "hardware profile failed (continuing)" });
     }
   }
-  const cfgPath = join25(process.env.REIN_HOME || join25(homedir18(), ".rein"), "config.json");
-  if (existsSync14(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
-    const mode = lstatSync10(cfgPath).mode & 511;
+  const cfgPath = join27(process.env.REIN_HOME || join27(homedir18(), ".rein"), "config.json");
+  if (existsSync15(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
+    const mode = lstatSync11(cfgPath).mode & 511;
     checks.push({
       name: "perms",
       status: (mode & 63) === 0 ? "ok" : "warn",
@@ -9258,6 +10178,7 @@ var init_doctor = __esm({
     init_auth();
     init_catalog();
     init_fit();
+    init_recipes();
     init_profile();
     NODE_COMPATIBILITY_MAJORS = /* @__PURE__ */ new Set([18, 20, 22, 24]);
   }
@@ -9275,8 +10196,8 @@ __export(loop_exports, {
   runExperimentLoop: () => runExperimentLoop
 });
 import { execFileSync as execFileSync5 } from "node:child_process";
-import { existsSync as existsSync15, readFileSync as readFileSync18, appendFileSync as appendFileSync2, realpathSync as realpathSync9 } from "node:fs";
-import { join as join26, resolve as resolve19 } from "node:path";
+import { existsSync as existsSync16, readFileSync as readFileSync19, appendFileSync as appendFileSync2, realpathSync as realpathSync9 } from "node:fs";
+import { join as join28, resolve as resolve19 } from "node:path";
 import { randomUUID as randomUUID14 } from "node:crypto";
 function sh3(cmd, cwd) {
   return execFileSync5("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
@@ -9320,7 +10241,7 @@ function discardIteration(cwd, expectedHead) {
   execFileSync5("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
 }
 function recordLesson(cwd, text, commitMessage) {
-  appendFileSync2(join26(cwd, "LESSONS.md"), `
+  appendFileSync2(join28(cwd, "LESSONS.md"), `
 ${text}
 `);
   execFileSync5("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
@@ -9330,16 +10251,16 @@ async function runExperimentLoop(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join26(cwd, taskFile);
-  const metricPath = join26(cwd, metricFile);
-  if (!existsSync15(taskPath)) {
+  const taskPath = join28(cwd, taskFile);
+  const metricPath = join28(cwd, metricFile);
+  if (!existsSync16(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
-  if (!existsSync15(metricPath)) {
+  if (!existsSync16(metricPath)) {
     throw new Error(`No ${metricFile} in ${cwd} \u2014 put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
   }
-  const task = readFileSync18(taskPath, "utf8");
-  const metricDoc = readFileSync18(metricPath, "utf8");
+  const task = readFileSync19(taskPath, "utf8");
+  const metricDoc = readFileSync19(metricPath, "utf8");
   const metricCmd = readMetricCommand(metricDoc);
   if (!metricCmd) throw new Error("METRIC.md has no metric command");
   requireCleanGit(cwd);
@@ -9441,19 +10362,19 @@ __export(improve_exports, {
   runImproveLoop: () => runImproveLoop
 });
 import { execFileSync as execFileSync6 } from "node:child_process";
-import { cpSync, existsSync as existsSync16, mkdtempSync as mkdtempSync2, readFileSync as readFileSync19, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
+import { cpSync, existsSync as existsSync17, mkdtempSync as mkdtempSync2, readFileSync as readFileSync20, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
-import { join as join27, dirname as dirname12, resolve as resolve20 } from "node:path";
+import { join as join29, dirname as dirname12, resolve as resolve20 } from "node:path";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 import { randomUUID as randomUUID15 } from "node:crypto";
 function sh4(cmd, cwd) {
   return execFileSync6("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function runHarnessTests(repoDir) {
-  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join27(tmpdir5(), "rein-validation-")) : repoDir;
+  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join29(tmpdir5(), "rein-validation-")) : repoDir;
   try {
     if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
-      if (existsSync16(join27(repoDir, name))) cpSync(join27(repoDir, name), join27(dir, name), { recursive: true });
+      if (existsSync17(join29(repoDir, name))) cpSync(join29(repoDir, name), join29(dir, name), { recursive: true });
     }
     const output = execFileSync6(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
       cwd: dir,
@@ -9469,9 +10390,9 @@ function runHarnessTests(repoDir) {
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join27(repoDir, "LESSONS.md");
-  if (!existsSync16(path2)) return "";
-  const text = readFileSync19(path2, "utf8");
+  const path2 = join29(repoDir, "LESSONS.md");
+  if (!existsSync17(path2)) return "";
+  const text = readFileSync20(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
   return m?.[1]?.trim() ?? "";
 }
@@ -9533,7 +10454,7 @@ ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
         const test = runHarnessTests(repoDir);
         if (sh4("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
         if (test.pass) {
-          appendFileSync3(join27(repoDir, "LESSONS.md"), `
+          appendFileSync3(join29(repoDir, "LESSONS.md"), `
 - [improve ${tag}] fixed: ${firstLine(report)}
 `);
           if (useGit) sh4(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
@@ -9575,7 +10496,7 @@ var init_improve = __esm({
     init_runner();
     init_system_prompt();
     here4 = dirname12(fileURLToPath5(import.meta.url));
-    REIN_REPO = [here4, resolve20(here4, ".."), resolve20(here4, "..", "..")].find((dir) => existsSync16(join27(dir, "test", "smoke.ts"))) ?? resolve20(here4, "..", "..");
+    REIN_REPO = [here4, resolve20(here4, ".."), resolve20(here4, "..", "..")].find((dir) => existsSync17(join29(dir, "test", "smoke.ts"))) ?? resolve20(here4, "..", "..");
   }
 });
 
@@ -9586,9 +10507,9 @@ __export(heartbeat_exports, {
   parseHeartbeat: () => parseHeartbeat,
   runHeartbeat: () => runHeartbeat
 });
-import { appendFileSync as appendFileSync4, existsSync as existsSync17, mkdirSync as mkdirSync14, readFileSync as readFileSync20, writeFileSync as writeFileSync14 } from "node:fs";
+import { appendFileSync as appendFileSync4, existsSync as existsSync18, mkdirSync as mkdirSync15, readFileSync as readFileSync21, writeFileSync as writeFileSync15 } from "node:fs";
 import { homedir as homedir19 } from "node:os";
-import { isAbsolute as isAbsolute6, join as join28, resolve as resolve21 } from "node:path";
+import { isAbsolute as isAbsolute6, join as join30, resolve as resolve21 } from "node:path";
 function parseHeartbeat(text) {
   const tasks = [];
   let improveGoal;
@@ -9607,13 +10528,13 @@ function parseHeartbeat(text) {
 function resolveHeartbeatFile(explicit) {
   if (explicit) return isAbsolute6(explicit) ? explicit : resolve21(explicit);
   const local = resolve21(process.cwd(), "HEARTBEAT.md");
-  if (existsSync17(local)) return local;
-  return join28(process.env.REIN_HOME || join28(homedir19(), ".rein"), "HEARTBEAT.md");
+  if (existsSync18(local)) return local;
+  return join30(process.env.REIN_HOME || join30(homedir19(), ".rein"), "HEARTBEAT.md");
 }
 function logBeat(result) {
-  const dir = process.env.REIN_HOME || join28(homedir19(), ".rein");
-  mkdirSync14(dir, { recursive: true });
-  const path2 = join28(dir, "heartbeat.log");
+  const dir = process.env.REIN_HOME || join30(homedir19(), ".rein");
+  mkdirSync15(dir, { recursive: true });
+  const path2 = join30(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     file: result.file,
@@ -9631,17 +10552,17 @@ async function runHeartbeat(opts = {}) {
   };
   if (opts.init) {
     const path2 = opts.file ? isAbsolute6(opts.file) ? opts.file : resolve21(opts.file) : resolve21(process.cwd(), "HEARTBEAT.md");
-    writeFileSync14(path2, HEARTBEAT_TEMPLATE);
+    writeFileSync15(path2, HEARTBEAT_TEMPLATE);
     say(green(`wrote ${path2} \u2014 edit it, then run: rein heartbeat`));
     return 0;
   }
   const file = resolveHeartbeatFile(opts.file);
-  if (!existsSync17(file)) {
+  if (!existsSync18(file)) {
     say(red(`no HEARTBEAT.md (looked in cwd and ~/.rein)`));
     say(dim(`create one: rein heartbeat --init --file ${file}`));
     return 1;
   }
-  const { tasks, improveGoal } = parseHeartbeat(readFileSync20(file, "utf8"));
+  const { tasks, improveGoal } = parseHeartbeat(readFileSync21(file, "utf8"));
   say(bold(`heartbeat \xB7 ${file}`) + dim(` \xB7 ${(/* @__PURE__ */ new Date()).toISOString()}`));
   say(`
 ${bold("1/4 self-heal")}`);
@@ -9652,7 +10573,7 @@ ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync17(join28(process.env.REIN_HOME || join28(homedir19(), ".rein"), "config.json"))) {
+  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync18(join30(process.env.REIN_HOME || join30(homedir19(), ".rein"), "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -10399,17 +11320,17 @@ var activity_exports = {};
 __export(activity_exports, {
   openDesktopActivity: () => openDesktopActivity
 });
-import { execFile as execFile11 } from "node:child_process";
+import { execFile as execFile12 } from "node:child_process";
 import { promisify as promisify10 } from "node:util";
-import { existsSync as existsSync18 } from "node:fs";
+import { existsSync as existsSync19 } from "node:fs";
 import { homedir as homedir20 } from "node:os";
-import { join as join29 } from "node:path";
+import { join as join31 } from "node:path";
 async function openDesktopActivity(id) {
   const canvas = await startCanvas(id);
-  const base = process.platform === "darwin" ? join29(homedir20(), "Library/Application Support/node-terminal") : join29(process.env.XDG_CONFIG_HOME || join29(homedir20(), ".config"), "node-terminal");
-  const script = join29(base, "canvas-control/nodeterm.sh");
+  const base = process.platform === "darwin" ? join31(homedir20(), "Library/Application Support/node-terminal") : join31(process.env.XDG_CONFIG_HOME || join31(homedir20(), ".config"), "node-terminal");
+  const script = join31(base, "canvas-control/nodeterm.sh");
   try {
-    if (process.env.NODETERM_NODE_ID && process.env.NODETERM_CANVAS_CONTROL && existsSync18(script)) {
+    if (process.env.NODETERM_NODE_ID && process.env.NODETERM_CANVAS_CONTROL && existsSync19(script)) {
       try {
         await exec5("sh", [script, "show-web", "--url", canvas.url], { timeout: 1e4, maxBuffer: 64 * 1024 });
         console.error("Rein activity opened as a NodeTerm canvas node.");
@@ -10431,33 +11352,20 @@ var exec5;
 var init_activity = __esm({
   "src/harness/desktop/activity.ts"() {
     init_server();
-    exec5 = promisify10(execFile11);
+    exec5 = promisify10(execFile12);
   }
 });
 
 // src/cli.ts
 init_models();
-import { readFileSync as readFileSync21 } from "node:fs";
+import { readFileSync as readFileSync22 } from "node:fs";
 async function printHardwareSection() {
-  try {
-    const { summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
-    const { assessCatalog: assessCatalog2 } = await Promise.resolve().then(() => (init_fit(), fit_exports));
-    const { profile, all } = await assessCatalog2();
-    const ranked = all.filter((x) => x.a.verdict !== "no").sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.model.params - a.model.params).slice(0, 5);
-    if (ranked.length === 0) return;
-    console.log("\nyour machine:");
-    console.log(`  ${summarizeHardware2(profile)}`);
-    console.log("top local picks (see `rein hardware` for the full table):");
-    for (const { model: m, a } of ranked) {
-      const mark = a.verdict === "fits" ? `~${a.estTokS ?? "?"} tok/s` : "tight";
-      console.log(`  ${m.name.padEnd(28)} ${String(mark).padEnd(12)} ${m.ollama ?? ""}`);
-    }
-  } catch {
-  }
+  const { printServingAdvice: printServingAdvice2 } = await Promise.resolve().then(() => (init_server_setup(), server_setup_exports));
+  await printServingAdvice2();
 }
 function cliVersion() {
   try {
-    return JSON.parse(readFileSync21(new URL("../package.json", import.meta.url), "utf8")).version;
+    return JSON.parse(readFileSync22(new URL("../package.json", import.meta.url), "utf8")).version;
   } catch {
     return "0.0.0";
   }
@@ -10495,7 +11403,9 @@ Usage:
   rein tmux list                list this workspace's persistent shells
   rein tmux capture|attach|interrupt|stop <id>
   rein tmux send <id> <text>     send literal input and Enter to a persistent shell
-  rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
+  rein hardware [--json]        model fit and serving recipes for this machine
+    --context <tokens>          plan the recipe's context memory
+    --focus coding|ops|research|creative   choose task-oriented recommendations
   rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal \u2192 HEARTBEAT.md tasks \u2192 self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
@@ -10507,8 +11417,10 @@ Usage:
   rein autonomy                 task-history proposals and background service controls
   rein autonomy help            enrollment, budgets, approvals, pause, and removal
   rein setup --status           show config, detected servers, test the connection
-  rein login codex|copilot      open official subscription device sign-in
+  rein login codex|copilot|grok open official subscription device sign-in
   rein setup --provider codex   use a ChatGPT subscription through the official CLI
+  rein setup --provider grok    SuperGrok / X Premium+ through the official Grok CLI
+  rein setup --provider xai     xAI API key (XAI_API_KEY)
   rein setup --ssh model-host --base-url 127.0.0.1:1234
                                 reach a remote loopback API through SSH
 
@@ -10523,6 +11435,9 @@ Model selection (highest wins):
 Options:
   --silent[=false]               doctor/heartbeat: compatibility flags stay silent by default
                                  false shows them as information; warnings and failures remain visible
+  --discover-network[=false]      setup/models: include known LAN and mesh peers
+  --discover-hosts <hosts>        setup/models: comma-separated hosts or endpoint URLs
+  --discover-ports <ports>        setup/models: additional listening ports
   --auth <api-key|cli>            setup: API credentials or official subscription CLI
   --api chat-completions         explicit OpenAI-compatible HTTP protocol
   --activity <id>                record a private activity view under a fresh UUID
@@ -10543,7 +11458,7 @@ Options:
   -h, --help                       this help
   -v, --version                    print version`);
 }
-var BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only"]);
+var BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only", "discover-network"]);
 function parseArgs(argv) {
   const positional = [];
   const flags = {};
@@ -10589,6 +11504,15 @@ function stringFlag(flags, name) {
   if (value === void 0) return void 0;
   if (typeof value !== "string" || !value.trim()) throw new Error(`--${name} must have a value`);
   return value.trim();
+}
+function discoveryFlags(flags) {
+  const hostText = stringFlag(flags, "discover-hosts");
+  const portText = stringFlag(flags, "discover-ports");
+  const discoverHosts = hostText?.split(",").map((s) => s.trim());
+  if (discoverHosts?.some((s) => !s)) throw new Error("--discover-hosts requires comma-separated hosts or URLs.");
+  const discoverPorts = portText?.split(",").map((s) => Number(s.trim()));
+  if (discoverPorts?.some((p) => !Number.isInteger(p) || p < 1 || p > 65535)) throw new Error("--discover-ports requires comma-separated port numbers from 1 to 65535.");
+  return { discoverNetwork: typeof flags["discover-network"] === "boolean" ? flags["discover-network"] : void 0, discoverHosts, discoverPorts };
 }
 async function main(argv = process.argv.slice(2)) {
   const { _, flags } = parseArgs(argv);
@@ -10756,20 +11680,26 @@ ${result.smart_diff}`);
     return;
   }
   if (_[0] === "models" || _[0] === "model") {
-    const { discoverLocalServers: discoverLocalServers2, PROVIDER_PRESETS: PROVIDER_PRESETS2 } = await Promise.resolve().then(() => (init_models(), models_exports));
-    const servers = await discoverLocalServers2();
-    console.log("local servers detected:");
-    if (servers.length === 0) console.log("  (none running \u2014 start ollama / LM Studio / llama.cpp / vLLM)");
-    for (const s of servers) {
-      console.log(`  ${s.provider.padEnd(10)} ${s.baseUrl}`);
+    const { discoverServers: discoverServers3, PROVIDER_PRESETS: PROVIDER_PRESETS2 } = await Promise.resolve().then(() => (init_models(), models_exports));
+    const { printDiscoverySummary: printDiscoverySummary2 } = await Promise.resolve().then(() => (init_server_setup(), server_setup_exports));
+    const options = discoveryFlags(flags);
+    const report = await discoverServers3({ network: options.discoverNetwork === true, hosts: options.discoverHosts, ports: options.discoverPorts });
+    if (flags.json === true) {
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+    printDiscoverySummary2(report);
+    if (!report.network) console.log("Use rein models --discover-network to include known LAN/mesh peers.");
+    for (const s of report.servers) {
+      console.log(`  ${s.provider.padEnd(10)} ${s.baseUrl} [${s.status}; ${s.source}]${s.sshHost ? ` via SSH ${s.sshHost}` : ""}`);
       for (const m of s.models ?? []) console.log(`     ${m}`);
     }
     console.log("\nprovider presets:");
     for (const [name, p] of Object.entries(PROVIDER_PRESETS2)) {
       console.log(`  ${name.padEnd(12)} ${p.baseUrl}  (key: ${p.keyEnv})`);
     }
-    console.log("\nsubscription CLIs (official sign-in, separate from API billing):\n  codex        rein setup --provider codex\n  copilot      rein setup --provider copilot");
-    const config = loadConfig();
+    console.log("\nsubscription CLIs (official sign-in):\n  codex        rein setup --provider codex\n  copilot      rein setup --provider copilot\n  grok         rein setup --provider grok (SuperGrok / X Premium+)");
+    const config = loadConfig() ?? {};
     if (config.model || config.baseUrl) console.log(`
 config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, sshHost: config.sshHost })}`);
     await printHardwareSection();
@@ -10777,7 +11707,10 @@ config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, s
   }
   if (_[0] === "hardware") {
     const { printHardwareReport: printHardwareReport2 } = await Promise.resolve().then(() => (init_report(), report_exports));
-    return printHardwareReport2({ json: flags.json === true });
+    const { readOperatorProfile: readOperatorProfile2 } = await Promise.resolve().then(() => (init_operator_profile(), operator_profile_exports));
+    const focus = stringFlag(flags, "focus") ?? readOperatorProfile2().profile?.operator_profile.focus;
+    if (focus !== void 0 && !["coding", "ops", "research", "creative"].includes(focus)) throw new Error("--focus must be coding, ops, research, or creative.");
+    return printHardwareReport2({ json: flags.json === true, contextTokens: numberFlag(flags, "context", 1), focus });
   }
   if (_[0] === "doctor") {
     const { runDoctor: runDoctor2 } = await Promise.resolve().then(() => (init_doctor(), doctor_exports));
@@ -10806,7 +11739,7 @@ config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, s
   }
   if (_[0] === "login") {
     const provider = (_[1] ?? common.providerOverride)?.toLowerCase();
-    if (provider !== "codex" && provider !== "copilot") throw new Error("Use rein login codex or rein login copilot. API-key providers are configured with rein setup.");
+    if (provider !== "codex" && provider !== "copilot" && provider !== "grok") throw new Error("Use rein login codex, rein login copilot, or rein login grok. API-key providers are configured with rein setup.");
     if (flags.yes === true) throw new Error("Login requires browser interaction. Run rein login without --yes.");
     const { loginCli: loginCli2 } = await Promise.resolve().then(() => (init_auth(), auth_exports));
     const result = await loginCli2(provider, { deviceAuth: flags["device-auth"] !== false, openBrowser: flags["no-browser"] !== true });
@@ -10819,11 +11752,12 @@ config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, s
     const auth = stringFlag(flags, "auth");
     if (auth !== void 0 && auth !== "api-key" && auth !== "cli") throw new Error("--auth must be api-key or cli");
     const cliProvider = stringFlag(flags, "cli-provider");
-    if (cliProvider !== void 0 && cliProvider !== "codex" && cliProvider !== "copilot") throw new Error("--cli-provider must be codex or copilot");
+    if (cliProvider !== void 0 && cliProvider !== "codex" && cliProvider !== "copilot" && cliProvider !== "grok") throw new Error("--cli-provider must be codex, copilot, or grok");
     const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
     const { runOnboarding: runOnboarding2 } = await Promise.resolve().then(() => (init_onboarding(), onboarding_exports));
     const setup = flags["connection-only"] === true || flags.yes === true || flags.status === true ? runSetup2 : runOnboarding2;
     const code = await setup({
+      ...discoveryFlags(flags),
       yes: flags.yes === true,
       status: flags.status === true,
       api: common.api,

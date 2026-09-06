@@ -16,6 +16,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Model } from "./types.ts";
+import { discoverServers as probeServers, type DiscoverServersOptions, type DiscoveryDependencies, type DiscoveryEndpoint, type ServerDiscoveryReport } from "./discovery.ts";
+export type { DiscoverServersOptions, DiscoveredServer, ServerDiscoveryReport, DiscoveryStatus, DiscoverySource } from "./discovery.ts";
 
 import { PROVIDER_PRESETS, detectEndpoint, normalizeBaseUrl, guessProvider, GITHUB_MODELS_RETIRED } from "./endpoints.ts";
 export { PROVIDER_PRESETS, normalizeBaseUrl, detectEndpoint, guessProvider } from "./endpoints.ts";
@@ -76,10 +78,40 @@ export async function discoverLocalServers(): Promise<LocalServer[]> {
 	return results.filter((server): server is LocalServer & { models: string[] } => server !== undefined);
 }
 
+/** Localhost and explicitly configured endpoints are checked on every setup discovery. */
+export async function discoverServers(options: DiscoverServersOptions = {}, dependencies: DiscoveryDependencies = {}): Promise<ServerDiscoveryReport> {
+	const config = loadConfig();
+	const configured: DiscoveryEndpoint[] = [];
+	const savedBase = config.auth?.type !== "cli" ? config.baseUrl ?? (config.provider ? PROVIDER_PRESETS[config.provider.toLowerCase()]?.baseUrl : undefined) : undefined;
+	const envBase = process.env.REIN_BASE_URL?.trim();
+	if (envBase && !envBase.startsWith("cli://")) {
+		try {
+			const normalized = normalizeBaseUrl(envBase);
+			let sameSaved = false;
+			try { sameSaved = !!savedBase && normalizeBaseUrl(savedBase) === normalized; } catch { /* A malformed saved URL cannot hide a valid environment URL. */ }
+			const sshHost = sameSaved ? config.sshHost : undefined;
+			const inferred = guessProvider(normalized, "openai-compatible");
+			const provider = sameSaved ? config.provider ?? "openai-compatible" : LOCAL_SERVERS.some(server => server.provider === inferred) ? "openai-compatible" : inferred;
+			configured.push({ baseUrl: normalized, provider, source: "environment", sshHost, apiKey: apiKeyFor(provider, normalized, sshHost) });
+		} catch { /* Invalid URLs remain actionable when explicitly selected in setup. */ }
+	}
+	if (savedBase && !savedBase.startsWith("cli://")) {
+		const provider = config.provider ?? "openai-compatible";
+		configured.push({ baseUrl: savedBase, provider, source: "configured", sshHost: config.sshHost,
+			apiKey: scopedApiKeyFor(provider, savedBase, config.sshHost, !envBase) });
+	}
+	// Provider-specific local keys remain scoped to the exact documented local listener.
+	for (const server of LOCAL_SERVERS) {
+		const key = scopedApiKeyFor(server.provider, server.baseUrl, undefined, false);
+		if (key) configured.push({ baseUrl: server.baseUrl, source: "localhost", provider: "openai-compatible", apiKey: key });
+	}
+	return probeServers({ ...options, configured: [...configured, ...(options.configured ?? [])] }, dependencies);
+}
+
 export interface ReinConfig {
 	provider?: string;
 	api?: "chat-completions";
-	auth?: { type: "api-key" | "cli"; provider?: "codex" | "copilot"; command?: never };
+	auth?: { type: "api-key" | "cli"; provider?: "codex" | "copilot" | "grok"; command?: never };
 	sshHost?: string;
 	baseUrl?: string;
 	apiKey?: string;
@@ -106,7 +138,7 @@ export function apiKeyFor(provider?: string, baseUrl?: string, sshHost?: string)
 
 function scopedApiKeyFor(provider?: string, baseUrl?: string, sshHost?: string, allowGeneric = true): string | undefined {
 	provider = provider?.toLowerCase();
-	if (provider === "codex" || provider === "copilot" || baseUrl?.startsWith("cli://")) return undefined;
+	if (provider === "codex" || provider === "copilot" || provider === "grok" || baseUrl?.startsWith("cli://")) return undefined;
 	const config = loadConfig();
 	const preset = provider ? PROVIDER_PRESETS[provider] : undefined;
 	const target = baseUrl ?? preset?.baseUrl ?? config.baseUrl;
@@ -114,6 +146,13 @@ function scopedApiKeyFor(provider?: string, baseUrl?: string, sshHost?: string, 
 	try { if (target) normalized = normalizeBaseUrl(target); } catch { return undefined; }
 	// This explicit generic variable applies to the user's selected API endpoint.
 	if (allowGeneric && process.env.REIN_API_KEY) return process.env.REIN_API_KEY;
+	if (["custom", "openai-compatible"].includes(provider ?? "") && normalized && !sshHost) {
+		// A provider-specific local key identifies its documented listener, not the
+		// implementation answering there. Keep the custom adapter and exact path.
+		const local = LOCAL_SERVERS.find(server => normalizeBaseUrl(server.baseUrl) === normalized);
+		const key = local ? process.env[PROVIDER_PRESETS[local.provider].keyEnv] : undefined;
+		if (key) return key;
+	}
 	if (preset && normalized && new URL(normalized).origin === new URL(preset.baseUrl).origin) {
 		const key = process.env[preset.keyEnv];
 		if (key) return key;
@@ -127,7 +166,10 @@ function scopedApiKeyFor(provider?: string, baseUrl?: string, sshHost?: string, 
 export function loadConfig(): ReinConfig {
 	const path = join(process.env.REIN_HOME || join(homedir(), ".rein"), "config.json");
 	try {
-		if (existsSync(path)) return JSON.parse(readFileSync(path, "utf8")) as ReinConfig;
+		if (existsSync(path)) {
+			const parsed = JSON.parse(readFileSync(path, "utf8"));
+			return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ReinConfig : {};
+		}
 	} catch {
 		// bad config file: ignore (reported by `rein doctor` if we add one)
 	}
@@ -153,7 +195,7 @@ export async function resolveModel(
 	const configuredProvider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : undefined);
 	const providerName = providerOverride ?? (selectingEndpoint ? undefined : configuredProvider);
 	if (providerName === "github") throw new Error(GITHUB_MODELS_RETIRED);
-	if (providerName === "codex" || providerName === "copilot") {
+	if (providerName === "codex" || providerName === "copilot" || providerName === "grok") {
 		if (requestedApi !== undefined) throw new Error("--api/REIN_API selects an HTTP API protocol. Subscription CLI providers manage their own transport.");
 		if (overrides.baseUrl !== undefined || envBase) throw new Error(`CLI provider ${providerName} cannot be combined with an HTTP base URL. Remove --base-url/REIN_BASE_URL or select an API provider.`);
 		if (overrides.sshHost) throw new Error("SSH forwarding applies to HTTP API providers, not subscription CLI providers.");
@@ -166,7 +208,7 @@ export async function resolveModel(
 	validateHttpApi(requestedApi ?? config.api);
 	const preset = providerName ? PROVIDER_PRESETS[providerName] : undefined;
 	if (providerOverride && !preset && !["custom", "openai-compatible"].includes(providerOverride)) {
-		throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, custom`);
+		throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, grok, custom`);
 	}
 	// Config URLs belong to their auth mode; selecting an API cannot inherit a CLI URL.
 	const configuredBase = config.auth?.type !== "cli" && !config.baseUrl?.startsWith("cli://") ? config.baseUrl : undefined;

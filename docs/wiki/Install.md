@@ -77,11 +77,16 @@ if you do not have a model server yet. The
 [self-hosted models guide](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models)
 walks through serving a model.
 
-Rein checks localhost ports 11434, 1234, 8080, and 8000 for Ollama, LM Studio,
-llama.cpp, and vLLM. If discovery misses yours, choose the custom API option and
-enter the URL shown by your model server. For another machine, supply its
-reachable hostname or IP and port. Rein checks that address rather than scanning
-LAN or mesh peers.
+Setup checks localhost, configured endpoints, and known LAN/mesh peers. It shows
+servers needing a key or a loaded model as well as ready servers. The scan has a
+10-second budget and does not sweep subnets. Use `--discover-network=false` to
+limit setup to localhost and configured endpoints. For missing hosts or unusual
+ports, enter the URL shown by your server. See
+[Server discovery](https://github.com/Zermo/rein-agent/wiki/Server-discovery).
+
+Setup also checks the machine running Rein and suggests a local model. Choose
+**Help me host a model** for serving recipes and prerequisites. Run `rein hardware`
+on a remote model host to assess that host's memory; the gateway cannot infer it.
 
 For a supported subscription login or API key, follow
 [Cloud connections](https://github.com/Zermo/rein-agent/wiki/Cloud-connections).

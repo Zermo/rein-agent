@@ -6,11 +6,13 @@ import { join } from "node:path";
 import { AssistantMessageEventStream } from "./event-stream.ts";
 import { parseTextToolCalls, TEXT_TOOL_INSTRUCTIONS } from "./openai-completions.ts";
 import type { AssistantMessage, Context, Model, StreamOptions } from "./types.ts";
+import { GROK_CLI, grokArguments, grokEnvironment, grokEvent, grokOutput, prepareGrokProfile } from "./xai.ts";
 
-export type CliProvider = "codex" | "copilot";
+export type CliProvider = "codex" | "copilot" | "grok";
 export const CLI_PROVIDERS = {
 	codex: { label: "ChatGPT subscription via Codex CLI", command: "codex", installCommand: "npm install -g @openai/codex", loginUrl: "https://auth.openai.com/codex/device", defaultModel: "default", baseUrl: "cli://codex" },
 	copilot: { label: "GitHub Copilot subscription via Copilot CLI", command: "copilot", installCommand: "npm install -g @github/copilot", loginUrl: "https://github.com/login/device", defaultModel: "default", baseUrl: "cli://copilot" },
+	grok: GROK_CLI,
 } as const;
 export interface CliProcessOptions { executable?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; signal?: AbortSignal }
 export interface CliStreamOptions extends StreamOptions { executable?: string; env?: NodeJS.ProcessEnv; maxOutputBytes?: number }
@@ -21,7 +23,8 @@ export function cliEnvironment(provider: CliProvider, overrides: NodeJS.ProcessE
 	const env = { ...process.env, ...overrides };
 	// Subscription mode must not silently select API billing or environment-token overrides.
 	for (const key of Object.keys(env)) if (key.startsWith("COPILOT_PROVIDER_")) delete env[key];
-	for (const key of ["ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "COPILOT_ALLOW_ALL", "NODE_OPTIONS", "BASH_ENV", "ENV"]) delete env[key];
+	for (const key of ["ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_KEY", "XAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "COPILOT_ALLOW_ALL", "NODE_OPTIONS", "BASH_ENV", "ENV"]) delete env[key];
+	if (provider === "grok") return grokEnvironment(env, cliAuthDirectory(provider, env));
 	env[provider === "codex" ? "CODEX_HOME" : "COPILOT_HOME"] = cliAuthDirectory(provider, env);
 	if (provider === "copilot") env.GH_CONFIG_DIR = join(cliAuthDirectory(provider, env), "gh");
 	env.GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS = "false";
@@ -37,12 +40,14 @@ export function renderCliPrompt(context: Context): string {
 const CODEX_DISABLED_FEATURES = ["shell_tool", "unified_exec", "apply_patch_freeform", "view_image", "apps", "plugins", "hooks", "codex_hooks", "plugin_hooks", "multi_agent", "multi_agent_v2", "browser_use", "computer_use", "image_generation", "imagegenext", "js_repl", "code_mode", "code_mode_host", "memory_tool", "memories", "tool_suggest", "skill_search", "skill_mcp_dependency_install", "remote_plugin", "workspace_dependencies", "in_app_browser", "in_app_chat", "in_app_local_automation"];
 /** Source: openai/codex config.schema.json and GitHub's CLI/custom-agent references. */
 export function cliArguments(provider: CliProvider, model: string, _prompt = ""): string[] {
+	if (provider === "grok") return grokArguments(model, _prompt);
 	if (provider === "codex") return ["exec", "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-c", 'approval_policy="never"', "-c", 'web_search="disabled"', "-c", "mcp_servers={}", "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false", ...CODEX_DISABLED_FEATURES.flatMap(name => ["-c", `features.${name}=false`]), ...(model && model !== "default" ? ["--model", model] : []), "-"];
 	// A custom agent with tools: [] removes all tools, including configured MCP tools.
 	return ["--agent", "rein-bridge", "--silent", "--no-color", "--no-ask-user", "--no-custom-instructions", "--no-auto-update", "--no-bash-env", "--no-experimental", "--no-remote", "--no-remote-export", "--disable-builtin-mcps", "--deny-tool", "shell,write,read,url,memory", ...(model && model !== "default" ? ["--model", model] : [])];
 }
-function prepareProfile(provider: CliProvider, env: NodeJS.ProcessEnv): void {
+export function prepareCliProfile(provider: CliProvider, env: NodeJS.ProcessEnv): void {
 	const directory = cliAuthDirectory(provider, env); mkdirSync(directory, { recursive: true, mode: 0o700 });
+	if (provider === "grok") return prepareGrokProfile(directory);
 	if (provider !== "copilot") return;
 	// This profile is dedicated to Rein login. Never inherit additional code or tools.
 	for (const name of ["mcp-config.json", "hooks.json", "hooks", "plugins", "agents", "extensions"]) {
@@ -57,10 +62,10 @@ export function streamCli(model: Model, context: Context, options: CliStreamOpti
 	void (async () => {
 		let directory: string | undefined;
 		try {
-			if (model.provider !== "codex" && model.provider !== "copilot") throw new Error(`Unsupported CLI provider: ${model.provider}`);
+			if (model.provider !== "codex" && model.provider !== "copilot" && model.provider !== "grok") throw new Error(`Unsupported CLI provider: ${model.provider}`);
 			const provider = model.provider;
 			if (options.signal?.aborted) throw new Error("Operation aborted");
-			const env = cliEnvironment(provider, options.env); prepareProfile(provider, env);
+			const env = cliEnvironment(provider, options.env); prepareCliProfile(provider, env);
 			const prompt = renderCliPrompt(context);
 			if (Buffer.byteLength(prompt) > 8_000_000) throw new Error(`${provider} CLI prompt exceeds its transport size limit. Start a fresh context window or use an API provider.`);
 			directory = mkdtempSync(join(tmpdir(), "rein-cli-"));
@@ -68,8 +73,17 @@ export function streamCli(model: Model, context: Context, options: CliStreamOpti
 				mkdirSync(join(directory, ".github", "agents"), { recursive: true });
 				writeFileSync(join(directory, ".github", "agents", "rein-bridge.agent.md"), '---\nname: rein-bridge\ndescription: Generate the next Rein assistant message without native tools\ntools: []\n---\nUse only the Rein text-tool protocol in the supplied conversation. Never call native tools.\n', { mode: 0o600 });
 			}
-			const result = await runCliProcess(provider, cliArguments(provider, model.id, prompt), prompt, directory, env, options);
+			let promptArgument = prompt;
+			if (provider === "grok") {
+				promptArgument = join(directory, "prompt.txt");
+				writeFileSync(promptArgument, prompt, { flag: "wx", mode: 0o600 });
+			}
+			const result = await runCliProcess(provider, cliArguments(provider, model.id, promptArgument), provider === "grok" ? "" : prompt, directory, env, options);
 			let text = result;
+			if (provider === "grok") {
+				const parsed = grokOutput(result); text = parsed.text;
+				if (parsed.usage) message.usage = parsed.usage;
+			}
 			if (provider === "codex") {
 				const parts: string[] = [];
 				for (const line of result.split(/\r?\n/).filter(Boolean)) {
@@ -136,10 +150,15 @@ function runCliProcess(provider: CliProvider, args: string[], input: string, cwd
 			bytes += Buffer.byteLength(data);
 			if (bytes > (options.maxOutputBytes ?? 2_000_000)) { stop(`${provider} CLI output exceeded its size limit`); return; }
 			stdout += data;
-			if (provider === "codex") {
+			if (provider === "codex" || provider === "grok") {
 				pendingLine += data;
 				const lines = pendingLine.split("\n"); pendingLine = lines.pop() ?? "";
 				for (const line of lines) {
+					if (provider === "grok") {
+						if (!line.trim()) continue;
+						try { grokEvent(line); } catch (error) { stop(error instanceof Error ? error.message : String(error)); }
+						continue;
+					}
 					try {
 						const event = JSON.parse(line);
 						if (/command_execution|file_change|mcp_tool_call|web_search|image_generation|browser|computer/.test(event.item?.type ?? "")) stop("Codex attempted a native tool. The bridge canceled this turn; Rein tools must use text tool blocks.");

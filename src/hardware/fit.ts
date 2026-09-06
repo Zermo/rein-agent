@@ -1,127 +1,98 @@
-/**
- * Fit assessment — will this model run on this machine, and roughly how fast?
- *
- * Stolen concepts from Magnitude's icn-hardware (Apache-2.0):
- *  - per-domain reserves before a model may claim memory
- *    (CapacityPolicy.reserve_bytes_per_domain, system_memory_thresholds)
- *  - a model "Fits" only with a headroom breakdown, not a boolean
- *
- * rein's version is pure arithmetic (no native planner):
- *   footprint = weights(params × bytesPerWeight) + KV estimate
- *   verdict   = footprint vs the memory pool(s), after reserves
- *   speed     = bandwidth / bytes-per-token (MoE: active params only)
+/** Magnitude-inspired memory planning: explicit pools, reserves and limitations.
+ * No benchmarks, summed-GPU assumptions, or remote-hardware inference.
  */
 import { CATALOG, type CatalogModel, type CatalogQuant } from "./catalog.ts";
 import { gb, profileHardware, type HardwareProfile } from "./profile.ts";
-
 const GiB = 1024 ** 3;
-/** Context we plan against (agent sessions, not 128k novels). */
-const PLAN_CONTEXT = 16_384;
-/** KV cache bytes per parameter at PLAN_CONTEXT, f16-ish entries. Rough. */
-const KV_PER_PARAM = 0.045;
-/** Bandwidth utilization for the tok/s estimate (memory-bound decoding). */
-const EFFICIENCY = 0.55;
-
+export const DEFAULT_PLAN_CONTEXT = 16_384;
+export interface FitOptions { contextTokens?: number }
 export interface FitAssessment {
 	model: CatalogModel;
 	quant: CatalogQuant;
 	weightsBytes: number;
 	kvBytes: number;
+	runtimeBytes: number;
 	totalBytes: number;
-	/** Where it would live. */
+	contextTokens: number;
 	placement: "gpu" | "unified" | "ram";
+	gpuIndex?: number;
 	verdict: "fits" | "tight" | "no";
+	reserveBytes: number;
+	availableBytes: number;
+	capacityBytes: number;
+	/** Low-confidence dense decode estimate only; never used to rank quality. */
 	estTokS?: number;
 	estimate: string;
+	confidence: "planning-estimate";
+	limitations: string[];
 }
-
-/**
- * Magnitude-style reserves: a model must leave room for the OS, the
- * runtime, and KV growth. max(pool/10, 2 GiB) for assessment.
- */
-function reserveFor(poolBytes: number): number {
-	return Math.max(poolBytes / 10, 2 * GiB);
+export function planContext(contextTokens?: number, maximum = DEFAULT_PLAN_CONTEXT): number {
+	if (contextTokens == null) return Math.min(DEFAULT_PLAN_CONTEXT, maximum);
+	if (!Number.isFinite(contextTokens) || contextTokens < 1) throw new Error("Context length must be a positive finite number.");
+	return Math.min(Math.floor(contextTokens), maximum);
 }
+function reserveFor(capacity: number, gpu: boolean): number { return Math.max(capacity / 10, (gpu ? 1 : 2) * GiB); }
+function finiteBytes(n: number | undefined): number { return n != null && Number.isFinite(n) && n > 0 ? n : 0; }
 
-export function assessFit(profile: HardwareProfile, model: CatalogModel, quant: CatalogQuant): FitAssessment {
-	const active = model.activeParams ?? model.params;
-	const weightsBytes = model.params * quant.bytesPerWeight * 1.05; // +5% embeddings/layers overhead
-	// KV scales with layers, not total params — using total params over-counts MoE by
-	// 3-5× (conservative: costs headroom, flips fits→tight). Deliberate.
-	const kvBytes = model.params * KV_PER_PARAM * (PLAN_CONTEXT / 4096);
-	const totalBytes = weightsBytes + kvBytes;
-
-	const pools: Array<{ name: "gpu" | "unified" | "ram"; capacity: number; available: number }> = [];
-	if (profile.unifiedMemory) {
-		pools.push({ name: "unified", capacity: profile.ram.totalBytes, available: Math.min(profile.ram.availableBytes, profile.ram.totalBytes) });
-	} else {
-		for (const g of profile.gpus) {
-			if (g.vramTotalBytes) pools.push({ name: "gpu", capacity: g.vramTotalBytes, available: Math.min(g.vramFreeBytes ?? g.vramTotalBytes, g.vramTotalBytes) });
-		}
-		pools.push({ name: "ram", capacity: profile.ram.totalBytes, available: Math.min(profile.ram.availableBytes, profile.ram.totalBytes) });
-	}
-
-	let verdict: FitAssessment["verdict"] = "no";
-	let placement: FitAssessment["placement"] = "ram";
-	let usedReserve = 0; // the reserve of the pool that decided the verdict (for the estimate line)
-	for (const pool of pools) {
-		const reserve = reserveFor(pool.capacity);
-		if (totalBytes + reserve <= pool.available) {
-			verdict = "fits"; // a later pool that fits overrides an earlier "tight" (e.g. VRAM tight, RAM fine)
-			placement = pool.name;
-			usedReserve = reserve;
-			if (pool.name === "gpu" || pool.name === "unified") break; // GPU-resident wins; stop looking
-		} else if (verdict === "no" && totalBytes + reserve <= pool.capacity * 0.95) {
-			verdict = "tight"; // fits only if you close other memory hogs
-			placement = pool.name;
-			usedReserve = reserve;
-		}
-	}
-
-	const estTokS =
-		profile.memBandwidthGBs && verdict !== "no"
-			? Math.round(((profile.memBandwidthGBs * 1e9) / (active * quant.bytesPerWeight)) * EFFICIENCY)
-			: undefined;
-
-	const estimate = `weights ${gb(totalBytes - kvBytes)} + KV ~${gb(kvBytes)} @ ${PLAN_CONTEXT / 1024}k ctx, after ${gb(usedReserve || reserveFor(8 * GiB))} reserve`;
-
+export function assessFit(profile: HardwareProfile, model: CatalogModel, quant: CatalogQuant, opts: FitOptions = {}): FitAssessment {
+	const contextTokens = planContext(opts.contextTokens, model.contextLength);
+	const weightsBytes = model.params * quant.bytesPerWeight * 1.05;
+	// K and V, two bytes each. Unlike params-based estimates this accounts for GQA
+	// and MoE layer geometry. Full context per layer conservatively covers SWA.
+	const kvBytes = model.kv
+		? 2 * 2 * model.kv.layers * model.kv.heads * model.kv.headDim * contextTokens
+		: Math.max(0.5 * GiB, model.params * 0.18) * contextTokens / DEFAULT_PLAN_CONTEXT;
+	const runtimeBytes = Math.max(0.5 * GiB, weightsBytes * 0.05);
+	const totalBytes = weightsBytes + kvBytes + runtimeBytes;
+	const limitations = ["One sequence, f16 KV; concurrent requests, vision, load-time buffers and runtime allocation limits can require more memory."];
+	if (!model.kv) limitations.push("Architecture-specific KV geometry unavailable; conservative fallback estimate used.");
+	if (model.activeParams) limitations.push("MoE keeps all weights resident. Expert routing and kernels make bandwidth-only speed estimates unreliable.");
+	if (opts.contextTokens && opts.contextTokens > contextTokens) limitations.push(`Requested context was capped at the model's ${contextTokens}-token limit.`);
+	type Pool = { placement: FitAssessment["placement"]; capacity: number; available: number; known: boolean; gpuIndex?: number };
+	const ramTotal = finiteBytes(profile.ram.totalBytes), ramAvailable = Math.min(finiteBytes(profile.ram.availableBytes), ramTotal);
+	const pools: Pool[] = profile.unifiedMemory
+		? [{ placement: "unified", capacity: ramTotal, available: ramAvailable, known: true }]
+		: [
+			...profile.gpus.flatMap((g, gpuIndex) => g.vramTotalBytes && !g.sharedMemory ? [{ placement: "gpu" as const, capacity: finiteBytes(g.vramTotalBytes),
+				available: Math.min(finiteBytes(g.vramFreeBytes), finiteBytes(g.vramTotalBytes)), known: g.vramFreeBytes != null, gpuIndex }] : []),
+			{ placement: "ram", capacity: ramTotal, available: ramAvailable, known: true },
+		];
+	const candidates = pools.map(pool => {
+		const reserve = reserveFor(pool.capacity, pool.placement === "gpu");
+		const verdict = pool.known && totalBytes + reserve <= pool.available ? "fits" : totalBytes + reserve <= pool.capacity ? "tight" : "no";
+		return { ...pool, reserve, verdict: verdict as FitAssessment["verdict"] };
+	}).sort((a, b) => {
+		const order = { fits: 0, tight: 1, no: 2 };
+		return order[a.verdict] - order[b.verdict] || Number(a.placement === "ram") - Number(b.placement === "ram") || b.available - a.available;
+	});
+	const chosen = candidates[0];
+	if (!chosen.known) limitations.push("Free memory in the selected GPU pool is unknown; fit requires a runtime check.");
+	if (profile.gpus.length > 1) limitations.push("Each GPU is assessed separately. Multi-GPU sharding and CPU/GPU offload need an explicit engine plan.");
+	if (chosen.placement === "ram") limitations.push("RAM placement means CPU inference; it does not establish GPU acceleration or interactive speed.");
+	if (profile.unifiedMemory) limitations.push("Unified RAM is counted once; driver/Metal allocation limits may be lower than physical RAM.");
+	const estTokS = !model.activeParams && chosen.verdict === "fits" && chosen.placement === "unified" && profile.os.startsWith("darwin") && profile.memBandwidthGBs
+		? Math.max(1, Math.round(profile.memBandwidthGBs * 1e9 * 0.35 / (weightsBytes + kvBytes))) : undefined;
+	if (estTokS) limitations.push("Decode speed is a low-confidence bandwidth estimate, not a measurement; prompt processing and kernel overhead are excluded.");
 	return {
-		model,
-		quant,
-		weightsBytes,
-		kvBytes,
-		totalBytes,
-		placement,
-		verdict,
-		estTokS,
-		estimate,
+		model, quant, weightsBytes, kvBytes, runtimeBytes, totalBytes, contextTokens,
+		placement: chosen.placement, gpuIndex: chosen.gpuIndex, verdict: chosen.verdict, reserveBytes: chosen.reserve,
+		capacityBytes: chosen.capacity, availableBytes: chosen.available, estTokS,
+		estimate: `weights ~${gb(weightsBytes, 1)} + KV ~${gb(kvBytes, 1)} + runtime ~${gb(runtimeBytes, 1)} @ ${contextTokens} ctx; ${gb(chosen.reserve, 1)} reserve`,
+		confidence: "planning-estimate", limitations,
 	};
 }
-
-/** Profile the machine and assess every catalog model against it (shared by
- * `rein hardware` and the `rein models` section). */
-export async function assessCatalog(): Promise<{
-	profile: HardwareProfile;
-	all: Array<{ model: CatalogModel; a: FitAssessment }>;
-}> {
+export async function assessCatalog(opts: FitOptions = {}): Promise<{ profile: HardwareProfile; all: Array<{ model: CatalogModel; a: FitAssessment }> }> {
 	const profile = await profileHardware();
-	return { profile, all: CATALOG.map((m) => ({ model: m, a: bestAssessment(profile, m) })) };
+	return { profile, all: CATALOG.map(model => ({ model, a: bestAssessment(profile, model, opts) })) };
 }
-
-/** Rank a model's quants best-first for this machine (smallest that fits). */
-export function bestAssessment(profile: HardwareProfile, model: CatalogModel): FitAssessment {
-	const ranked = model.quants
-		.map((q) => assessFit(profile, model, q))
-		.sort((a, b) => {
-			const order = { fits: 0, tight: 1, no: 2 } as const;
-			if (order[a.verdict] !== order[b.verdict]) return order[a.verdict] - order[b.verdict];
-			return a.totalBytes - b.totalBytes;
-		});
-	return ranked[0];
+/** Prefer fitting GPU/unified placement, then the smallest artifact with headroom. */
+export function bestAssessment(profile: HardwareProfile, model: CatalogModel, opts: FitOptions = {}): FitAssessment {
+	if (!model.quants.length) throw new Error(`No quantizations available for ${model.id}.`);
+	return model.quants.map(q => assessFit(profile, model, q, opts)).sort((a, b) => {
+		const order = { fits: 0, tight: 1, no: 2 };
+		return order[a.verdict] - order[b.verdict] || Number(a.placement === "ram") - Number(b.placement === "ram") || a.totalBytes - b.totalBytes;
+	})[0];
 }
-
 export function verdictMark(a: FitAssessment): string {
-	if (a.verdict === "fits") return a.estTokS ? `✓ ~${a.estTokS} tok/s` : "✓ fits";
-	if (a.verdict === "tight") return "△ tight";
-	return "✗ won't fit";
+	return a.verdict === "fits" ? "✓ fits estimate" : a.verdict === "tight" ? "△ verify memory" : "✗ beyond estimate";
 }

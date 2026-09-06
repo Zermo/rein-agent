@@ -1,99 +1,58 @@
-/**
- * `rein hardware` — profile the machine, then show what it can run.
- * The "scan your hardware and give you what you can run" feature, stolen
- * from Magnitude and rebuilt as three small zero-dependency modules.
- */
+/** Current-machine planning and serving steps, shared by CLI and onboarding. */
 import { bold, dim, green, red, yellow } from "../util/ansi.ts";
-import { assessCatalog, verdictMark } from "./fit.ts";
-import { gb, summarizeHardware } from "./profile.ts";
+import { verdictMark } from "./fit.ts";
+import { gb, profileHardware, summarizeHardware, type HardwareProfile } from "./profile.ts";
+import { probeServingTools, servingRecommendations, type ServingOptions, type ServingPlan } from "./recipes.ts";
 
-export async function printHardwareReport(opts: { json?: boolean } = {}): Promise<number> {
-	const { profile, all: assessments } = await assessCatalog();
-	const fits = assessments.filter((x) => x.a.verdict === "fits");
-	const tight = assessments.filter((x) => x.a.verdict === "tight");
-	const no = assessments.filter((x) => x.a.verdict === "no");
-
-	if (opts.json) {
-		console.log(
-			JSON.stringify(
-				{
-					hardware: {
-						os: profile.os,
-						cpu: profile.cpu,
-						ram: { total: profile.ram.totalBytes, available: profile.ram.availableBytes },
-						gpus: profile.gpus,
-						unifiedMemory: profile.unifiedMemory,
-						memBandwidthGBs: profile.memBandwidthGBs,
-						bandwidthNote: profile.bandwidthNote,
-					},
-					models: assessments.map((x) => ({
-						id: x.model.id,
-						name: x.model.name,
-						params: x.model.params,
-						activeParams: x.model.activeParams,
-						quant: x.a.quant.label,
-						footprint: Math.round(x.a.totalBytes),
-						placement: x.a.placement,
-						verdict: x.a.verdict,
-						estTokS: x.a.estTokS,
-						ollama: x.model.ollama,
-					})),
-				},
-				null,
-				2,
-			),
-		);
-		return 0;
-	}
-
-	console.log(bold("rein hardware"));
-	console.log(`  ${profile.cpu.name} · ${profile.cpu.cores} cores${profile.cpu.features.length ? ` (${profile.cpu.features.join(", ")})` : ""}`);
-	const bwLine = profile.memBandwidthGBs ? ` · ~${profile.memBandwidthGBs} GB/s${profile.bandwidthNote === "estimate" ? " (est)" : ""}` : "";
-	console.log(
-		profile.unifiedMemory
-			? `  ${gb(profile.ram.totalBytes)} unified memory (${gb(profile.ram.availableBytes)} available)${bwLine}`
-			: `  ${gb(profile.ram.totalBytes)} RAM (${gb(profile.ram.availableBytes)} available)${bwLine}`,
-	);
+export function hardwareReportLines(profile: HardwareProfile, plan: ServingPlan, tools: Awaited<ReturnType<typeof probeServingTools>>): string[] {
+	const lines = [bold("rein hardware — this machine"), `  ${summarizeHardware(profile)}`, `  ${gb(profile.ram.availableBytes, 1)} system memory available now`,
+		`  Plan: ${plan.contextTokens} context tokens, one concurrent request, f16 KV. Focus: ${plan.focus}.`, ""];
 	for (const g of profile.gpus) {
-		if (g.vramTotalBytes) console.log(`  ${g.name} · ${gb(g.vramTotalBytes)} VRAM${g.vramFreeBytes != null ? ` (${gb(g.vramFreeBytes)} free)` : ""}`);
-		else if (!profile.unifiedMemory) console.log(`  ${g.name} (no VRAM reported)`);
+		if (g.vramTotalBytes && !g.sharedMemory) lines.push(`  ${g.name}: ${gb(g.vramTotalBytes, 1)} VRAM, ${g.vramFreeBytes == null ? "free memory unknown" : gb(g.vramFreeBytes, 1) + " free"}`);
+		else lines.push(`  ${g.name}: ${g.sharedMemory ? "shared system memory" : "VRAM unavailable"}`);
 	}
-	console.log("");
+	for (const note of profile.notes ?? []) lines.push(`  ${dim(note)}`);
+	lines.push("", bold("model memory estimates"));
+	for (const { model, assessment: a } of plan.recommendations) {
+		const plain = verdictMark(a).padEnd(19);
+		const mark = a.verdict === "fits" ? green(plain) : a.verdict === "tight" ? yellow(plain) : red(plain);
+		lines.push(`  ${mark} ${model.name.padEnd(27)} ${a.quant.label.padEnd(7)} ${gb(a.totalBytes, 1).padStart(9)} ${a.placement}${a.gpuIndex == null ? "" : ` #${a.gpuIndex}`}`);
+	}
+	if (plan.best) {
+		lines.push("", `suggested starting model: ${bold(plan.best.model.name)}`, `  ${plan.best.reason}`, `  ${plan.best.assessment.estimate}`);
+		if (plan.best.assessment.estTokS) lines.push(`  Low-confidence decode estimate: ~${plan.best.assessment.estTokS} tok/s. This is not a benchmark.`);
+	}
+	lines.push("", bold("serving recipes — run only the one you choose"));
+	if (!plan.recipes.length) lines.push("  No launch recipe has sufficient assessed memory headroom. The notes below describe the next step.");
+	for (const recipe of plan.recipes) {
+		lines.push("", `  ${bold(recipe.title)} (${tools[recipe.engine]?.onPath ? "CLI found on PATH; runtime unverified" : "CLI not found on PATH"})`,
+			`  Model: ${recipe.model.name}, ${recipe.assessment.quant.label}, ${recipe.assessment.contextTokens} context tokens`,
+			`  ${recipe.assessment.estimate}`, `  Chat Completions base URL: ${recipe.baseUrl}`);
+		for (const prerequisite of recipe.prerequisites) lines.push(`    Before: ${prerequisite}`);
+		for (const command of recipe.commands) lines.push(`    ${command}`);
+		lines.push(`    Check: ${recipe.checks.join(" → ")}`);
+		for (const note of recipe.notes) lines.push(`    ${dim(note)}`);
+		lines.push(`    Docs: ${recipe.sources.join(" ")}`);
+	}
+	lines.push("", ...plan.notes.map(note => dim(note)));
+	return lines;
+}
 
-	const row = (x: (typeof assessments)[number]) => {
-		const m = x.model;
-		const moe = m.activeParams ? ` · ${Math.round(m.activeParams / 1e9)}B active` : "";
-		// Pad the plain text, then color — escape codes after padding keep columns aligned.
-		const markPlain = verdictMark(x.a).padEnd(14);
-		const mark = x.a.verdict === "fits" ? green(markPlain) : x.a.verdict === "tight" ? yellow(markPlain) : red(markPlain);
-		const get = m.ollama ? `  ${dim("ollama pull " + m.ollama)}` : "";
-		console.log(`  ${mark} ${m.name.padEnd(26)} ${Math.round(m.params / 1e9)}B${moe.padEnd(16)} ${x.a.quant.label.padEnd(8)} ${dim(x.a.placement)}${get}`);
-	};
-
-	if (fits.length > 0) {
-		console.log(bold(`what you can run (${fits.length})`));
-		fits
-			.sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.model.params - a.model.params)
-			.forEach(row);
+export async function printHardwareReport(opts: ServingOptions & { json?: boolean; log?: (text: string) => void } = {}): Promise<number> {
+	const log = opts.log ?? console.log;
+	const [profile, tools] = await Promise.all([profileHardware(), probeServingTools()]);
+	const plan = servingRecommendations(profile, opts);
+	if (opts.json) {
+		log(JSON.stringify({ scope: plan.scope, hardware: { ...profile, ram: { total: profile.ram.totalBytes, available: profile.ram.availableBytes } },
+			contextTokens: plan.contextTokens, focus: plan.focus, tools,
+			models: plan.recommendations.map(({ model, assessment: a, reason }) => ({ id: model.id, name: model.name, params: model.params,
+				activeParams: model.activeParams, quant: a.quant.label, footprint: Math.round(a.totalBytes), weightsBytes: Math.round(a.weightsBytes),
+				kvBytes: Math.round(a.kvBytes), runtimeBytes: Math.round(a.runtimeBytes), reserveBytes: Math.round(a.reserveBytes),
+				contextTokens: a.contextTokens, placement: a.placement, gpuIndex: a.gpuIndex, verdict: a.verdict, estTokS: a.estTokS,
+				confidence: a.confidence, limitations: a.limitations, ollama: a.quant.ollama, reason })),
+			best: plan.best?.model.id, recipes: plan.recipes, notes: plan.notes }, null, 2));
+	} else {
+		for (const line of hardwareReportLines(profile, plan, tools)) log(line);
 	}
-	if (tight.length > 0) {
-		console.log("");
-		console.log(bold("tight — fits only if other memory hogs are closed"));
-		tight.forEach(row);
-	}
-	if (no.length > 0) {
-		console.log("");
-		console.log(dim(`out of reach: ${no.map((x) => x.model.name).join(", ")}`));
-	}
-	if (fits.length > 0) {
-		const best = fits[0];
-		console.log("");
-		console.log(`best pick: ${bold(best.model.name)}`);
-		if (best.model.ollama) console.log(`  ollama pull ${best.model.ollama}`);
-		console.log(`  ${dim(best.a.estimate)}`);
-	}
-	console.log("");
-	console.log(dim("estimates: footprint = weights + KV @ 16k ctx, 10%/2GiB reserve; tok/s = bandwidth × efficiency — directional, not a benchmark"));
-	console.log(dim(`summary: ${summarizeHardware(profile)}`));
 	return 0;
 }

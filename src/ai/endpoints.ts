@@ -1,11 +1,13 @@
 /** OpenAI-compatible endpoint normalization and bounded, same-origin discovery. */
 import { withSshTunnel } from "./ssh.ts";
+import { XAI_PRESET, xaiLanguageModelIds } from "./xai.ts";
 export const PROVIDER_PRESETS: Record<string, { baseUrl: string; keyEnv: string }> = {
 	ollama: { baseUrl: "http://localhost:11434/v1", keyEnv: "OLLAMA_API_KEY" },
 	lmstudio: { baseUrl: "http://localhost:1234/v1", keyEnv: "LMSTUDIO_API_KEY" },
 	llamacpp: { baseUrl: "http://localhost:8080/v1", keyEnv: "LLAMACPP_API_KEY" },
 	vllm: { baseUrl: "http://localhost:8000/v1", keyEnv: "VLLM_API_KEY" },
 	openai: { baseUrl: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
+	xai: XAI_PRESET,
 	deepseek: { baseUrl: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY" },
 	groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY" },
 	together: { baseUrl: "https://api.together.xyz/v1", keyEnv: "TOGETHER_API_KEY" },
@@ -63,8 +65,8 @@ export function normalizeBaseUrl(input: string, provider?: string): string {
 	const inferred = guessProvider(url.toString());
 	if (inferred === "github" || provider?.toLowerCase() === "github") throw new Error(GITHUB_MODELS_RETIRED);
 	let path = url.pathname.replace(/\/+$/, "");
-	const wasRoute = /\/(?:chat\/completions|models)$/.test(path);
-	path = path.replace(/\/(?:chat\/completions|models)$/, "");
+	const wasRoute = /\/(?:chat\/completions|models|language-models)$/.test(path);
+	path = path.replace(/\/(?:chat\/completions|models|language-models)$/, "");
 	const preset = PROVIDER_PRESETS[inferred];
 	// Canonical cloud API prefixes are only inferred on the provider's own origin.
 	if (preset && url.origin === new URL(preset.baseUrl).origin && (!path || path === "/v1" || new URL(preset.baseUrl).pathname.startsWith(path + "/"))) {
@@ -75,14 +77,47 @@ export function normalizeBaseUrl(input: string, provider?: string): string {
 	return url.origin + (path || "/");
 }
 
-export interface DetectedEndpoint { baseUrl: string; provider: string; models: string[]; error?: string; }
+export type EndpointStatus = "ready" | "auth-required" | "no-models" | "unreachable" | "incompatible";
+export interface DetectedEndpoint { baseUrl: string; provider: string; models: string[]; error?: string; status?: EndpointStatus; }
+
+function endpointStatus(result: DetectedEndpoint): EndpointStatus {
+	if (result.models.length) return "ready";
+	if (/Authentication .*HTTP (401|403)/.test(result.error ?? "")) return "auth-required";
+	if (/API is reachable but has no available models/.test(result.error ?? "")) return "no-models";
+	if (/Connection refused|Could not connect|could not be resolved|timed out|Cannot open SSH tunnel/i.test(result.error ?? "")) return "unreachable";
+	return "incompatible";
+}
+
+/** A nearby web server must not be able to stream an unbounded body into discovery. */
+async function boundedJson(response: Response): Promise<unknown> {
+	const reader = response.body?.getReader();
+	if (!reader) throw new Error("Empty model list response");
+	const decoder = new TextDecoder();
+	let size = 0;
+	let body = "";
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			size += value.byteLength;
+			if (size > 1024 * 1024) { await reader.cancel(); throw new Error("Model list exceeded 1 MiB"); }
+			body += decoder.decode(value, { stream: true });
+		}
+		return JSON.parse(body + decoder.decode());
+	} finally { reader.releaseLock(); }
+}
 
 function modelIds(doc: any): string[] | undefined {
 	const values = Array.isArray(doc?.data) ? doc.data : Array.isArray(doc?.models) ? doc.models : undefined;
 	if (!values) return undefined;
-	const ids = values.map((item: any) => typeof item === "string" ? item : item?.id ?? item?.name ?? item?.model).filter((id: unknown) => typeof id === "string" && id.length > 0);
+	const ids = values.map((item: any) => typeof item === "string" ? item : item?.id ?? item?.name ?? item?.model).filter(safeModelId);
 	if (values.length && !ids.length) return undefined;
 	return [...new Set(ids)] as string[];
+}
+
+/** IDs appear in terminal menus; reject terminal control sequences, not just bad JSON. */
+function safeModelId(id: unknown): id is string {
+	return typeof id === "string" && id.length <= 512 && id.trim().length > 0 && !/[\u0000-\u001f\u007f-\u009f]/.test(id);
 }
 
 /** Some self-hosted servers advertise their implementation in the model list. */
@@ -98,19 +133,28 @@ function serverProvider(doc: any, fallback: string): string {
 }
 
 /** Probe a few path variants on the supplied origin; never scan hosts or ports. */
-export interface DetectEndpointOptions { provider?: string; apiKey?: string; timeoutMs?: number; sshHost?: string; }
+export interface DetectEndpointOptions { provider?: string; apiKey?: string; timeoutMs?: number; sshHost?: string; signal?: AbortSignal; }
 export async function detectEndpoint(input: string, options: DetectEndpointOptions = {}): Promise<DetectedEndpoint> {
 	const logicalBase = normalizeBaseUrl(input, options.provider);
 	const provider = options.provider?.toLowerCase() ?? guessProvider(logicalBase, "custom");
+	const controller = new AbortController();
+	const abort = () => controller.abort();
+	if (options.signal?.aborted) controller.abort();
+	else options.signal?.addEventListener("abort", abort, { once: true });
+	const timer = setTimeout(abort, Math.max(1, options.timeoutMs ?? (options.sshHost ? 15_000 : 2500)));
 	try {
-		return await withSshTunnel(logicalBase, options.sshHost, async forwardedBase => {
-			const detected = await detectEndpointDirect(forwardedBase, { ...options, provider });
+		const result = await withSshTunnel(logicalBase, options.sshHost, async forwardedBase => {
+			const detected = await detectEndpointDirect(forwardedBase, { ...options, provider, signal: controller.signal });
 			const logicalOrigin = new URL(logicalBase).origin;
 			const forwardedOrigin = new URL(forwardedBase).origin;
 			return { ...detected, baseUrl: logicalOrigin + (new URL(detected.baseUrl).pathname === "/" ? "/" : new URL(detected.baseUrl).pathname.replace(/\/$/, "")),
 				...(detected.error ? { error: detected.error.replaceAll(forwardedOrigin, logicalOrigin) } : {}) };
-		});
-	} catch (error) { return { baseUrl: logicalBase, provider, models: [], error: (error as Error).message }; }
+		}, { signal: controller.signal, timeoutMs: options.timeoutMs });
+		return { ...result, status: endpointStatus(result) };
+	} catch (error) {
+		const result = { baseUrl: logicalBase, provider, models: [], error: controller.signal.aborted ? "Connection timed out while checking this endpoint. Check the host, VPN connection, and server bind address." : (error as Error).message };
+		return { ...result, status: endpointStatus(result) };
+	} finally { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); }
 }
 
 async function detectEndpointDirect(input: string, options: DetectEndpointOptions): Promise<DetectedEndpoint> {
@@ -122,13 +166,18 @@ async function detectEndpointDirect(input: string, options: DetectEndpointOption
 	if (url.pathname.endsWith("/v1")) bases.push(baseUrl.slice(0, -3));
 	else if (provider === "custom" || provider === "openai-compatible") bases.push(`${baseUrl.replace(/\/$/, "")}/v1`);
 	const probes = [...new Set(bases)].map(base => ({ base, endpoint: `${base}/models` }));
-	if (provider === "ollama") probes.push({ base: `${url.origin}/v1`, endpoint: `${url.origin}/api/tags` });
+	if (provider === "xai") probes.unshift({ base: bases[0], endpoint: `${bases[0]}/language-models` });
+	// A port is a probe hint, not evidence of which implementation is running.
+	if (provider === "ollama" || url.port === "11434") probes.push({ base: `${url.origin}/v1`, endpoint: `${url.origin}/api/tags` });
 	const deadline = Date.now() + Math.max(1, options.timeoutMs ?? 2500);
 	let error = "No compatible model list was found.";
 	for (const probe of probes) {
 		const controller = new AbortController();
+		const abort = () => controller.abort();
+		if (options.signal?.aborted) return { ...result, error: "Connection timed out while checking this endpoint." };
+		options.signal?.addEventListener("abort", abort, { once: true });
 		const remaining = deadline - Date.now();
-		if (remaining <= 0) return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
+		if (remaining <= 0) { options.signal?.removeEventListener("abort", abort); return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` }; }
 		const timer = setTimeout(() => controller.abort(), remaining);
 		try {
 			let endpoint = probe.endpoint;
@@ -154,22 +203,27 @@ async function detectEndpointDirect(input: string, options: DetectEndpointOption
 				continue;
 			}
 			let doc: unknown;
-			try { doc = await response!.json(); } catch {
+			try { doc = await boundedJson(response!); } catch {
 				if (controller.signal.aborted) throw new Error("Timed out");
 				error = `Invalid model list at ${probe.endpoint}: expected JSON, but received another response (possibly a web UI).`;
 				continue;
 			}
-			const models = modelIds(doc);
+			const languageRoute = new URL(endpoint).pathname.endsWith("/language-models");
+			const models = provider === "xai" ? xaiLanguageModelIds(languageRoute ? doc : { models: (doc as any)?.data ?? (doc as any)?.models })?.filter(safeModelId) : modelIds(doc);
+			if (provider === "xai" && !languageRoute && models?.length === 0 && modelIds(doc)?.length) {
+				error = "The xAI model list did not identify any text-capable models. Check /v1/language-models or enter an available chat model ID manually.";
+				continue;
+			}
 			if (!models) { error = `Invalid model list at ${probe.endpoint}: expected a data[] or models[] array of model IDs.`; continue; }
-			const rawDetectedBase = endpoint.endsWith("/models") ? endpoint.slice(0, -7) : probe.base;
+			const rawDetectedBase = /\/(?:models|language-models)$/.test(endpoint) ? endpoint.replace(/\/(?:models|language-models)$/, "") : probe.base;
 			const detectedBase = new URL(rawDetectedBase).pathname === "/" ? new URL(rawDetectedBase).origin + "/" : rawDetectedBase;
-			return { baseUrl: detectedBase, provider: serverProvider(doc, provider), models, ...(models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." }) };
+			return { baseUrl: detectedBase, provider: serverProvider(doc, new URL(endpoint).pathname === "/api/tags" && Array.isArray((doc as any)?.models) ? "ollama" : provider), models, ...(models.length ? {} : { error: "The API is reachable but has no available models. Load a model in the server, or specify its model ID manually." }) };
 		} catch (err) {
 			if (controller.signal.aborted || (err as Error).name === "AbortError") return { ...result, error: `Connection timed out while checking ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
 			const cause = (err as { cause?: { code?: string }; code?: string });
 			const code = cause.cause?.code ?? cause.code;
 			return { ...result, error: `${code === "ECONNREFUSED" ? "Connection refused" : code === "ENOTFOUND" || code === "EAI_AGAIN" ? "Host name could not be resolved" : "Could not connect"} at ${url.origin}. Check the host, port, VPN connection, and server bind address.` };
-		} finally { clearTimeout(timer); }
+		} finally { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); }
 	}
 	return { ...result, error };
 }

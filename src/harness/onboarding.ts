@@ -157,7 +157,7 @@ export async function runOnboarding(options: SetupOptions = {}, dependencies: On
 		if (!keep) await runProfileWizard({ ...dependencies, prompt: getPrompt(), log });
 		log("\n[2/4] Give Rein a model");
 		log("A model is the engine that answers and uses tools. Run one on your hardware, or connect a cloud account.");
-		log("No local server yet? Install LM Studio at https://lmstudio.ai/download or Ollama at https://ollama.com/download, load a model, then start its API server.");
+		log("Connection setup checks this machine's model fit and known LAN/mesh servers. Choose hosting recipes if you need to install LM Studio, Ollama, llama.cpp, or vLLM. For cloud access, choose an API key or an official subscription CLI, including Grok for SuperGrok / X Premium+.");
 		const config = loadConfig() ?? {};
 		const explicit = options.provider || options.baseUrl || options.model || options.auth || options.cliProvider || options.sshHost || options.api;
 		let reuse = !explicit && !!(config.model && (config.baseUrl || config.auth?.type === "cli"));

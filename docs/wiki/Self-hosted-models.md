@@ -39,18 +39,19 @@ Other OpenAI-compatible servers, including llama.cpp and vLLM, work through thei
 
 ## What Rein detects
 
-`rein setup` checks these localhost ports for model lists:
+Interactive setup checks localhost ports 11434, 1234, 8080, and 8000, configured endpoints, and known private peers from the LAN neighbor table, NetBird, and Tailscale. Saved and explicitly supplied ports extend those defaults. It checks at most 16 peers and 80 endpoint candidates, with 8 concurrent probes and a 10-second deadline. It does not sweep a subnet.
 
-| Server preset | Port |
-| --- | --- |
-| Ollama | 11434 |
-| LM Studio | 1234 |
-| llama.cpp | 8080 |
-| vLLM | 8000 |
+Reachable servers remain listed when they need a key or have no models loaded. Choose the server to finish authentication or enter a model ID. Setup then tests a Chat Completions reply. A web dashboard URL alone is not enough.
 
-Discovery lists servers with available model IDs. If a server needs credentials, choose it explicitly and enter the key. An empty model list means you need to load or download a model, or enter its exact ID manually if the server supports that model but does not list it.
+```sh
+rein models --discover-network
+rein models --discover-hosts model-host --discover-ports 9000
+rein setup --connection-only --discover-network=false
+```
 
-For a remote machine, supply its hostname or IP and port. Rein checks API path variants on that same origin, including `/v1/models`, and can recognize server types from common ports or model-list metadata. It does not enumerate network devices, mesh peers, or ports. A successful discovery is followed by a short Chat Completions check; a web dashboard URL alone is not enough.
+Use the actual host and listening port if discovery misses a machine. A remote API bound only to loopback needs an explicit SSH connection. See [Server discovery](https://github.com/Zermo/rein-agent/wiki/Server-discovery) for bounds and troubleshooting.
+
+Before downloading, run `rein hardware` on the machine that will serve the model. Setup's **Help me host a model** option shows fit estimates and engine recipes. A gateway's hardware profile applies to the gateway only. See [Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and-serving).
 
 ## Connect over a LAN or mesh VPN
 

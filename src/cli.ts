@@ -20,27 +20,10 @@
 import { readFileSync } from "node:fs";
 import { loadConfig } from "./ai/models.ts";
 
-/** "what you can run" section for `rein models` — hardware-aware fit, best 5. */
+/** Hardware advice describes this gateway only, never an inferred remote GPU. */
 async function printHardwareSection(): Promise<void> {
-	try {
-		const { summarizeHardware } = await import("./hardware/profile.ts");
-		const { assessCatalog } = await import("./hardware/fit.ts");
-		const { profile, all } = await assessCatalog();
-		const ranked = all
-			.filter((x) => x.a.verdict !== "no")
-			.sort((a, b) => (b.a.estTokS ?? 0) - (a.a.estTokS ?? 0) || b.model.params - a.model.params)
-			.slice(0, 5);
-		if (ranked.length === 0) return;
-		console.log("\nyour machine:");
-		console.log(`  ${summarizeHardware(profile)}`);
-		console.log("top local picks (see `rein hardware` for the full table):");
-		for (const { model: m, a } of ranked) {
-			const mark = a.verdict === "fits" ? `~${a.estTokS ?? "?"} tok/s` : "tight";
-			console.log(`  ${m.name.padEnd(28)} ${String(mark).padEnd(12)} ${m.ollama ?? ""}`);
-		}
-	} catch {
-		// hardware section is best-effort; never break `rein models`
-	}
+	const { printServingAdvice } = await import("./harness/server-setup.ts");
+	await printServingAdvice();
 }
 
 function cliVersion(): string {
@@ -84,7 +67,9 @@ Usage:
   rein tmux list                list this workspace's persistent shells
   rein tmux capture|attach|interrupt|stop <id>
   rein tmux send <id> <text>     send literal input and Enter to a persistent shell
-  rein hardware [--json]        profile this machine + what it can run (tok/s estimates)
+  rein hardware [--json]        model fit and serving recipes for this machine
+    --context <tokens>          plan the recipe's context memory
+    --focus coding|ops|research|creative   choose task-oriented recommendations
   rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
@@ -96,8 +81,10 @@ Usage:
   rein autonomy                 task-history proposals and background service controls
   rein autonomy help            enrollment, budgets, approvals, pause, and removal
   rein setup --status           show config, detected servers, test the connection
-  rein login codex|copilot      open official subscription device sign-in
+  rein login codex|copilot|grok open official subscription device sign-in
   rein setup --provider codex   use a ChatGPT subscription through the official CLI
+  rein setup --provider grok    SuperGrok / X Premium+ through the official Grok CLI
+  rein setup --provider xai     xAI API key (XAI_API_KEY)
   rein setup --ssh model-host --base-url 127.0.0.1:1234
                                 reach a remote loopback API through SSH
 
@@ -112,6 +99,9 @@ Model selection (highest wins):
 Options:
   --silent[=false]               doctor/heartbeat: compatibility flags stay silent by default
                                  false shows them as information; warnings and failures remain visible
+  --discover-network[=false]      setup/models: include known LAN and mesh peers
+  --discover-hosts <hosts>        setup/models: comma-separated hosts or endpoint URLs
+  --discover-ports <ports>        setup/models: additional listening ports
   --auth <api-key|cli>            setup: API credentials or official subscription CLI
   --api chat-completions         explicit OpenAI-compatible HTTP protocol
   --activity <id>                record a private activity view under a fresh UUID
@@ -139,7 +129,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only", "discover-network"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -188,6 +178,16 @@ function stringFlag(flags: ParsedArgs["flags"], name: string): string | undefine
 	if (value === undefined) return undefined;
 	if (typeof value !== "string" || !value.trim()) throw new Error(`--${name} must have a value`);
 	return value.trim();
+}
+
+function discoveryFlags(flags: ParsedArgs["flags"]) {
+	const hostText = stringFlag(flags, "discover-hosts");
+	const portText = stringFlag(flags, "discover-ports");
+	const discoverHosts = hostText?.split(",").map(s => s.trim());
+	if (discoverHosts?.some(s => !s)) throw new Error("--discover-hosts requires comma-separated hosts or URLs.");
+	const discoverPorts = portText?.split(",").map(s => Number(s.trim()));
+	if (discoverPorts?.some(p => !Number.isInteger(p) || p < 1 || p > 65535)) throw new Error("--discover-ports requires comma-separated port numbers from 1 to 65535.");
+	return { discoverNetwork: typeof flags["discover-network"] === "boolean" ? flags["discover-network"] : undefined, discoverHosts, discoverPorts };
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
@@ -308,27 +308,33 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 	if (_[0] === "models" || _[0] === "model") {
-		const { discoverLocalServers, PROVIDER_PRESETS } = await import("./ai/models.ts");
-		const servers = await discoverLocalServers();
-		console.log("local servers detected:");
-		if (servers.length === 0) console.log("  (none running — start ollama / LM Studio / llama.cpp / vLLM)");
-		for (const s of servers) {
-			console.log(`  ${s.provider.padEnd(10)} ${s.baseUrl}`);
+		const { discoverServers, PROVIDER_PRESETS } = await import("./ai/models.ts");
+		const { printDiscoverySummary } = await import("./harness/server-setup.ts");
+		const options = discoveryFlags(flags);
+		const report = await discoverServers({ network: options.discoverNetwork === true, hosts: options.discoverHosts, ports: options.discoverPorts });
+		if (flags.json === true) { console.log(JSON.stringify(report, null, 2)); return; }
+		printDiscoverySummary(report);
+		if (!report.network) console.log("Use rein models --discover-network to include known LAN/mesh peers.");
+		for (const s of report.servers) {
+			console.log(`  ${s.provider.padEnd(10)} ${s.baseUrl} [${s.status}; ${s.source}]${s.sshHost ? ` via SSH ${s.sshHost}` : ""}`);
 			for (const m of s.models ?? []) console.log(`     ${m}`);
 		}
 		console.log("\nprovider presets:");
 		for (const [name, p] of Object.entries(PROVIDER_PRESETS)) {
 			console.log(`  ${name.padEnd(12)} ${p.baseUrl}  (key: ${p.keyEnv})`);
 		}
-		console.log("\nsubscription CLIs (official sign-in, separate from API billing):\n  codex        rein setup --provider codex\n  copilot      rein setup --provider copilot");
-		const config = loadConfig();
+		console.log("\nsubscription CLIs (official sign-in):\n  codex        rein setup --provider codex\n  copilot      rein setup --provider copilot\n  grok         rein setup --provider grok (SuperGrok / X Premium+)");
+		const config = loadConfig() ?? {};
 		if (config.model || config.baseUrl) console.log(`\nconfig → ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, sshHost: config.sshHost })}`);
 		await printHardwareSection();
 		return;
 	}
 	if (_[0] === "hardware") {
 		const { printHardwareReport } = await import("./hardware/report.ts");
-		return printHardwareReport({ json: flags.json === true });
+		const { readOperatorProfile } = await import("./harness/operator-profile.ts");
+		const focus = stringFlag(flags, "focus") ?? readOperatorProfile().profile?.operator_profile.focus;
+		if (focus !== undefined && !["coding", "ops", "research", "creative"].includes(focus)) throw new Error("--focus must be coding, ops, research, or creative.");
+		return printHardwareReport({ json: flags.json === true, contextTokens: numberFlag(flags, "context", 1), focus: focus as "coding" | "ops" | "research" | "creative" | undefined });
 	}
 
 	if (_[0] === "doctor") {
@@ -362,7 +368,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
 	if (_[0] === "login") {
 		const provider = (_[1] ?? common.providerOverride)?.toLowerCase();
-		if (provider !== "codex" && provider !== "copilot") throw new Error("Use rein login codex or rein login copilot. API-key providers are configured with rein setup.");
+		if (provider !== "codex" && provider !== "copilot" && provider !== "grok") throw new Error("Use rein login codex, rein login copilot, or rein login grok. API-key providers are configured with rein setup.");
 		if (flags.yes === true) throw new Error("Login requires browser interaction. Run rein login without --yes.");
 		const { loginCli } = await import("./harness/auth.ts");
 		const result = await loginCli(provider, { deviceAuth: flags["device-auth"] !== false, openBrowser: flags["no-browser"] !== true });
@@ -376,11 +382,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		const auth = stringFlag(flags, "auth");
 		if (auth !== undefined && auth !== "api-key" && auth !== "cli") throw new Error("--auth must be api-key or cli");
 		const cliProvider = stringFlag(flags, "cli-provider");
-		if (cliProvider !== undefined && cliProvider !== "codex" && cliProvider !== "copilot") throw new Error("--cli-provider must be codex or copilot");
+		if (cliProvider !== undefined && cliProvider !== "codex" && cliProvider !== "copilot" && cliProvider !== "grok") throw new Error("--cli-provider must be codex, copilot, or grok");
 		const { runSetup } = await import("./harness/setup.ts");
 		const { runOnboarding } = await import("./harness/onboarding.ts");
 		const setup = flags["connection-only"] === true || flags.yes === true || flags.status === true ? runSetup : runOnboarding;
-		const code = await setup({ yes: flags.yes === true, status: flags.status === true,
+		const code = await setup({ ...discoveryFlags(flags), yes: flags.yes === true, status: flags.status === true,
 			api: common.api,
 			provider: common.providerOverride, baseUrl: common.baseUrlOverride, model: common.modelOverride,
 			sshHost: common.sshHostOverride, auth, cliProvider, deviceAuth: flags["device-auth"] !== false, noBrowser: flags["no-browser"] === true });

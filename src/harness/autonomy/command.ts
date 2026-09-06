@@ -21,7 +21,7 @@ export interface AutonomyCommandDependencies {
 /** A user service does not inherit terminal exports. Do not persist credentials implicitly. */
 export function serviceConfigurationIssue(config: ReinConfig, env: NodeJS.ProcessEnv = process.env): string | undefined {
 	const provider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : undefined);
-	const cli = provider === "codex" || provider === "copilot";
+	const cli = provider === "codex" || provider === "copilot" || provider === "grok";
 	const configuredBase = config.baseUrl ?? (provider ? PROVIDER_PRESETS[provider]?.baseUrl : undefined);
 	const envBase = env.REIN_BASE_URL?.trim();
 	const envModel = env.REIN_MODEL?.trim();

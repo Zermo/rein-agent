@@ -61,6 +61,17 @@ try {
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /bundle rollover OK/);
   assert.equal(requests, 2);
+  // The distributed build exposes the new provider routes without starting login.
+  const help = await runCli(["--help"]);
+  assert.match(help.stdout, /--provider grok/); assert.match(help.stdout, /--provider xai/);
+  assert.match(help.stdout, /--discover-network/);
+  const invalidPort = await runCli(["models", "--discover-ports", "70000"]);
+  assert.equal(invalidPort.code, 1); assert.match(invalidPort.stderr, /1 to 65535/);
+  const hardware = await runCli(["hardware", "--json"]);
+  assert.equal(hardware.code, 0, hardware.stderr);
+  const hardwarePlan = JSON.parse(hardware.stdout);
+  assert.equal(hardwarePlan.scope, "current-machine");
+  assert.ok(Array.isArray(hardwarePlan.recipes));
   const invalidApi = await runCli(["--api", "responses", "--base-url", endpoint, "--model", "bundle-mock", "-p", "must not send"]);
   assert.notEqual(invalidApi.code, 0); assert.match(invalidApi.stderr, /Supported HTTP API/);
   const health = await runCli(["doctor", "--silent", "--json"], { REIN_HOME: join(dir, "health"), PATH: "/usr/bin:/bin" });
