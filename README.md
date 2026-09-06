@@ -1,5 +1,7 @@
 # rein
 
+[![Rein repository card](docs/assets/rein-repo-card.jpg)](https://zermo.github.io/rein-agent/)
+
 A minimal, local-first agent harness. Three layers, zero runtime dependencies,
 any OpenAI-compatible model — local by default, any provider by choice.
 
@@ -46,11 +48,14 @@ readable over clever, with explicit limits on context and tool output.
 ## Install
 
 For a visual walkthrough with copyable commands, open the
-[retro installation field guide](docs/install.html). It covers NodeTerm, a model-host
-over SSH, local models, and supported cloud connections. Download the HTML and
-open it in a browser, or open `docs/install.html` from a local checkout.
+[retro installation field guide](https://zermo.github.io/rein-agent/). It covers
+NodeTerm, a model-host over SSH, local models, and supported cloud connections. The
+[public wiki](https://github.com/Zermo/rein-agent/wiki) has setup and deployment
+instructions. For offline use, open `docs/install.html` from a local checkout.
 
-[![Retro Rein installation guide](docs/assets/install-guide-preview.png)](docs/install.html)
+[![Retro Rein installation guide](docs/assets/rein-field-guide-card.jpg)](https://zermo.github.io/rein-agent/)
+
+[Repo cards and logo files](docs/branding.md) · [Publish the guide](docs/guide-deployment.md)
 
 One-liner (macOS / Linux / WSL) — installs the harness and walks you through
 model setup (the openclaw / hermes style onboarding):

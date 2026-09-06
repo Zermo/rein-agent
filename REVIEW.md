@@ -1,5 +1,14 @@
 # Posthorse and harness review
 
+## Field guide branding and public publishing
+
+The guide now has matching repo cards, a PNG/SVG harness logo, a public setup
+wiki, and automatic GitHub Pages deployment. Two visual findings, inconsistent
+logo proportions and small phone labels, were corrected. Fresh visual and code
+reviews reported no remaining findings. Browser interactions, build fixtures,
+script syntax, and guide/wiki command syntax passed. See the
+[branding review](docs/branding-review.md) for coverage and limitations.
+
 ## 0.9.3 Reasoning-model setup and install guide
 
 The reported model-host connection was valid: an eight-token setup probe returned
