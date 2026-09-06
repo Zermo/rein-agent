@@ -30,6 +30,10 @@ from `apps/klaud` with `npm run dev`. Choose URL + token in its first window. Th
 server prints its loopback URL and the location of its private runtime token.
 See [the desktop README](../apps/klaud/README.md) for environment variables.
 
+For the native iOS client, use the separately enabled, resumable mobile gateway
+described in [Rein Klaud mobile gateway](klaud-mobile.md). The normal desktop
+bridge remains loopback-only.
+
 The server binds only to `127.0.0.1`. The app keeps its bearer token in Electron's
 main process. Model connections still use Rein's existing provider setup; the
 desktop does not connect to a model directly. Shell preferences apply live.

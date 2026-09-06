@@ -90,6 +90,24 @@ test("ESM entry finishes loading before Electron emits ready", async () => {
   } finally { clearTimeout(timer); }
 });
 
+test("desktop chrome and package metadata consistently use the rein-klaʊd name", async () => {
+  let nativeName;
+  await mainHarness(false, { setName(value) { nativeName = value; } });
+  assert.equal(nativeName, "rein-klaʊd", "the macOS application menu must not inherit Electron's name");
+
+  const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const metadata = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8"));
+  assert.equal(metadata.productName, "rein-klaʊd");
+  assert.equal(metadata.build.productName, "rein-klaʊd");
+  assert.match(readFileSync(join(appRoot, "index.html"), "utf8"), /<title>rein-klaʊd<\/title>/);
+
+  const main = readFileSync(join(appRoot, "main.mjs"), "utf8");
+  assert.match(main, /process\.title = "rein-klaʊd"/);
+  assert.match(main, /new BrowserWindow\(\{[\s\S]*?title: "rein-klaʊd"/);
+  assert.match(main, /label: "rein-klaʊd", submenu:/);
+  assert.doesNotMatch(main, /label: "Electron"|title: "Electron"/);
+});
+
 test("immediate backend cleanup resumes native Quit on the next event-loop turn", async () => {
   let beforeQuit, quitCalls = 0, cleanupCalls = 0, prevented = 0;
   const event = { preventDefault() { prevented++; } };

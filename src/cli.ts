@@ -63,6 +63,8 @@ Usage:
   rein watch <activity-id>       inspect activity inside this terminal
   rein canvas <activity-id>      serve an optional node canvas; --browser opens it
   rein serve [--port n]          serve the loopback rein-klaʊd AG-UI API
+  rein serve --mobile --host <private-ip> [--port n] [--trusted-origin <https-origin>]
+                                opt-in resumable iOS gateway (default port 4318)
   rein train <recipe.yaml>       run optional Automodel training
   rein meat [ref [ref]]          review a commit or range with the embedded Meat engine
                                 --staged or --working-tree selects uncommitted changes
@@ -106,6 +108,8 @@ Options:
   --discover-network[=false]      setup/models: include known LAN and mesh peers
   --discover-hosts <hosts>        setup/models: comma-separated hosts or endpoint URLs
   --discover-ports <ports>        setup/models: additional listening ports
+  --advertise=false              mobile gateway: disable Bonjour/Avahi discovery
+  --trusted-origin <https-url>   mobile gateway: exact private-mesh proxy origin
   --auth <api-key|cli>            setup: API credentials or official subscription CLI
   --api chat-completions         explicit OpenAI-compatible HTTP protocol
   --activity <id>                record a private activity view under a fresh UUID
@@ -133,7 +137,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only", "discover-network", "browser", "install-runtime", "start-runtime"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only", "discover-network", "browser", "install-runtime", "start-runtime", "mobile", "advertise"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -184,6 +188,12 @@ function stringFlag(flags: ParsedArgs["flags"], name: string): string | undefine
 	return value.trim();
 }
 
+export function resolveServePort(flags: ParsedArgs["flags"], mobile: boolean): number {
+	const port = numberFlag(flags, "port", 0) ?? (mobile ? 4318 : 0);
+	if (port > 65535) throw new Error("--port must be <= 65535");
+	return port;
+}
+
 function discoveryFlags(flags: ParsedArgs["flags"]) {
 	const hostText = stringFlag(flags, "discover-hosts");
 	const portText = stringFlag(flags, "discover-ports");
@@ -228,13 +238,24 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 	if (_[0] === "serve") {
-		if (_.length !== 1 || Object.keys(flags).some(key => key !== "port")) throw new Error("Usage: rein serve [--port n]");
-		const port = numberFlag(flags, "port", 0);
-		if (port !== undefined && port > 65535) throw new Error("--port must be <= 65535");
-		const { startKlaudServe } = await import("./harness/klaud/serve.ts");
-		const handle = await startKlaudServe({ port });
-		console.log(`rein-klaʊd is listening at ${handle.url}`);
-		console.log("The bearer token is in $REIN_HOME/klaud/serve-<port>.token, default ~/.rein.");
+		const allowed = new Set(["port", "mobile", "host", "advertise", "trusted-origin"]);
+		if (_.length !== 1 || Object.keys(flags).some(key => !allowed.has(key))) throw new Error("Usage: rein serve [--port n] | rein serve --mobile --host <private-ip> [--port n]");
+		const mobile = flags.mobile === true;
+		const port = resolveServePort(flags, mobile);
+		if (!mobile && (flags.host !== undefined || flags.advertise !== undefined || flags["trusted-origin"] !== undefined || flags.mobile === false)) throw new Error("--host, --advertise, --trusted-origin, and --mobile=false are valid only with --mobile.");
+		const handle = mobile
+			? await (async () => {
+				const host = stringFlag(flags, "host");
+				if (!host) throw new Error("rein serve --mobile requires --host with an explicit private interface address.");
+				const { startKlaudMobileGateway } = await import("./harness/klaud/mobile.ts");
+				return startKlaudMobileGateway({ host, port, advertise: flags.advertise === false ? false : undefined, trustedOrigin: stringFlag(flags, "trusted-origin") });
+			})()
+			: await (async () => { const { startKlaudServe } = await import("./harness/klaud/serve.ts"); return startKlaudServe({ port }); })();
+		console.log(`${mobile ? "rein-klaʊd mobile gateway" : "rein-klaʊd"} is listening at ${handle.url}`);
+		console.log(mobile && "tokenFile" in handle && handle.tokenFile
+			? `The reusable mobile bearer token is stored at ${handle.tokenFile}.`
+			: "The bearer token is in $REIN_HOME/klaud/serve-<port>.token, default ~/.rein.");
+		if (mobile && "trustedOrigin" in handle && handle.trustedOrigin) console.log(`The configured private-mesh origin is ${handle.trustedOrigin}.`);
 		await new Promise<void>((resolve, reject) => {
 			const stop = () => {
 				process.removeListener("SIGINT", stop);

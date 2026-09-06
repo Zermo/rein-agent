@@ -57,10 +57,22 @@ test("model start leaves the run lifecycle to serve", () => {
 for (const reason of ["stop", "length", "toolUse"] as const) {
 	test(`done with ${reason} emits RUN_FINISHED with a success outcome`, () => {
 		assert.deepEqual(toAgUiEvents({ type: "done", reason, message: message() }, ids), [
-			{ type: "RUN_FINISHED", threadId: "t", runId: "r", outcome: { type: "success" } },
+			{ type: "RUN_FINISHED", threadId: "t", runId: "r", outcome: { type: "success", stopReason: "stop" } },
 		]);
 	});
 }
+
+test("done exposes provider-reported reasoning usage without thought content or invented effort", () => {
+	const finished = toAgUiEvents({
+		type: "done", reason: "stop",
+		message: { ...message([{ type: "thinking", thinking: privateThinking }]), usage: { input: 12, output: 30, totalTokens: 42, reasoning: 17 } },
+	}, ids);
+	assert.deepEqual(finished, [{
+		type: "RUN_FINISHED", threadId: "t", runId: "r",
+		outcome: { type: "success", stopReason: "stop", reasoningTokens: 17 },
+	}]);
+	assert.doesNotMatch(JSON.stringify(finished), /PRIVATE_THINKING_SENTINEL|effort|strength/i);
+});
 
 test("error emits the provider error message without the raw assistant message", () => {
 	const error = { ...message(), errorMessage: "Fixture provider failed" };

@@ -106,6 +106,48 @@ test("real runner patches live shell and resumes the same bot transcript after r
 	assert.equal(loadSession(bot.sessionId).messages.length, 6);
 });
 
+test("bot history preserves safe assistant completion metadata across restart", async t => {
+	const f = await fixture(t);
+	const bot = await (await f.post("/bots", { name: "Completion history" })).json();
+	appendMessage(bot.sessionId, {
+		role: "assistant",
+		content: [
+			{ type: "thinking", thinking: "PRIVATE_COMPLETION_THINKING" },
+			{ type: "text", text: "Visible completed reply" },
+		],
+		provider: "PRIVATE_PROVIDER",
+		model: "PRIVATE_MODEL",
+		usage: { input: 11, output: 9, totalTokens: 20, reasoning: 7 },
+		stopReason: "stop",
+		errorMessage: "PRIVATE_ERROR_DETAIL",
+		timestamp: 1,
+	});
+	appendMessage(bot.sessionId, {
+		role: "assistant", content: [{ type: "text", text: "Legacy reply" }], timestamp: 2,
+	} as any);
+	appendMessage(bot.sessionId, {
+		role: "assistant",
+		content: [{ type: "thinking", thinking: "PRIVATE_INVALID_THINKING" }, { type: "text", text: "Invalid metadata reply" }],
+		provider: "PRIVATE_INVALID_PROVIDER", model: "PRIVATE_INVALID_MODEL",
+		usage: { input: 0, output: 0, totalTokens: 0, reasoning: Number.MAX_SAFE_INTEGER + 1 },
+		stopReason: "private-provider-status",
+		errorMessage: "PRIVATE_INVALID_ERROR",
+		timestamp: 3,
+	} as any);
+
+	const history = await (await f.get(`/bots/${bot.id}/messages`)).json();
+	assert.deepEqual(history.messages.map((message: any) => message.content), ["Visible completed reply", "Legacy reply", "Invalid metadata reply"]);
+	assert.deepEqual(history.messages[0].completion, { stopReason: "stop", reasoningTokens: 7 });
+	assert.equal("completion" in history.messages[1], false);
+	assert.equal("completion" in history.messages[2], false);
+	for (const privateValue of ["PRIVATE_COMPLETION_THINKING", "PRIVATE_PROVIDER", "PRIVATE_MODEL", "PRIVATE_ERROR_DETAIL", "PRIVATE_INVALID_THINKING", "PRIVATE_INVALID_PROVIDER", "PRIVATE_INVALID_MODEL", "PRIVATE_INVALID_ERROR", "private-provider-status"]) {
+		assert.ok(!JSON.stringify(history).includes(privateValue));
+	}
+
+	await f.restart();
+	assert.deepEqual(await (await f.get(`/bots/${bot.id}/messages`)).json(), history);
+});
+
 test("native writes require an explicit decision; cancellation rejects late approvals", { timeout: 15_000 }, async t => {
 	let target = "";
 	const f = await fixture(t, (_body, count) => count % 2 === 1 ? call("write", { path: target, content: "approved fixture" }, `write-${count}`) : answer());

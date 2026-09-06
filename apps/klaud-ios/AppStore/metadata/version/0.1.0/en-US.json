@@ -1,0 +1,7 @@
+{
+  "description": "rein-klaʊd brings the Rein operator console to iPhone and iPad while your harness and tools keep running on hardware you control.\n\nConnect to your private Rein gateway, open a named agent, and continue its durable conversation. Streaming replies clearly identify operator input, agent responses, and tool execution. Actions that require approval under your Rein policy open a native allow-or-deny prompt. A run continues on the host if the phone locks or changes networks.\n\nThe interface carries Rein's field-guide design into a native mobile layout with Light and Night themes, Dynamic Type, VoiceOver support, and optional vintage computer sounds.\n\nrein-klaʊd does not provide a hosted AI service or collect your conversations. It connects directly to a compatible Rein server configured by you.",
+  "keywords": "AI agent,local AI,self-hosted,terminal,automation,assistant,developer,workflow,private",
+  "marketingUrl": "https://github.com/Zermo/rein-agent/wiki/Rein-klaud-iOS",
+  "promotionalText": "Carry your durable Rein sessions between desk, phone, and tablet while execution stays on your own host.",
+  "supportUrl": "https://github.com/Zermo/rein-agent/wiki/Rein-klaud-iOS"
+}

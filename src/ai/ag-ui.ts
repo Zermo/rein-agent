@@ -36,7 +36,18 @@ export function toAgUiEvents(
 				{ type: "TOOL_CALL_END", toolCallId: event.toolCall.id },
 			];
 		case "done":
-			return [{ type: "RUN_FINISHED", threadId: ids.threadId, runId: ids.runId, outcome: { type: "success" } }];
+			return [{
+				type: "RUN_FINISHED",
+				threadId: ids.threadId,
+				runId: ids.runId,
+				outcome: {
+					type: "success",
+					stopReason: event.message.stopReason,
+					...(Number.isSafeInteger(event.message.usage.reasoning) && (event.message.usage.reasoning ?? 0) > 0
+						? { reasoningTokens: event.message.usage.reasoning }
+						: {}),
+				},
+			}];
 		case "error":
 			return [{ type: "RUN_ERROR", message: event.error.errorMessage || "aborted" }];
 	}

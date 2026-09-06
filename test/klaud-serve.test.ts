@@ -110,7 +110,7 @@ test("SSE sends snapshot, content, exactly one whole-run finish, and DONE withou
 	assert.notEqual(texts[0].messageId, texts[1].messageId);
 	assert.equal(events.filter(e => e.type === "RUN_FINISHED").length, 1);
 	assert.equal(events.at(-1)!.type, "RUN_FINISHED");
-	assert.deepEqual(events.at(-1)!.outcome, { type: "success" });
+	assert.deepEqual(events.at(-1)!.outcome, { type: "success", stopReason: "stop" });
 	assert.ok(body.endsWith("data: [DONE]\n\n"));
 	assert.ok(!body.includes("private reasoning"));
 });

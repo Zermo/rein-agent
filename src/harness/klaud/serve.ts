@@ -29,8 +29,11 @@ export interface ServeOptions {
 export interface ServeHandle { url: string; token: string; close(): Promise<void>; }
 
 const MAX_BODY = 256 * 1024;
-const PENDING_TIMEOUT = 120_000;
+// A phone may lock or change networks while the host waits. Keep the prompt
+// recoverable long enough for a normal mobile return, then fail closed.
+const PENDING_TIMEOUT = 30 * 60_000;
 const FRONTEND_NAMES = new Set(["patchShell", "setPref", "navigateTo", "confirmAction"]);
+const PUBLIC_STOP_REASONS = new Set(["stop", "length", "toolUse", "error", "aborted", "budget"]);
 const processHome = () => resolve(process.env.REIN_HOME || join(homedir(), ".rein"));
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 class HttpError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
@@ -76,6 +79,15 @@ function requestedBot(id: unknown, home: string): KlaudBot {
 		throw error;
 	}
 }
+function publicCompletion(message: AssistantMessage): { stopReason?: string; reasoningTokens?: number } | undefined {
+	const stopReason = typeof message.stopReason === "string" && PUBLIC_STOP_REASONS.has(message.stopReason) ? message.stopReason : undefined;
+	const reasoning = object(message.usage) ? message.usage.reasoning : undefined;
+	const reasoningTokens = typeof reasoning === "number" && Number.isSafeInteger(reasoning) && reasoning > 0 ? reasoning : undefined;
+	return stopReason === undefined && reasoningTokens === undefined ? undefined : {
+		...(stopReason ? { stopReason } : {}),
+		...(reasoningTokens ? { reasoningTokens } : {}),
+	};
+}
 function botMessages(bot: KlaudBot, home: string, before?: number) {
 	const file = sessionPath(bot.sessionId, home);
 	checkStorage(file);
@@ -85,8 +97,9 @@ function botMessages(bot: KlaudBot, home: string, before?: number) {
 		const content = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
 		if (message.role === "toolResult") return [{ id: message.id, role: "tool", content, toolCallId: message.toolCallId }];
 		const toolCalls = message.content.filter(part => part.type === "toolCall").map(part => ({ id: part.id, type: "function", function: { name: part.name, arguments: JSON.stringify(part.arguments) } }));
+		const completion = publicCompletion(message);
 		// Only display text and tool records; never serialize thinking or private session metadata.
-		return content || toolCalls.length ? [{ id: message.id, role: "assistant", content, ...(toolCalls.length ? { toolCalls } : {}) }] : [];
+		return content || toolCalls.length ? [{ id: message.id, role: "assistant", content, ...(toolCalls.length ? { toolCalls } : {}), ...(completion ? { completion } : {}) }] : [];
 	});
 	const end = Math.min(before ?? messages.length, messages.length);
 	const page: Record<string, unknown>[] = [];
@@ -235,6 +248,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", Connection: "keep-alive", "X-Accel-Buffering": "no" });
 		res.flushHeaders();
 		let turn = 0, failure: string | undefined;
+		let completion: { stopReason: AssistantMessage["stopReason"]; reasoningTokens?: number } | undefined;
 		const onAssistant = (event: AssistantMessageEvent) => {
 			if (controller.signal.aborted) return;
 			if (event.type === "done") { failure = undefined; turn++; return; }
@@ -242,6 +256,12 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 			for (const encoded of toAgUiEvents(event, { threadId, runId: `${id}:${turn}` })) run.emit(encoded);
 		};
 		const finalStatus = (message: AssistantMessage) => {
+			completion = {
+				stopReason: message.stopReason,
+				...(Number.isSafeInteger(message.usage.reasoning) && (message.usage.reasoning ?? 0) > 0
+					? { reasoningTokens: message.usage.reasoning }
+					: {}),
+			};
 			if (["error", "aborted", "budget", "length", "pending"].includes(message.stopReason)) failure = message.errorMessage || (message.stopReason === "budget" ? "Turn budget reached. Continue the run to resume." : `Run stopped: ${message.stopReason}.`);
 			else failure = undefined;
 		};
@@ -298,7 +318,10 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 			// Flush one terminal event for the whole runner, never partial model-turn outcomes.
 			controller.abort(); active.delete(id); threads.delete(sessionId);
 			res.removeListener("close", disconnected);
-			run.emit(failure ? { type: "RUN_ERROR", threadId, runId: id, message: failure } : { type: "RUN_FINISHED", threadId, runId: id, outcome: { type: "success" } });
+			run.emit(failure ? { type: "RUN_ERROR", threadId, runId: id, message: failure } : {
+				type: "RUN_FINISHED", threadId, runId: id,
+				outcome: { type: "success", ...(completion ?? { stopReason: "stop" }) },
+			});
 			if (!res.destroyed && !res.writableEnded) res.end("data: [DONE]\n\n");
 			publishState();
 		}
@@ -379,7 +402,10 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 	return { url, token, close() {
 		if (!closing) closing = (async () => {
 			for (const run of active.values()) run.controller.abort();
-				await new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); });
+			await new Promise<void>((resolve, reject) => {
+				server.close(error => error ? reject(error) : resolve());
+				(server as typeof server & { closeAllConnections?: () => void }).closeAllConnections?.();
+			});
 				await Promise.allSettled([...executions]);
 			if (tokenFile) { try { if (privateRead(tokenFile) === token + "\n") unlinkSync(tokenFile); } catch { /* Preserve replaced or linked files. */ } }
 		})();
