@@ -64,14 +64,14 @@ test("failed spawn and normal child shutdown resolve without an exit event", asy
 });
 
 // Evaluate the actual main functions with Electron startup disabled. No GUI or server starts.
-async function mainHarness(ownsInstance = false) {
+async function mainHarness(ownsInstance = false, appOverrides = {}) {
   const sourceUrl = new URL("../main.mjs", import.meta.url);
   const source = readFileSync(sourceUrl, "utf8").replace(/^import .*;\n/gm, "").replaceAll("import.meta.url", JSON.stringify(sourceUrl.href));
   const context = {
-    app: { setName() {}, setAppUserModelId() {}, requestSingleInstanceLock: () => ownsInstance, quit() {}, on() {}, whenReady: () => new Promise(() => {}) },
+    app: { setName() {}, setAppUserModelId() {}, requestSingleInstanceLock: () => ownsInstance, quit() {}, on() {}, whenReady: () => new Promise(() => {}), ...appOverrides },
     dirname, join, resolve, fileURLToPath, pathToFileURL, randomUUID, process: { ...process, env: {}, on() {} },
     applyDelta, applyShellPatch, frontendTools, replayEvents, requestRoute, sseEvents, validateConnection, validateMessages, validateState, stopChild,
-    Buffer, AbortSignal, AbortController, setTimeout, clearTimeout, structuredClone, Map, Promise,
+    Buffer, AbortSignal, AbortController, setTimeout, clearTimeout, setImmediate, structuredClone, Map, Promise,
   };
   await vm.runInNewContext(`(async () => { ${source}\n globalThis.hooks = {
     connect, startRun, answerTool, trusted,
@@ -88,6 +88,27 @@ test("ESM entry finishes loading before Electron emits ready", async () => {
     const hooks = await Promise.race([mainHarness(true), new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Entry blocked Electron readiness")), 500); })]);
     assert.equal(typeof hooks.connect, "function");
   } finally { clearTimeout(timer); }
+});
+
+test("immediate backend cleanup resumes native Quit on the next event-loop turn", async () => {
+  let beforeQuit, quitCalls = 0, cleanupCalls = 0, prevented = 0;
+  const event = { preventDefault() { prevented++; } };
+  const hooks = await mainHarness(true, {
+    on(name, handler) { if (name === "before-quit") beforeQuit = handler; },
+    quit() { quitCalls++; beforeQuit(event); },
+  });
+  // CLI launches attach to an external backend, so cleanup resolves immediately.
+  const cleanup = Promise.resolve();
+  hooks.configure({ stop() { cleanupCalls++; return cleanup; } });
+  beforeQuit(event);
+  beforeQuit(event);
+  await cleanup;
+  assert.equal(cleanupCalls, 1, "repeated Quit cannot start another cleanup");
+  assert.equal(quitCalls, 0, "resuming inside cleanup's microtask reenters the native macOS Quit operation");
+  assert.equal(prevented, 2);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(quitCalls, 1, "Quit resumes after the original native operation has returned");
+  assert.equal(prevented, 2, "the resumed before-quit event must allow shutdown");
 });
 
 test("Quit during connection cleanup cannot start a later owned server", async () => {

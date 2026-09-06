@@ -253,7 +253,11 @@ else {
     if (quitting) return;
     quitting = true;
     activeRun?.controller.abort();
-    void stopOwnedServe().finally(() => { tray?.destroy(); shutdown = true; app.quit(); });
+    void stopOwnedServe().finally(() => {
+      tray?.destroy();
+      // Let macOS finish the prevented native Quit before resuming it.
+      setImmediate(() => { shutdown = true; app.quit(); });
+    });
   });
   for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => app.quit());
   await app.whenReady();
