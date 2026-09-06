@@ -68,8 +68,8 @@
 <div class="notice"><div class="stamp">ALREADY RAN CURL?<br>START HERE.</div><p><strong>"Existing config found" is normal.</strong> It means Rein kept your saved settings. A failed connection check is a separate result. If a reasoning model reports "no valid chat completion", <a href="#update">update Rein</a>, then run <code>rein setup --status</code>. The short-probe fix is in v0.9.3.</p></div>
 
 <section class="step" id="install" aria-labelledby="install-title">
-  <aside><div class="step-number">01</div><div class="step-title">Install the CLI</div><p>Run these commands in a normal NodeTerm shell tab.</p></aside>
-  <div><h2 id="install-title">Put Rein in your terminal.</h2><p class="lead">NodeTerm hosts the terminal. Rein is the command you install inside it. Start with a working Node.js installation and these command-line tools.</p>
+  <aside><div class="step-number">01</div><div class="step-title">Install the CLI</div><p>Run these commands in your current terminal.</p></aside>
+  <div><h2 id="install-title">Put Rein in your terminal.</h2><p class="lead">Rein installs as a command. On a local macOS desktop, the installer also adds the official NodeTerm app for its native canvas. Start with a working Node.js installation and these command-line tools.</p>
     <div class="checks" aria-label="Prerequisites"><span>Node.js 18+</span><span>npm</span><span>git</span><span>curl + Bash</span></div>
     <div class="command"><div class="command-header"><span>CHECK YOUR TOOLS</span><button class="copy js-only" type="button" data-copy="prereqs" aria-label="Copy prerequisite checks">Copy</button></div><pre><code id="prereqs">node --version
 npm --version
@@ -78,9 +78,10 @@ curl --version</code></pre></div>
     <p class="small">If one is missing, install it before continuing. Node includes npm. <a href="https://nodejs.org/en/download">Get Node.js from its official site.</a> The Bash installer supports macOS, Linux, and WSL.</p>
     <div class="command"><div class="command-header"><span>INSTALL / LEAVE MODEL SETUP FOR STEP 02</span><button class="copy js-only" type="button" data-copy="install-command" aria-label="Copy installation command">Copy</button></div><pre><code id="install-command">curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh \
   | bash -s -- --skip-setup</code></pre></div>
-    <p><code>--skip-setup</code> installs the latest build without checking a saved model connection. Your settings and session history stay in place.</p>
+    <p><code>--skip-setup</code> installs the latest build without checking a saved model connection. Your settings and session history stay in place. On macOS, this also installs NodeTerm if missing, without opening it. Add <code>--terminal-only</code> to keep the terminal-only setup.</p>
     <div class="expected"><span>LOOK FOR</span>installed · rein &lt;version&gt; · setup skipped</div>
     <details><summary>"rein: command not found" after installing?</summary><p>Open a fresh NodeTerm shell. If it still cannot find Rein, check the global npm location:</p><pre><code>npm prefix -g</code></pre><p>On macOS and Linux, its <code>bin</code> directory must be on your shell's <code>PATH</code>. The installer prints the exact path when it detects this problem.</p></details>
+    <details><summary>NodeTerm was already running during installation.</summary><p>Its active settings stay untouched. Close NodeTerm when convenient, then run <code>rein desktop install --no-launch</code> to register Rein as its default agent. You can already run <code>rein --terminal</code> in a NodeTerm terminal node.</p></details>
     <label class="finish js-only"><input type="checkbox" data-step="1">I can run <code>rein --version</code></label>
   </div>
 </section>
@@ -136,8 +137,8 @@ rein setup --provider copilot</code></pre></div>
     <div class="command"><div class="command-header"><span>VERIFY AND SEND A TEST MESSAGE</span><button class="copy js-only" type="button" data-copy="run-command" aria-label="Copy first-run commands">Copy</button></div><pre><code id="run-command">rein setup --status &amp;&amp;
 rein --no-tools -p "Reply with the single word: ok"</code></pre></div>
     <div class="expected"><span>LOOK FOR</span>connection: passed, followed by a short model reply</div>
-    <p style="margin-top:20px">Then move into the project you want Rein to work on and run <code>rein</code>. Your current directory gives its file and shell tools their working context.</p>
-    <p class="small">For chat alongside a live activity view, install tmux and start <code>rein --visual</code>. Ordinary chat does not require tmux.</p>
+    <p style="margin-top:20px">On a local macOS desktop, bare <code>rein</code> opens an installed NodeTerm. Choose a project and add a Rein agent node. NodeTerm has no external session-launch API, so that last step is manual. To work in your current terminal and directory, use <code>rein --terminal</code>.</p>
+    <p class="small">Chat shows distinct, numbered OPERATOR and REIN labels. In local NodeTerm sessions the detailed activity view opens automatically, in a browser if the native node cannot embed it. Use <code>--no-browser</code> to skip this, or install tmux for the explicit <code>rein --visual</code> split.</p>
     <label class="finish js-only"><input type="checkbox" data-step="3">My model replied</label>
   </div>
 </section>
@@ -162,7 +163,7 @@ rein setup</code></pre><p>Rerun the npm installation command to update. The curl
 </div></section>
 
 <footer class="footer"><div><div class="progress-label" id="progress-label" aria-live="polite">YOUR INSTALLATION CHECKLIST</div><div class="progress-track" aria-hidden="true"><i></i><i></i><i></i><i></i></div></div><button class="print js-only" id="print-guide" type="button">Print / save PDF ↗</button></footer>
-<div class="colophon"><span>REIN / FIELD GUIDE 01 / v0.9.3<br>Commands are copied, never executed by this page.<br><a href="https://github.com/Zermo/rein-agent/blob/main/docs/branding.md">Repo cards + logo</a> · <a href="https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide">Deploy this guide</a></span><span>Documentation and visual review guided by<br><a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/engineering/write-docs">dzhng / write-docs</a> + <a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/visual/screenshot-critique">screenshot-critique</a></span></div>
+<div class="colophon"><span>REIN / FIELD GUIDE 01 / v0.10.0<br>Commands are copied, never executed by this page.<br><a href="https://github.com/Zermo/rein-agent/blob/main/docs/branding.md">Repo cards + logo</a> · <a href="https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide">Deploy this guide</a></span><span>Documentation and visual review guided by<br><a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/engineering/write-docs">dzhng / write-docs</a> + <a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/visual/screenshot-critique">screenshot-critique</a></span></div>
 <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
 </main>
 <script>

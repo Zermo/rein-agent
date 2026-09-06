@@ -53,23 +53,23 @@ function sshArguments(host, baseUrl, localPort) {
 }
 async function unusedPort() {
   const server = createServer();
-  await new Promise((resolve19, reject) => {
+  await new Promise((resolve20, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve19);
+    server.listen(0, "127.0.0.1", resolve20);
   });
   const port = server.address().port;
-  await new Promise((resolve19, reject) => server.close((error) => error ? reject(error) : resolve19()));
+  await new Promise((resolve20, reject) => server.close((error) => error ? reject(error) : resolve20()));
   return port;
 }
 function portReady(port) {
-  return new Promise((resolve19) => {
+  return new Promise((resolve20) => {
     const socket = createConnection({ host: "127.0.0.1", port });
     let done = false;
     const finish = (ready) => {
       if (done) return;
       done = true;
       socket.destroy();
-      resolve19(ready);
+      resolve20(ready);
     };
     socket.once("connect", () => finish(true));
     socket.once("error", () => finish(false));
@@ -86,16 +86,16 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
   let failure;
   let closed = false;
   let stderr = "";
-  const exited = new Promise((resolve19) => {
+  const exited = new Promise((resolve20) => {
     child.once("error", (error) => {
       failure = error;
       closed = true;
-      resolve19();
+      resolve20();
     });
     child.once("close", (code) => {
       closed = true;
       failure ??= new Error(`SSH exited (${code ?? "signal"}). ${stderr.trim()}`);
-      resolve19();
+      resolve20();
     });
   });
   child.stderr?.on("data", (chunk) => {
@@ -113,7 +113,7 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
       if (failure) throw new Error(`Cannot open SSH tunnel through ${sshHost}: ${failure.message}. Check that ssh ${sshHost} works with key authentication.`);
       if (Date.now() >= deadline) throw new Error(`SSH tunnel through ${sshHost} timed out. Check the VPN and SSH connection.`);
       if (await portReady(port)) break;
-      await new Promise((resolve19) => setTimeout(resolve19, 40));
+      await new Promise((resolve20) => setTimeout(resolve20, 40));
     }
     const forwarded = new URL(baseUrl);
     forwarded.hostname = "127.0.0.1";
@@ -895,7 +895,7 @@ import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 function runProgram(command, args, signal, timeoutMs) {
   signal.throwIfAborted();
-  return new Promise((resolve19, reject) => {
+  return new Promise((resolve20, reject) => {
     const child = spawn2(command, args, { shell: false, detached: true, stdio: "inherit" });
     let closed = false, settled = false, code = null, error;
     let escalation;
@@ -912,7 +912,7 @@ function runProgram(command, args, signal, timeoutMs) {
       signal.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (code !== 0) reject(new Error(`${command} exited ${code ?? "after a signal"}.`));
-      else resolve19();
+      else resolve20();
     };
     const stop = (reason) => {
       if (error) return;
@@ -1302,6 +1302,336 @@ var init_tmux = __esm({
   }
 });
 
+// src/harness/desktop/surface.ts
+var surface_exports = {};
+__export(surface_exports, {
+  REIN_AGENT_ID: () => REIN_AGENT_ID,
+  desktopAvailable: () => desktopAvailable,
+  desktopHome: () => desktopHome,
+  nativeApp: () => nativeApp,
+  nodeTermRunning: () => nodeTermRunning,
+  openNodeTerm: () => openNodeTerm,
+  preferSurface: () => preferSurface,
+  preferredSurface: () => preferredSurface,
+  registerRein: () => registerRein,
+  registeredSettings: () => registeredSettings,
+  remoteDesktopSession: () => remoteDesktopSession,
+  shouldOpenDesktop: () => shouldOpenDesktop
+});
+import { existsSync as existsSync2, lstatSync, mkdirSync, readFileSync as readFileSync2, renameSync, writeFileSync, unlinkSync } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { dirname, join as join4, resolve as resolve2 } from "node:path";
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+import { randomUUID as randomUUID2 } from "node:crypto";
+function remoteDesktopSession(env = process.env) {
+  return !!(env.SSH_CONNECTION || env.SSH_TTY || /[/\\]\.nodeterm[/\\]hook-endpoint-[^/\\]+\.env$/.test(env.NODETERM_HOOK_ENDPOINT ?? ""));
+}
+function desktopAvailable(env = process.env, platform = process.platform) {
+  return platform === "darwin" && !env.CI && !remoteDesktopSession(env);
+}
+function nativeApp(home = homedir3()) {
+  return [join4(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find((path2) => existsSync2(join4(path2, "Contents/MacOS/nodeterm")));
+}
+function preferredSurface(home = desktopHome()) {
+  try {
+    return JSON.parse(readFileSync2(join4(home, "desktop.json"), "utf8")).surface === "terminal" ? "terminal" : "nodeterm";
+  } catch {
+    return "nodeterm";
+  }
+}
+function preferSurface(surface, home = desktopHome()) {
+  mkdirSync(home, { recursive: true, mode: 448 });
+  const file = join4(home, "desktop.json");
+  if (existsSync2(file) && lstatSync(file).isSymbolicLink()) throw new Error("Desktop preferences must not be a symlink.");
+  const temp = `${file}.${randomUUID2()}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify({ surface }, null, 2) + "\n", { flag: "wx", mode: 384 });
+    renameSync(temp, file);
+  } finally {
+    if (existsSync2(temp)) unlinkSync(temp);
+  }
+}
+async function nodeTermRunning() {
+  try {
+    await exec2("pgrep", ["-x", "nodeterm"], { timeout: 3e3 });
+    return true;
+  } catch (error) {
+    return error.code !== 1;
+  }
+}
+function registeredSettings(current, launchCmd) {
+  if (!current || typeof current !== "object" || Array.isArray(current)) throw new Error("NodeTerm settings are not a JSON object.");
+  const settings = current;
+  if (settings.customAgents !== void 0 && !Array.isArray(settings.customAgents)) throw new Error("Unrecognized NodeTerm custom-agent settings.");
+  if (settings.disabledAgents !== void 0 && !Array.isArray(settings.disabledAgents)) throw new Error("Unrecognized NodeTerm disabled-agent settings.");
+  const customAgents = (settings.customAgents ?? []).filter((agent) => agent?.id !== REIN_AGENT_ID);
+  customAgents.push({ id: REIN_AGENT_ID, label: "Rein", launchCmd, promptInjectionMode: "stdin-after-start", color: "#b6472d" });
+  return {
+    ...settings,
+    customAgents,
+    defaultAgent: REIN_AGENT_ID,
+    ...settings.disabledAgents ? { disabledAgents: settings.disabledAgents.filter((id) => id !== REIN_AGENT_ID) } : {}
+  };
+}
+async function registerRein(options = {}) {
+  const running = options.running ?? nodeTermRunning;
+  if (await running()) return "NodeTerm is running, so its settings were preserved. Close it when convenient and run rein desktop install --no-launch to register Rein as the default agent. For now, run rein --terminal in a NodeTerm terminal node.";
+  const file = options.settingsFile ?? join4(homedir3(), "Library/Application Support/node-terminal/settings.json");
+  if (existsSync2(file) && (!lstatSync(file).isFile() || lstatSync(file).isSymbolicLink())) throw new Error("NodeTerm settings must be an ordinary file.");
+  const before = existsSync2(file) ? readFileSync2(file, "utf8") : void 0;
+  const command = [options.node ?? "node", options.cli ?? resolve2(process.argv[1]), "--terminal"].map(shellQuote).join(" ");
+  const next = registeredSettings(before === void 0 ? {} : JSON.parse(before), command);
+  mkdirSync(dirname(file), { recursive: true, mode: 448 });
+  const temp = `${file}.${randomUUID2()}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(next, null, 2) + "\n", { flag: "wx", mode: 384 });
+    if (await running() || (existsSync2(file) ? readFileSync2(file, "utf8") : void 0) !== before) throw new Error("NodeTerm settings changed during registration. Close the app and retry.");
+    renameSync(temp, file);
+  } finally {
+    if (existsSync2(temp)) unlinkSync(temp);
+  }
+  return "Rein is registered as NodeTerm's default agent. Open a project and add an agent node to start Rein.";
+}
+async function openNodeTerm(app = nativeApp()) {
+  if (!app) throw new Error("NodeTerm is not installed. Run rein desktop install, or use rein --terminal.");
+  await exec2("open", ["-a", app], { timeout: 1e4 });
+}
+function shouldOpenDesktop(input) {
+  return input.interactive && !input.hasSessionOptions && !input.terminal && input.visual === void 0 && !input.activity && !input.insideNodeTerm && input.available && input.preference === "nodeterm";
+}
+var exec2, REIN_AGENT_ID, desktopHome;
+var init_surface = __esm({
+  "src/harness/desktop/surface.ts"() {
+    init_tmux();
+    exec2 = promisify3(execFile3);
+    REIN_AGENT_ID = "custom:749611bd-a3c7-4b35-b0e1-70cf837648b2";
+    desktopHome = () => resolve2(process.env.REIN_HOME || join4(homedir3(), ".rein"));
+  }
+});
+
+// src/harness/desktop/install.ts
+var install_exports = {};
+__export(install_exports, {
+  NODETERM_VERSION: () => NODETERM_VERSION,
+  createNodeTermInstaller: () => createNodeTermInstaller,
+  installNodeTerm: () => installNodeTerm,
+  nodeTermArtifact: () => nodeTermArtifact,
+  verifyNodeTermDownload: () => verifyNodeTermDownload
+});
+import { execFile as execFile4 } from "node:child_process";
+import { createHash as createHash2 } from "node:crypto";
+import { constants as constants2, createReadStream } from "node:fs";
+import { access, lstat, mkdir, mkdtemp as mkdtemp2, rename, rm as rm2, stat as stat2 } from "node:fs/promises";
+import { homedir as homedir4, tmpdir as tmpdir2 } from "node:os";
+import { join as join5 } from "node:path";
+import { promisify as promisify4 } from "node:util";
+function nodeTermArtifact(platform, arch) {
+  if (platform !== "darwin") return void 0;
+  const assets = {
+    arm64: [`nodeterm-${NODETERM_VERSION}-arm64.dmg`, "44d575d65d6b8cbfb92d1a2e7eca5996ff6918bc94db127548f1b6a13a6b554a"],
+    x64: [`nodeterm-${NODETERM_VERSION}.dmg`, "43de9d36b510a65b85fb483868d8899024ad05e14a9a33693187a763985b1e27"]
+  };
+  const asset = assets[arch];
+  return asset && { url: `https://github.com/eneskirca/nodeterm/releases/download/v${NODETERM_VERSION}/${asset[0]}`, sha256: asset[1] };
+}
+async function verifyNodeTermDownload(file, expected) {
+  const hash2 = createHash2("sha256");
+  for await (const chunk of createReadStream(file)) hash2.update(chunk);
+  if (hash2.digest("hex") !== expected) throw new Error("NodeTerm download checksum did not match the official release; installation stopped.");
+}
+async function exists(path2) {
+  try {
+    await lstat(path2);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+async function usableApp(path2) {
+  try {
+    const executable2 = join5(path2, "Contents", "MacOS", "nodeterm");
+    if (!(await stat2(path2)).isDirectory() || !(await stat2(executable2)).isFile() || !(await stat2(join5(path2, "Contents", "Info.plist"))).isFile()) return false;
+    await access(executable2, constants2.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function createNodeTermInstaller(deps) {
+  return async (options = {}) => {
+    if (deps.platform !== "darwin") return {
+      installed: false,
+      detail: "Automatic NodeTerm installation currently supports macOS. Install the native app for your platform from https://nodeterm.dev/releases, then run Rein inside its terminal node."
+    };
+    let temporary, staging, lock;
+    let mount, mounted = false, appPath;
+    let detail = "";
+    try {
+      const applications = join5(deps.home, "Applications");
+      const destination = join5(applications, "nodeterm.app");
+      for (const candidate of [join5(deps.systemApplications, "nodeterm.app"), destination]) {
+        if (!await exists(candidate)) continue;
+        if (!await usableApp(candidate)) throw new Error(`An incomplete or unusable NodeTerm app exists at ${candidate}. It was preserved. Move it aside before retrying installation.`);
+        appPath = candidate;
+        detail = "Existing NodeTerm installation preserved.";
+        break;
+      }
+      if (!appPath) {
+        const artifact = deps.artifact(deps.platform, deps.arch);
+        if (!artifact) return { installed: false, detail: `No supported NodeTerm download for macOS ${deps.arch}. See https://nodeterm.dev/releases.` };
+        await mkdir(applications, { recursive: true });
+        const lockPath = join5(applications, ".rein-nodeterm-install.lock");
+        try {
+          await mkdir(lockPath, { mode: 448 });
+          lock = lockPath;
+        } catch (error) {
+          if (error.code === "EEXIST") throw new Error("Another NodeTerm installation may be running. Retry when it finishes.");
+          throw error;
+        }
+        temporary = await mkdtemp2(join5(deps.temporaryRoot, "rein-nodeterm-"));
+        const download2 = join5(temporary, "nodeterm.dmg");
+        await deps.run("curl", [
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--location",
+          "--proto",
+          "=https",
+          "--proto-redir",
+          "=https",
+          "--connect-timeout",
+          "15",
+          "--max-time",
+          "600",
+          "--max-filesize",
+          "536870912",
+          "--output",
+          download2,
+          artifact.url
+        ], 61e4);
+        const downloaded = await stat2(download2);
+        if (!downloaded.isFile() || downloaded.size === 0 || downloaded.size > 536870912) throw new Error("The NodeTerm download is empty or exceeds the expected size limit.");
+        await verifyNodeTermDownload(download2, artifact.sha256);
+        mount = join5(temporary, "mount");
+        await mkdir(mount);
+        mounted = true;
+        await deps.run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, download2], 6e4);
+        const source = join5(mount, "nodeterm.app");
+        if (!(await lstat(source)).isDirectory()) throw new Error("The release disk image does not contain nodeterm.app.");
+        await deps.run("codesign", ["--verify", "--deep", "--strict", source], 6e4);
+        await deps.run("spctl", ["--assess", "--type", "execute", source], 6e4);
+        staging = await mkdtemp2(join5(applications, ".rein-nodeterm-stage-"));
+        const stagedApp = join5(staging, "nodeterm.app");
+        await deps.run("ditto", [source, stagedApp], 12e4);
+        await deps.run("codesign", ["--verify", "--deep", "--strict", stagedApp], 6e4);
+        if (await exists(destination)) throw new Error("A NodeTerm installation appeared while downloading. It was preserved; retry to use it.");
+        await rename(stagedApp, destination);
+        appPath = destination;
+        detail = `Installed official NodeTerm ${NODETERM_VERSION} in ~/Applications.`;
+      }
+      if (options.launch) {
+        try {
+          await deps.run("open", ["-a", appPath], 3e4);
+          detail += " NodeTerm opened.";
+        } catch {
+          detail += " Open NodeTerm from Applications to continue.";
+        }
+      }
+      return { installed: true, appPath, detail };
+    } catch (error) {
+      return { installed: false, detail: `NodeTerm installation failed: ${error.message}` };
+    } finally {
+      if (mounted && mount) {
+        try {
+          await deps.run("hdiutil", ["detach", mount], 3e4);
+          mounted = false;
+        } catch {
+          try {
+            await deps.run("hdiutil", ["detach", "-force", mount], 3e4);
+            mounted = false;
+          } catch {
+          }
+        }
+      }
+      if (temporary && !mounted) await rm2(temporary, { recursive: true, force: true }).catch(() => {
+      });
+      if (staging) await rm2(staging, { recursive: true, force: true }).catch(() => {
+      });
+      if (lock) await rm2(lock, { recursive: true, force: true }).catch(() => {
+      });
+    }
+  };
+}
+var NODETERM_VERSION, exec3, run, installNodeTerm;
+var init_install = __esm({
+  "src/harness/desktop/install.ts"() {
+    NODETERM_VERSION = "0.3.4";
+    exec3 = promisify4(execFile4);
+    run = async (command, args, timeout) => {
+      await exec3(command, args, { timeout, maxBuffer: 1024 * 1024, killSignal: "SIGKILL" });
+    };
+    installNodeTerm = createNodeTermInstaller({
+      platform: process.platform,
+      arch: process.arch,
+      home: homedir4(),
+      temporaryRoot: tmpdir2(),
+      systemApplications: "/Applications",
+      run,
+      artifact: nodeTermArtifact
+    });
+  }
+});
+
+// src/harness/desktop/cli.ts
+var cli_exports = {};
+__export(cli_exports, {
+  desktopCommand: () => desktopCommand
+});
+async function desktopCommand(args, flags) {
+  const action = args[0] ?? "status";
+  if (action === "use" && args.length === 2 && ["terminal", "nodeterm"].includes(args[1])) {
+    preferSurface(args[1]);
+    console.log(`Rein's preferred surface is ${args[1]}.`);
+    return;
+  }
+  if (args.length > 1 || !["install", "open", "status"].includes(action)) throw new Error("Usage: rein desktop install [--no-launch] | open | status | use terminal|nodeterm");
+  if (action === "status") {
+    console.log(`Preferred surface: ${preferredSurface()}
+NodeTerm: ${nativeApp() ? "installed" : "not found"}`);
+    return;
+  }
+  if (action === "install") {
+    if (flags["if-supported"] === true && preferredSurface() === "terminal") {
+      console.log("Keeping Rein's saved terminal preference. Run rein desktop install to switch to NodeTerm.");
+      return;
+    }
+    if (flags["if-supported"] === true && !desktopAvailable()) {
+      console.log("Native desktop setup skipped on this platform or remote/CI shell. Rein remains available in this terminal.");
+      return;
+    }
+    const { installNodeTerm: installNodeTerm2 } = await Promise.resolve().then(() => (init_install(), install_exports));
+    const result = await installNodeTerm2({ launch: false });
+    console.log(result.detail);
+    if (!result.installed) {
+      process.exitCode = 1;
+      return;
+    }
+    console.log(await registerRein());
+    preferSurface("nodeterm");
+    if (flags["no-launch"] === true) return;
+  }
+  await openNodeTerm();
+  console.log("NodeTerm is open. Choose a project and add a Rein agent node. In an existing terminal node, run rein --terminal.");
+  console.log("NodeTerm currently cannot accept a project or session command from an external CLI; session flags stay in the terminal where you run them.");
+}
+var init_cli = __esm({
+  "src/harness/desktop/cli.ts"() {
+    init_surface();
+  }
+});
+
 // src/harness/autonomy/tui.ts
 var tui_exports = {};
 __export(tui_exports, {
@@ -1367,7 +1697,7 @@ function render(snapshot, state) {
   } else {
     if (state?.details && snapshot.proposals[selected]) lines.push("", ...proposalDetails(snapshot.proposals[selected]));
     lines.push("", "Recent runs:", ...snapshot.recentRuns.length ? snapshot.recentRuns.slice(0, 5).map(
-      (run2) => `  ${terminalText(run2.id)} [${terminalText(run2.status)}] ${terminalText(run2.detail)}`
+      (run3) => `  ${terminalText(run3.id)} [${terminalText(run3.status)}] ${terminalText(run3.detail)}`
     ) : ["  (none)"]);
     lines.push(
       "",
@@ -1434,7 +1764,7 @@ async function runDashboard(controller) {
   }
   const wasRaw = Boolean(input.isRaw);
   const wasPaused = input.isPaused();
-  await new Promise((resolve19, reject) => {
+  await new Promise((resolve20, reject) => {
     let state = { selected: 0, button: 0, details: false };
     let done = false;
     let busy = false;
@@ -1460,7 +1790,7 @@ async function runDashboard(controller) {
       } catch {
       }
       if (error) reject(error);
-      else resolve19();
+      else resolve20();
     };
     const draw = () => {
       if (done) return;
@@ -1580,26 +1910,33 @@ var init_tui = __esm({
 });
 
 // src/harness/activity/store.ts
-import { mkdirSync, writeFileSync, renameSync, openSync, readFileSync as readFileSync2, closeSync, fstatSync, constants as constants2, existsSync as existsSync2, unlinkSync } from "node:fs";
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { homedir as homedir3 } from "node:os";
-import { join as join4, resolve as resolve2 } from "node:path";
+var store_exports = {};
+__export(store_exports, {
+  ActivityJournal: () => ActivityJournal,
+  activityFile: () => activityFile,
+  newActivityId: () => newActivityId,
+  readActivity: () => readActivity
+});
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, renameSync as renameSync2, openSync, readFileSync as readFileSync3, closeSync, fstatSync, constants as constants3, existsSync as existsSync3, unlinkSync as unlinkSync2 } from "node:fs";
+import { randomUUID as randomUUID3 } from "node:crypto";
+import { homedir as homedir5 } from "node:os";
+import { join as join6, resolve as resolve3 } from "node:path";
 function activityFile(id) {
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) throw new Error("Use the activity ID printed by rein --visual.");
-  return join4(resolve2(process.env.REIN_HOME ?? join4(homedir3(), ".rein")), "activity", `${id}.json`);
+  return join6(resolve3(process.env.REIN_HOME ?? join6(homedir5(), ".rein")), "activity", `${id}.json`);
 }
 function readActivity(id) {
   let fd;
   try {
-    fd = openSync(activityFile(id), constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0) | (constants2.O_NONBLOCK ?? 0));
+    fd = openSync(activityFile(id), constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0) | (constants3.O_NONBLOCK ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
   }
   try {
-    const stat2 = fstatSync(fd);
-    if (!stat2.isFile() || stat2.nlink !== 1 || stat2.size > 4 * 1024 * 1024) throw new Error("Activity data is not a bounded ordinary file.");
-    const state = JSON.parse(readFileSync2(fd, "utf8"));
+    const stat3 = fstatSync(fd);
+    if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size > 4 * 1024 * 1024) throw new Error("Activity data is not a bounded ordinary file.");
+    const state = JSON.parse(readFileSync3(fd, "utf8"));
     if (state.id !== id || !Array.isArray(state.nodes) || state.nodes.length > 256) throw new Error("Invalid activity data.");
     return state;
   } finally {
@@ -1610,7 +1947,7 @@ var newActivityId, visible, ActivityJournal;
 var init_store = __esm({
   "src/harness/activity/store.ts"() {
     init_tui();
-    newActivityId = () => randomUUID2();
+    newActivityId = () => randomUUID3();
     visible = (value, limit = 8e3) => {
       const text = terminalText(typeof value === "string" ? value : JSON.stringify(value) ?? "", true);
       return text.length > limit ? text.slice(0, limit) + "\n[view truncated]" : text;
@@ -1626,9 +1963,9 @@ var init_store = __esm({
       disabled = false;
       constructor(id, cwd, model) {
         this.file = activityFile(id);
-        mkdirSync(join4(this.file, ".."), { recursive: true, mode: 448 });
-        this.snapshot = { id, cwd: resolve2(cwd), model, updated: Date.now(), state: "idle", nodes: [], omitted: 0 };
-        writeFileSync(this.file, JSON.stringify(this.snapshot), { flag: "wx", mode: 384 });
+        mkdirSync2(join6(this.file, ".."), { recursive: true, mode: 448 });
+        this.snapshot = { id, cwd: resolve3(cwd), model, updated: Date.now(), state: "idle", nodes: [], omitted: 0 };
+        writeFileSync2(this.file, JSON.stringify(this.snapshot), { flag: "wx", mode: 384 });
       }
       setSession(id) {
         this.snapshot.sessionId = id;
@@ -1721,7 +2058,7 @@ var init_store = __esm({
         this.timer = void 0;
         if (this.disabled) return;
         this.snapshot.updated = Date.now();
-        const temp = this.file + `.${randomUUID2()}.tmp`;
+        const temp = this.file + `.${randomUUID3()}.tmp`;
         try {
           let json = JSON.stringify(this.snapshot);
           while (Buffer.byteLength(json) > 3 * 1024 * 1024 && this.snapshot.nodes.length > 1) {
@@ -1729,12 +2066,12 @@ var init_store = __esm({
             this.snapshot.omitted++;
             json = JSON.stringify(this.snapshot);
           }
-          writeFileSync(temp, json, { flag: "wx", mode: 384 });
-          renameSync(temp, this.file);
+          writeFileSync2(temp, json, { flag: "wx", mode: 384 });
+          renameSync2(temp, this.file);
         } catch {
           this.disabled = true;
-          if (existsSync2(temp)) try {
-            unlinkSync(temp);
+          if (existsSync3(temp)) try {
+            unlinkSync2(temp);
           } catch {
           }
           console.error("[activity] Could not save the live view. Agent work continues.");
@@ -1838,13 +2175,13 @@ async function startCanvas(id) {
   });
   server.requestTimeout = 5e3;
   server.headersTimeout = 5e3;
-  await new Promise((resolve19, reject) => {
+  await new Promise((resolve20, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve19);
+    server.listen(0, "127.0.0.1", resolve20);
   });
   origin = `http://127.0.0.1:${server.address().port}`;
-  return { url: `${origin}/#${token2}`, close: () => new Promise((resolve19, reject) => {
-    server.close((error) => error ? reject(error) : resolve19());
+  return { url: `${origin}/#${token2}`, close: () => new Promise((resolve20, reject) => {
+    server.close((error) => error ? reject(error) : resolve20());
     server.closeAllConnections();
   }) };
 }
@@ -1863,7 +2200,7 @@ __export(terminal_exports, {
   watchActivity: () => watchActivity
 });
 import { emitKeypressEvents } from "node:readline";
-import { resolve as resolve3 } from "node:path";
+import { resolve as resolve4 } from "node:path";
 function renderActivity(snapshot, selected, width = 65, height = 36) {
   const columns = Math.max(16, width), rows = Math.max(8, height);
   const lines = ["REIN / ACTIVITY", snapshot ? `${snapshot.state} \xB7 ${snapshot.model ?? ""}` : "Waiting for the session\u2026", "\u2191\u2193 select \xB7 f follow \xB7 c canvas \xB7 q quit", ""];
@@ -1974,7 +2311,7 @@ async function launchVisual(argv, cwd) {
   const id = newActivityId(), shells = new TmuxShells(cwd, "visual");
   const boundary = argv.indexOf("--");
   const args = argv.filter((arg, index) => boundary >= 0 && index > boundary || !/^--visual(?:=true|=false)?$/.test(arg));
-  const cli = [process.execPath, resolve3(process.argv[1])].map(shellQuote).join(" ");
+  const cli = [process.execPath, resolve4(process.argv[1])].map(shellQuote).join(" ");
   const prefix = `cd ${shellQuote(cwd)} && `;
   const session = await shells.start();
   try {
@@ -2373,8 +2710,8 @@ var init_event_stream = __esm({
       constructor(isComplete, extractResult) {
         this.isComplete = isComplete ?? (() => false);
         this.extractResult = extractResult ?? ((event) => event);
-        this.finalResultPromise = new Promise((resolve19) => {
-          this.resolveFinalResult = resolve19;
+        this.finalResultPromise = new Promise((resolve20) => {
+          this.resolveFinalResult = resolve20;
         });
       }
       push(event) {
@@ -2403,7 +2740,7 @@ var init_event_stream = __esm({
           if (this.queue.length > 0) yield this.queue.shift();
           else if (this.done) return;
           else {
-            const result = await new Promise((resolve19) => this.waiting.push(resolve19));
+            const result = await new Promise((resolve20) => this.waiting.push(resolve20));
             if (result.done) return;
             yield result.value;
           }
@@ -3011,18 +3348,18 @@ Rules for tool blocks:
 
 // src/ai/cli-provider.ts
 import { spawn as spawn5 } from "node:child_process";
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, mkdtempSync, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { homedir as homedir4, tmpdir as tmpdir2 } from "node:os";
-import { join as join5 } from "node:path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync3, mkdtempSync, rmSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir6, tmpdir as tmpdir3 } from "node:os";
+import { join as join7 } from "node:path";
 function cliAuthDirectory(provider, env = process.env) {
-  return join5(env.REIN_HOME || join5(homedir4(), ".rein"), "cli-auth", provider);
+  return join7(env.REIN_HOME || join7(homedir6(), ".rein"), "cli-auth", provider);
 }
 function cliEnvironment(provider, overrides = {}) {
   const env = { ...process.env, ...overrides };
   for (const key of Object.keys(env)) if (key.startsWith("COPILOT_PROVIDER_")) delete env[key];
   for (const key of ["ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "COPILOT_ALLOW_ALL", "NODE_OPTIONS", "BASH_ENV", "ENV"]) delete env[key];
   env[provider === "codex" ? "CODEX_HOME" : "COPILOT_HOME"] = cliAuthDirectory(provider, env);
-  if (provider === "copilot") env.GH_CONFIG_DIR = join5(cliAuthDirectory(provider, env), "gh");
+  if (provider === "copilot") env.GH_CONFIG_DIR = join7(cliAuthDirectory(provider, env), "gh");
   env.GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS = "false";
   env.GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS = "false";
   return env;
@@ -3043,11 +3380,11 @@ function cliArguments(provider, model, _prompt = "") {
 }
 function prepareProfile(provider, env) {
   const directory = cliAuthDirectory(provider, env);
-  mkdirSync2(directory, { recursive: true, mode: 448 });
+  mkdirSync3(directory, { recursive: true, mode: 448 });
   if (provider !== "copilot") return;
   for (const name of ["mcp-config.json", "hooks.json", "hooks", "plugins", "agents", "extensions"]) {
-    const path2 = join5(directory, name);
-    if (existsSync3(path2)) throw new Error(`Rein's isolated Copilot profile contains custom ${name}. Remove that customization from ${directory} or use the native CLI directly.`);
+    const path2 = join7(directory, name);
+    if (existsSync4(path2)) throw new Error(`Rein's isolated Copilot profile contains custom ${name}. Remove that customization from ${directory} or use the native CLI directly.`);
   }
 }
 function streamCli(model, context, options = {}) {
@@ -3064,10 +3401,10 @@ function streamCli(model, context, options = {}) {
       prepareProfile(provider, env);
       const prompt = renderCliPrompt(context);
       if (Buffer.byteLength(prompt) > 8e6) throw new Error(`${provider} CLI prompt exceeds its transport size limit. Start a fresh context window or use an API provider.`);
-      directory = mkdtempSync(join5(tmpdir2(), "rein-cli-"));
+      directory = mkdtempSync(join7(tmpdir3(), "rein-cli-"));
       if (provider === "copilot") {
-        mkdirSync2(join5(directory, ".github", "agents"), { recursive: true });
-        writeFileSync2(join5(directory, ".github", "agents", "rein-bridge.agent.md"), "---\nname: rein-bridge\ndescription: Generate the next Rein assistant message without native tools\ntools: []\n---\nUse only the Rein text-tool protocol in the supplied conversation. Never call native tools.\n", { mode: 384 });
+        mkdirSync3(join7(directory, ".github", "agents"), { recursive: true });
+        writeFileSync3(join7(directory, ".github", "agents", "rein-bridge.agent.md"), "---\nname: rein-bridge\ndescription: Generate the next Rein assistant message without native tools\ntools: []\n---\nUse only the Rein text-tool protocol in the supplied conversation. Never call native tools.\n", { mode: 384 });
       }
       const result = await runCliProcess(provider, cliArguments(provider, model.id, prompt), prompt, directory, env, options);
       let text = result;
@@ -3118,7 +3455,7 @@ function streamCli(model, context, options = {}) {
   return out;
 }
 function runCliProcess(provider, args, input, cwd, env, options) {
-  return new Promise((resolve19, reject) => {
+  return new Promise((resolve20, reject) => {
     const child = spawn5(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
     let stdout = "", stderr = "", pendingLine = "", bytes = 0, error, forceKill;
     let closed = false, settled = false, exitCode = null, exitSignal = null;
@@ -3151,7 +3488,7 @@ function runCliProcess(provider, args, input, cwd, env, options) {
       options.signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (exitCode !== 0) reject(new Error(`${provider} CLI exited ${exitCode ?? exitSignal}. ${stderr.trim().slice(-2e3)} Run 'rein login ${provider}' if authentication is required.`));
-      else resolve19(stdout);
+      else resolve20(stdout);
     };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -3210,12 +3547,12 @@ var init_cli_provider = __esm({
 });
 
 // src/ai/compat.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync4 } from "node:fs";
-import { homedir as homedir5 } from "node:os";
-import { join as join6 } from "node:path";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4, existsSync as existsSync5 } from "node:fs";
+import { homedir as homedir7 } from "node:os";
+import { join as join8 } from "node:path";
 function readStore() {
   try {
-    if (existsSync4(storePath())) return JSON.parse(readFileSync3(storePath(), "utf8"));
+    if (existsSync5(storePath())) return JSON.parse(readFileSync4(storePath(), "utf8"));
   } catch {
   }
   return {};
@@ -3229,9 +3566,9 @@ function decideToolMode(provider, modelId, forced = "auto") {
   if (forced !== "auto") {
     const mode = { mode: forced, source: "forced" };
     try {
-      mkdirSync3(reinHome(), { recursive: true });
+      mkdirSync4(reinHome(), { recursive: true });
       store[key] = mode;
-      writeFileSync3(storePath(), JSON.stringify(store, null, 2));
+      writeFileSync4(storePath(), JSON.stringify(store, null, 2));
     } catch {
     }
     return mode;
@@ -3245,10 +3582,10 @@ function decideToolMode(provider, modelId, forced = "auto") {
 }
 function recordDecision(provider, modelId, mode, source) {
   try {
-    mkdirSync3(reinHome(), { recursive: true });
+    mkdirSync4(reinHome(), { recursive: true });
     const store = readStore();
     store[keyFor(provider, modelId)] = { mode, source };
-    writeFileSync3(storePath(), JSON.stringify(store, null, 2));
+    writeFileSync4(storePath(), JSON.stringify(store, null, 2));
   } catch {
   }
 }
@@ -3302,20 +3639,20 @@ var init_compat = __esm({
       /openchat[-_]?3\.5/i,
       /starcoder[-_]?1b/i
     ];
-    reinHome = () => process.env.REIN_HOME || join6(homedir5(), ".rein");
-    storePath = () => join6(reinHome(), "capabilities.json");
+    reinHome = () => process.env.REIN_HOME || join8(homedir7(), ".rein");
+    storePath = () => join8(reinHome(), "capabilities.json");
   }
 });
 
 // src/harness/system-prompt.ts
-import { existsSync as existsSync5 } from "node:fs";
-import { readFileSync as readFileSync4 } from "node:fs";
-import { join as join7 } from "node:path";
+import { existsSync as existsSync6 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
+import { join as join9 } from "node:path";
 function readProjectInstructions(cwd) {
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const path2 = join7(cwd, name);
-    if (existsSync5(path2)) {
-      const text = readFileSync4(path2, "utf8").trim();
+    const path2 = join9(cwd, name);
+    if (existsSync6(path2)) {
+      const text = readFileSync5(path2, "utf8").trim();
       if (text) return `Project instructions:
 ${text}`;
     }
@@ -3323,9 +3660,9 @@ ${text}`;
   return void 0;
 }
 function readLessons(cwd) {
-  const path2 = join7(cwd, "LESSONS.md");
-  if (!existsSync5(path2)) return void 0;
-  const text = readFileSync4(path2, "utf8").trim();
+  const path2 = join9(cwd, "LESSONS.md");
+  if (!existsSync6(path2)) return void 0;
+  const text = readFileSync5(path2, "utf8").trim();
   if (!text) return void 0;
   return `Lessons from previous sessions (trust but verify):
 ${text.slice(0, 4e3)}`;
@@ -3417,7 +3754,7 @@ var init_system_prompt = __esm({
 });
 
 // src/harness/tools/read.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 var readTool, read_default;
 var init_read = __esm({
   "src/harness/tools/read.ts"() {
@@ -3437,7 +3774,7 @@ var init_read = __esm({
         const path2 = args.path;
         let text;
         try {
-          text = readFileSync5(path2, "utf8");
+          text = readFileSync6(path2, "utf8");
         } catch (err) {
           return { content: `read failed: ${err.message}`, isError: true };
         }
@@ -3467,8 +3804,8 @@ var init_read = __esm({
 });
 
 // src/harness/tools/write.ts
-import { writeFileSync as writeFileSync4, mkdirSync as mkdirSync4 } from "node:fs";
-import { dirname } from "node:path";
+import { writeFileSync as writeFileSync5, mkdirSync as mkdirSync5 } from "node:fs";
+import { dirname as dirname2 } from "node:path";
 var writeTool, write_default;
 var init_write = __esm({
   "src/harness/tools/write.ts"() {
@@ -3487,8 +3824,8 @@ var init_write = __esm({
         const path2 = args.path;
         const content = args.content;
         try {
-          mkdirSync4(dirname(path2), { recursive: true });
-          writeFileSync4(path2, content);
+          mkdirSync5(dirname2(path2), { recursive: true });
+          writeFileSync5(path2, content);
         } catch (err) {
           return { content: `write failed: ${err.message}`, isError: true };
         }
@@ -3501,7 +3838,7 @@ var init_write = __esm({
 });
 
 // src/harness/tools/edit.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "node:fs";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
 function countOccurrences(text, needle) {
   let count = 0;
   let i = text.indexOf(needle);
@@ -3541,7 +3878,7 @@ var init_edit = __esm({
         const edits = args.edits;
         let text;
         try {
-          text = readFileSync6(path2, "utf8");
+          text = readFileSync7(path2, "utf8");
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -3572,7 +3909,7 @@ var init_edit = __esm({
           text = text.slice(0, r.start) + edit.newText + text.slice(r.end);
         }
         try {
-          writeFileSync5(path2, text);
+          writeFileSync6(path2, text);
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -3587,7 +3924,7 @@ var init_edit = __esm({
 import { spawn as spawn6 } from "node:child_process";
 async function runShell(command, cwd, timeout, signal) {
   if (signal?.aborted) return { stdout: "", stderr: "", code: 1, reason: "Operation aborted" };
-  return new Promise((resolve19) => {
+  return new Promise((resolve20) => {
     const child = spawn6("bash", ["-c", command], { cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, code = 1, reason;
     let closed = false, settled = false, killTimer;
@@ -3603,7 +3940,7 @@ async function runShell(command, cwd, timeout, signal) {
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
-      resolve19({ stdout, stderr, code, reason });
+      resolve20({ stdout, stderr, code, reason });
     };
     const stop = (detail) => {
       if (reason) return;
@@ -3685,12 +4022,12 @@ var init_bash = __esm({
 });
 
 // src/harness/tools/grep.ts
-import { execFile as execFile3 } from "node:child_process";
-import { promisify as promisify3 } from "node:util";
+import { execFile as execFile5 } from "node:child_process";
+import { promisify as promisify5 } from "node:util";
 var execFileAsync, grepTool, grep_default;
 var init_grep = __esm({
   "src/harness/tools/grep.ts"() {
-    execFileAsync = promisify3(execFile3);
+    execFileAsync = promisify5(execFile5);
     grepTool = {
       name: "grep",
       description: "Search file contents for a pattern (regex or literal). Returns matching lines as path:line:text.",
@@ -3735,15 +4072,15 @@ var init_grep = __esm({
 });
 
 // src/harness/tools/find.ts
-import { execFile as execFile4 } from "node:child_process";
-import { promisify as promisify4 } from "node:util";
+import { execFile as execFile6 } from "node:child_process";
+import { promisify as promisify6 } from "node:util";
 function shellQuote2(s) {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 var execFileAsync2, findTool, find_default;
 var init_find = __esm({
   "src/harness/tools/find.ts"() {
-    execFileAsync2 = promisify4(execFile4);
+    execFileAsync2 = promisify6(execFile6);
     findTool = {
       name: "find",
       description: "Find files by glob pattern. Returns matching paths under the search directory.",
@@ -3774,7 +4111,7 @@ var init_find = __esm({
 
 // src/harness/tools/ls.ts
 import { readdirSync, statSync as statSync2 } from "node:fs";
-import { join as join8 } from "node:path";
+import { join as join10 } from "node:path";
 var lsTool, ls_default;
 var init_ls = __esm({
   "src/harness/tools/ls.ts"() {
@@ -3811,12 +4148,12 @@ var init_ls = __esm({
             }
             let isDir = false;
             try {
-              isDir = statSync2(join8(dir, name)).isDirectory();
+              isDir = statSync2(join10(dir, name)).isDirectory();
             } catch {
               isDir = false;
             }
             lines.push(`${prefix}${name}${isDir ? "/" : ""}`);
-            if (isDir && d > 1) walk(join8(dir, name), prefix + "  ", d - 1);
+            if (isDir && d > 1) walk(join10(dir, name), prefix + "  ", d - 1);
           }
         };
         walk(path2, "", depth);
@@ -3828,27 +4165,27 @@ var init_ls = __esm({
 });
 
 // src/harness/obscura/install.ts
-import { createHash as createHash2 } from "node:crypto";
-import { accessSync as accessSync2, constants as constants3, createReadStream, existsSync as existsSync6, lstatSync, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
-import { chmod as chmod2, mkdir, mkdtemp as mkdtemp2, open, readFile, rename, rm as rm2, writeFile } from "node:fs/promises";
-import { homedir as homedir6 } from "node:os";
-import { delimiter as delimiter2, dirname as dirname2, isAbsolute, join as join9, resolve as resolve4 } from "node:path";
+import { createHash as createHash3 } from "node:crypto";
+import { accessSync as accessSync2, constants as constants4, createReadStream as createReadStream2, existsSync as existsSync7, lstatSync as lstatSync2, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
+import { chmod as chmod2, mkdir as mkdir2, mkdtemp as mkdtemp3, open, readFile, rename as rename2, rm as rm3, writeFile } from "node:fs/promises";
+import { homedir as homedir8 } from "node:os";
+import { delimiter as delimiter2, dirname as dirname3, isAbsolute, join as join11, resolve as resolve5 } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { createGunzip, createInflateRaw } from "node:zlib";
 function manifest() {
-  const here5 = dirname2(fileURLToPath(import.meta.url));
-  const path2 = [resolve4(here5, "../../../vendor/obscura/releases.json"), resolve4(here5, "../vendor/obscura/releases.json")].find(existsSync6);
+  const here5 = dirname3(fileURLToPath(import.meta.url));
+  const path2 = [resolve5(here5, "../../../vendor/obscura/releases.json"), resolve5(here5, "../vendor/obscura/releases.json")].find(existsSync7);
   if (!path2) throw new Error("Obscura release metadata is missing. Reinstall the complete Rein package.");
-  return JSON.parse(readFileSync7(path2, "utf8"));
+  return JSON.parse(readFileSync8(path2, "utf8"));
 }
-function installRoot(home = process.env.REIN_HOME || join9(homedir6(), ".rein"), platform = process.platform, arch = process.arch) {
-  return join9(resolve4(home), "native", "obscura", OBSCURA_VERSION, `${platform}-${arch}`);
+function installRoot(home = process.env.REIN_HOME || join11(homedir8(), ".rein"), platform = process.platform, arch = process.arch) {
+  return join11(resolve5(home), "native", "obscura", OBSCURA_VERSION, `${platform}-${arch}`);
 }
 function executable(path2) {
   try {
     if (!statSync3(path2).isFile()) return false;
-    accessSync2(path2, process.platform === "win32" ? constants3.F_OK : constants3.X_OK);
+    accessSync2(path2, process.platform === "win32" ? constants4.F_OK : constants4.X_OK);
     return true;
   } catch {
     return false;
@@ -3856,15 +4193,15 @@ function executable(path2) {
 }
 function managedExecutable(directory, asset) {
   try {
-    if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) return void 0;
-    const installed = JSON.parse(readFileSync7(join9(directory, "install.json"), "utf8"));
+    if (!lstatSync2(directory).isDirectory() || lstatSync2(directory).isSymbolicLink()) return void 0;
+    const installed = JSON.parse(readFileSync8(join11(directory, "install.json"), "utf8"));
     const members = asset?.members ?? (process.platform === "win32" ? ["obscura.exe", "obscura-worker.exe"] : ["obscura", "obscura-worker"]);
     if (installed.version !== OBSCURA_VERSION || asset && installed.sha256 !== asset.sha256) return void 0;
     for (const member of members) {
-      const path2 = join9(directory, member);
-      if (lstatSync(path2).isSymbolicLink() || !executable(path2)) return void 0;
+      const path2 = join11(directory, member);
+      if (lstatSync2(path2).isSymbolicLink() || !executable(path2)) return void 0;
     }
-    return join9(directory, members[0]);
+    return join11(directory, members[0]);
   } catch {
     return void 0;
   }
@@ -3879,7 +4216,7 @@ function resolveObscura(override) {
   if (managed) return managed;
   const name = process.platform === "win32" ? "obscura.exe" : "obscura";
   for (const directory of (process.env.PATH || "").split(delimiter2)) {
-    if (isAbsolute(directory) && executable(join9(directory, name))) return join9(directory, name);
+    if (isAbsolute(directory) && executable(join11(directory, name))) return join11(directory, name);
   }
   return void 0;
 }
@@ -3921,7 +4258,7 @@ async function download(asset, path2, signal, fetcher, maxBytes) {
     const length = response.headers.get("content-length");
     if (length !== null && (!/^\d+$/.test(length) || Number(length) !== asset.bytes)) throw new Error("Obscura archive size does not match the pinned release.");
     file = await open(path2, "wx", 384);
-    const hash2 = createHash2("sha256");
+    const hash2 = createHash3("sha256");
     let bytes = 0;
     while (true) {
       const chunk = await abortable(() => reader.read(), signal);
@@ -3951,7 +4288,7 @@ function cstring(bytes) {
   return bytes.subarray(0, end < 0 ? bytes.length : end).toString("utf8");
 }
 async function extractTar(path2, stage, asset, signal, maxBytes) {
-  const input = createReadStream(path2), unzip = createGunzip();
+  const input = createReadStream2(path2), unzip = createGunzip();
   input.on("error", (error) => unzip.destroy(error));
   input.pipe(unzip);
   const abort = () => {
@@ -3998,7 +4335,7 @@ async function extractTar(path2, stage, asset, signal, maxBytes) {
       const size = octal(header.subarray(124, 136));
       if (!size || size > maxBytes) throw new Error("Invalid Obscura executable size.");
       found.add(name);
-      const output = await open(join9(stage, name), "wx", 448);
+      const output = await open(join11(stage, name), "wx", 448);
       try {
         for (let left = size; left > 0; ) {
           checkAbort(signal);
@@ -4047,7 +4384,7 @@ async function extractZip(path2, stage, asset, signal, maxBytes) {
     if (bytes.readUInt16LE(local + 6) !== flags || bytes.readUInt16LE(local + 8) !== method || bytes.subarray(local + 30, local + 30 + localNameLength).toString("utf8") !== name || start + compressed > directoryOffset || spans.some(([a, b]) => local < b && start + compressed > a)) throw new Error("Invalid Obscura ZIP member bounds.");
     spans.push([local, start + compressed]);
     found.add(name);
-    const output = await open(join9(stage, name), "wx", 448);
+    const output = await open(join11(stage, name), "wx", 448);
     let written = 0;
     const source = Readable.from([bytes.subarray(start, start + compressed)]), stream2 = method === 8 ? source.pipe(createInflateRaw()) : source;
     const abort = () => stream2.destroy(signal.reason instanceof Error ? signal.reason : new Error("Obscura installation cancelled."));
@@ -4080,7 +4417,7 @@ async function installObscura(options = {}, dependencies = {}) {
   if (release.repository !== REPOSITORY || release.version !== OBSCURA_VERSION || release.tag !== `v${OBSCURA_VERSION}` || !/^[a-f0-9]{40}$/.test(release.commit) || release.variant !== "no-render" || !/^obscura-[a-z0-9_-]+\.(tar\.gz|zip)$/.test(asset.filename) || !/^[a-f0-9]{64}$/.test(asset.sha256) || !Number.isSafeInteger(asset.bytes) || asset.bytes < 1 || asset.bytes > maxArchive || !["tar.gz", "zip"].includes(asset.format) || JSON.stringify(asset.members) !== JSON.stringify(members)) throw new Error("Invalid pinned Obscura release metadata.");
   const target = installRoot(dependencies.home, platform, arch), existing = managedExecutable(target, asset);
   if (existing) return existing;
-  if (existsSync6(target)) throw new Error(`The Obscura install is incomplete: ${target}. Move that directory aside and run rein web install again.`);
+  if (existsSync7(target)) throw new Error(`The Obscura install is incomplete: ${target}. Move that directory aside and run rein web install again.`);
   const controller = new AbortController();
   const abort = () => controller.abort(options.signal?.reason instanceof Error ? options.signal.reason : new Error("Obscura installation cancelled."));
   options.signal?.addEventListener("abort", abort, { once: true });
@@ -4088,11 +4425,11 @@ async function installObscura(options = {}, dependencies = {}) {
   let temporary;
   try {
     checkAbort(controller.signal);
-    await mkdir(dirname2(target), { recursive: true, mode: 448 });
-    temporary = await mkdtemp2(join9(dirname2(target), ".install-"));
+    await mkdir2(dirname3(target), { recursive: true, mode: 448 });
+    temporary = await mkdtemp3(join11(dirname3(target), ".install-"));
     await chmod2(temporary, 448);
-    const archive = join9(temporary, "archive"), stage = join9(temporary, "runtime");
-    await mkdir(stage, { mode: 448 });
+    const archive = join11(temporary, "archive"), stage = join11(temporary, "runtime");
+    await mkdir2(stage, { mode: 448 });
     options.onProgress?.(`Downloading Obscura ${OBSCURA_VERSION} for ${platform}/${arch} (${Math.ceil(asset.bytes / 1024 / 1024)} MiB)\u2026`);
     await download(asset, archive, controller.signal, dependencies.fetch ?? globalThis.fetch, maxArchive);
     checkAbort(controller.signal);
@@ -4100,20 +4437,20 @@ async function installObscura(options = {}, dependencies = {}) {
     if (asset.format === "tar.gz") await extractTar(archive, stage, asset, controller.signal, maxExtracted);
     else await extractZip(archive, stage, asset, controller.signal, maxExtracted);
     checkAbort(controller.signal);
-    await writeFile(join9(stage, "install.json"), JSON.stringify({ version: OBSCURA_VERSION, commit: release.commit, sha256: asset.sha256, asset: asset.filename }) + "\n", { mode: 384, flag: "wx" });
+    await writeFile(join11(stage, "install.json"), JSON.stringify({ version: OBSCURA_VERSION, commit: release.commit, sha256: asset.sha256, asset: asset.filename }) + "\n", { mode: 384, flag: "wx" });
     checkAbort(controller.signal);
     try {
-      await rename(stage, target);
+      await rename2(stage, target);
     } catch (error) {
       const concurrent = managedExecutable(target, asset);
       if (concurrent) return concurrent;
       throw error;
     }
-    return join9(target, members[0]);
+    return join11(target, members[0]);
   } finally {
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abort);
-    if (temporary) await rm2(temporary, { recursive: true, force: true });
+    if (temporary) await rm3(temporary, { recursive: true, force: true });
   }
 }
 async function ensureObscura(options = {}) {
@@ -4121,7 +4458,7 @@ async function ensureObscura(options = {}) {
   return resolveObscura(options.bin) ?? await installObscura(options);
 }
 var OBSCURA_VERSION, REPOSITORY, MAX_ARCHIVE_BYTES, MAX_EXTRACTED_BYTES, INSTALL_TIMEOUT_MS;
-var init_install = __esm({
+var init_install2 = __esm({
   "src/harness/obscura/install.ts"() {
     OBSCURA_VERSION = "0.2.2";
     REPOSITORY = "https://github.com/h4ckf0r0day/obscura";
@@ -4133,9 +4470,9 @@ var init_install = __esm({
 
 // src/harness/obscura/runtime.ts
 import { spawn as spawn7 } from "node:child_process";
-import { mkdtemp as mkdtemp3, rm as rm3 } from "node:fs/promises";
-import { tmpdir as tmpdir3 } from "node:os";
-import { join as join10 } from "node:path";
+import { mkdtemp as mkdtemp4, rm as rm4 } from "node:fs/promises";
+import { tmpdir as tmpdir4 } from "node:os";
+import { join as join12 } from "node:path";
 import { stripVTControlCharacters as stripVTControlCharacters2 } from "node:util";
 function webOptions() {
   const config = loadConfig().obscura;
@@ -4168,7 +4505,7 @@ async function evaluatePage(url, expression, signal, onProgress) {
   const options = webOptions();
   const executable2 = await ensureObscura({ bin: options.bin, signal, onProgress });
   signal?.throwIfAborted();
-  const directory = await mkdtemp3(join10(tmpdir3(), "rein-obscura-page-"));
+  const directory = await mkdtemp4(join12(tmpdir4(), "rein-obscura-page-"));
   try {
     signal?.throwIfAborted();
     onProgress?.(`Obscura: reading ${url.hostname}`);
@@ -4180,7 +4517,7 @@ async function evaluatePage(url, expression, signal, onProgress) {
       throw new Error("Obscura returned invalid extraction data. Update the configured binary or run rein web install.");
     }
   } finally {
-    await rm3(directory, { recursive: true, force: true });
+    await rm4(directory, { recursive: true, force: true });
   }
 }
 function browserEnvironment() {
@@ -4188,7 +4525,7 @@ function browserEnvironment() {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => names.has(name))), RUST_LOG: "error", NO_COLOR: "1" };
 }
 function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
-  return new Promise((resolve19, reject) => {
+  return new Promise((resolve20, reject) => {
     const child = spawn7(executable2, args, { cwd, env: browserEnvironment(), detached: process.platform !== "win32", shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, closed = false, settled = false, exitCode = null, error;
     let escalation;
@@ -4206,7 +4543,7 @@ function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
       signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (exitCode !== 0) reject(new Error(`Obscura exited ${exitCode ?? "with a signal"}: ${cleanWebText(stderr).trim().slice(-1500) || "page navigation failed"}`));
-      else resolve19(stdout);
+      else resolve20(stdout);
     };
     const stop = (message) => {
       if (error) return;
@@ -4249,7 +4586,7 @@ function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
 var init_runtime = __esm({
   "src/harness/obscura/runtime.ts"() {
     init_models();
-    init_install();
+    init_install2();
   }
 });
 
@@ -4450,22 +4787,22 @@ var gates_exports = {};
 __export(gates_exports, {
   default: () => gates_default
 });
-import { execFile as execFile5 } from "node:child_process";
-import { promisify as promisify5 } from "node:util";
-import { existsSync as existsSync7 } from "node:fs";
-import { dirname as dirname3, isAbsolute as isAbsolute2, join as join11, resolve as resolve5 } from "node:path";
+import { execFile as execFile7 } from "node:child_process";
+import { promisify as promisify7 } from "node:util";
+import { existsSync as existsSync8 } from "node:fs";
+import { dirname as dirname4, isAbsolute as isAbsolute2, join as join13, resolve as resolve6 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var execFileAsync3, here, UNLAZY_CANDIDATES, UNLAZY_DIR, MODES, gatesTool, gates_default;
 var init_gates = __esm({
   "src/harness/tools/gates.ts"() {
     init_truncate();
-    execFileAsync3 = promisify5(execFile5);
-    here = dirname3(fileURLToPath2(import.meta.url));
+    execFileAsync3 = promisify7(execFile7);
+    here = dirname4(fileURLToPath2(import.meta.url));
     UNLAZY_CANDIDATES = [
-      resolve5(here, "..", "..", "..", "vendor", "unlazy"),
-      resolve5(here, "..", "vendor", "unlazy")
+      resolve6(here, "..", "..", "..", "vendor", "unlazy"),
+      resolve6(here, "..", "vendor", "unlazy")
     ];
-    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync7(join11(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
+    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync8(join13(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
     MODES = /* @__PURE__ */ new Set(["status", "approve", "reverify", "lint"]);
     gatesTool = {
       name: "gates",
@@ -4483,12 +4820,12 @@ var init_gates = __esm({
         const mode = args.mode;
         if (!MODES.has(mode)) return { content: `Unknown mode: ${mode}. Use one of: status, approve, reverify, lint.`, isError: true };
         const file = args.file ? String(args.file) : "GATES.md";
-        const root2 = args.root ? resolve5(String(args.root)) : process.cwd();
-        const ledgerPath = isAbsolute2(file) ? file : join11(root2, file);
-        if (!existsSync7(ledgerPath)) {
+        const root2 = args.root ? resolve6(String(args.root)) : process.cwd();
+        const ledgerPath = isAbsolute2(file) ? file : join13(root2, file);
+        if (!existsSync8(ledgerPath)) {
           return { content: `Ledger not found: ${ledgerPath}. Write it first (template: vendor/unlazy/templates/gates-leaf.md), then run gates with mode=lint.`, isError: true };
         }
-        const scriptPath = join11(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
+        const scriptPath = join13(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
         const cmdArgs = mode === "lint" ? [scriptPath, ledgerPath] : [scriptPath, `--${mode}`, ledgerPath];
         let stdout = "";
         let stderr = "";
@@ -4524,10 +4861,10 @@ var init_gates = __esm({
 });
 
 // src/harness/tools/index.ts
-import { resolve as resolve6 } from "node:path";
-import { homedir as homedir7 } from "node:os";
+import { resolve as resolve7 } from "node:path";
+import { homedir as homedir9 } from "node:os";
 function toolsForCwd(cwd) {
-  const root2 = resolve6(cwd);
+  const root2 = resolve7(cwd);
   const pathTools = /* @__PURE__ */ new Set(["read", "write", "edit", "grep", "find", "ls"]);
   const optionalPaths = /* @__PURE__ */ new Set(["grep", "find", "ls"]);
   return [...TOOLS.map((tool) => {
@@ -4540,8 +4877,8 @@ function toolsForCwd(cwd) {
         const field = tool.name === "gates" ? "root" : "path";
         const value = args[field];
         const defaultsToRoot = tool.name === "gates" || optionalPaths.has(tool.name);
-        const expanded = value === "~" ? homedir7() : typeof value === "string" && value.startsWith("~/") ? resolve6(homedir7(), value.slice(2)) : value;
-        const path2 = typeof expanded === "string" ? resolve6(root2, expanded) : value === void 0 && defaultsToRoot ? root2 : value;
+        const expanded = value === "~" ? homedir9() : typeof value === "string" && value.startsWith("~/") ? resolve7(homedir9(), value.slice(2)) : value;
+        const path2 = typeof expanded === "string" ? resolve7(root2, expanded) : value === void 0 && defaultsToRoot ? root2 : value;
         return tool.execute(id, { ...args, [field]: path2 }, signal, onUpdate);
       }
     };
@@ -4569,7 +4906,7 @@ import * as fs from "node:fs";
 import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 function token() {
   const dir = process.env.NODETERM_NODE_TOKEN_DIR;
   const id = process.env.NODETERM_NODE_ID;
@@ -4625,7 +4962,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
   const configuredWait = Number(timeoutSec ?? process.env.NODETERM_PERM_WAIT_SECS ?? 45);
   const wait = Number.isFinite(configuredWait) ? Math.max(1, configuredWait) : 45;
   const nodeId = process.env.NODETERM_NODE_ID ?? "node";
-  const pendingId = `${nodeId}-${Date.now()}-${randomUUID3().slice(0, 8)}`;
+  const pendingId = `${nodeId}-${Date.now()}-${randomUUID4().slice(0, 8)}`;
   const dir = pendingDir();
   const requestFile = path.join(dir, `${pendingId}.json`);
   const answerFile = path.join(dir, `${pendingId}.answer`);
@@ -4645,7 +4982,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
   }
   postEvent(request2, { nodeterm_pending_id: pendingId });
   const deadline = Date.now() + wait * 1e3;
-  return new Promise((resolve19) => {
+  return new Promise((resolve20) => {
     let timer, settled = false;
     const finish = (answer, answered = false) => {
       if (settled) return;
@@ -4662,7 +4999,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
         { hook_event_name: "PostToolUse", tool_name: toolName, hookSpecificOutput: { hookEventName: "PostToolUse" } },
         { nodeterm_answered: answer }
       );
-      resolve19(answer);
+      resolve20(answer);
     };
     const abort = () => finish("deny");
     const tick = () => {
@@ -4708,11 +5045,11 @@ var init_nodeterm = __esm({
 
 // src/agent/workspace.ts
 import { execFileSync } from "node:child_process";
-import { createHash as createHash3, randomUUID as randomUUID4 } from "node:crypto";
-import { lstatSync as lstatSync2, readFileSync as readFileSync9, realpathSync as realpathSync2 } from "node:fs";
-import { dirname as dirname4, join as join13, resolve as resolve7, sep } from "node:path";
+import { createHash as createHash4, randomUUID as randomUUID5 } from "node:crypto";
+import { lstatSync as lstatSync3, readFileSync as readFileSync10, realpathSync as realpathSync2 } from "node:fs";
+import { dirname as dirname5, join as join15, resolve as resolve8, sep } from "node:path";
 function digest2(value) {
-  return createHash3("sha256").update(value).digest("hex").slice(0, 24);
+  return createHash4("sha256").update(value).digest("hex").slice(0, 24);
 }
 function git(cwd, args, maxBuffer = 2 * 1024 * 1024) {
   try {
@@ -4725,7 +5062,7 @@ function safeRealpath(path2) {
   try {
     return realpathSync2(path2);
   } catch {
-    return resolve7(path2);
+    return resolve8(path2);
   }
 }
 function validRef(value) {
@@ -4738,7 +5075,7 @@ function workspaceScope(cwd) {
     return { scope: `directory:${digest2(directory)}`, root: directory, git: false };
   }
   const common = git(cwd, ["rev-parse", "--git-common-dir"]);
-  const shared = common ? safeRealpath(resolve7(cwd, common)) : safeRealpath(root2);
+  const shared = common ? safeRealpath(resolve8(cwd, common)) : safeRealpath(root2);
   return { scope: `git:${digest2(shared)}`, root: safeRealpath(root2), git: true };
 }
 function captureWorkspaceSnapshot(cwd) {
@@ -4749,7 +5086,7 @@ function captureWorkspaceSnapshot(cwd) {
   const raw = identity.git ? git(cwd, ["diff", "--no-ext-diff", "--no-color", "--raw", "HEAD"], 512 * 1024) : void 0;
   const state = identity.git ? digest2(`${raw ?? ""}
 ${status2.join("\n")}`) : void 0;
-  return { type: "workspace_snapshot", id: randomUUID4(), timestamp: Date.now(), scope: identity.scope, cwd: safeRealpath(cwd), root: identity.root, ...head ? { head } : {}, ...branch ? { branch } : {}, status: status2, ...state ? { state } : {} };
+  return { type: "workspace_snapshot", id: randomUUID5(), timestamp: Date.now(), scope: identity.scope, cwd: safeRealpath(cwd), root: identity.root, ...head ? { head } : {}, ...branch ? { branch } : {}, status: status2, ...state ? { state } : {} };
 }
 function sameWorkspaceState(a, b) {
   return !!a && a.scope === b.scope && a.head === b.head && a.branch === b.branch && a.state === b.state && a.status.join("\n") === b.status.join("\n");
@@ -4758,25 +5095,25 @@ function sharedNotesRoot(cwd) {
   try {
     const commonRaw = git(cwd, ["rev-parse", "--git-common-dir"]);
     if (!commonRaw) return safeRealpath(cwd);
-    const common = safeRealpath(resolve7(cwd, commonRaw));
-    if (common.endsWith(`${sep}.git`)) return dirname4(common);
+    const common = safeRealpath(resolve8(cwd, commonRaw));
+    if (common.endsWith(`${sep}.git`)) return dirname5(common);
     const worktree = git(cwd, ["--git-dir", common, "config", "--path", "--get", "core.worktree"]);
-    return worktree ? safeRealpath(resolve7(common, worktree)) : common;
+    return worktree ? safeRealpath(resolve8(common, worktree)) : common;
   } catch {
     return safeRealpath(cwd);
   }
 }
 function sharedMemory(cwd, maxChars) {
   const root2 = sharedNotesRoot(cwd);
-  const path2 = join13(root2, ".pi", "notes", "MEMORY.md");
+  const path2 = join15(root2, ".pi", "notes", "MEMORY.md");
   try {
-    for (const directory of [root2, join13(root2, ".pi"), join13(root2, ".pi", "notes")]) {
-      const stat3 = lstatSync2(directory);
-      if (!stat3.isDirectory() || stat3.isSymbolicLink()) return void 0;
+    for (const directory of [root2, join15(root2, ".pi"), join15(root2, ".pi", "notes")]) {
+      const stat4 = lstatSync3(directory);
+      if (!stat4.isDirectory() || stat4.isSymbolicLink()) return void 0;
     }
-    const stat2 = lstatSync2(path2);
-    if (!stat2.isFile() || stat2.isSymbolicLink() || stat2.nlink > 1) return void 0;
-    const text = readFileSync9(path2, "utf8").trim();
+    const stat3 = lstatSync3(path2);
+    if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink > 1) return void 0;
+    const text = readFileSync10(path2, "utf8").trim();
     return text ? text.slice(0, maxChars) : void 0;
   } catch {
     return void 0;
@@ -4835,27 +5172,27 @@ var init_workspace = __esm({
 });
 
 // src/agent/session.ts
-import { appendFileSync, existsSync as existsSync8, mkdirSync as mkdirSync6, readFileSync as readFileSync10, readdirSync as readdirSync2, statSync as statSync4, writeFileSync as writeFileSync7 } from "node:fs";
-import { homedir as homedir9 } from "node:os";
-import { join as join14 } from "node:path";
-import { randomUUID as randomUUID5, createHash as createHash4 } from "node:crypto";
+import { appendFileSync, existsSync as existsSync9, mkdirSync as mkdirSync7, readFileSync as readFileSync11, readdirSync as readdirSync2, statSync as statSync4, writeFileSync as writeFileSync8 } from "node:fs";
+import { homedir as homedir11 } from "node:os";
+import { join as join16 } from "node:path";
+import { randomUUID as randomUUID6, createHash as createHash5 } from "node:crypto";
 function newSessionId() {
-  return `session-${Date.now()}-${randomUUID5().slice(0, 8)}`;
+  return `session-${Date.now()}-${randomUUID6().slice(0, 8)}`;
 }
 function sessionPath(id) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(id)) throw new Error("Invalid session id. Use the full id from /sessions.");
-  return join14(sessionsDir(), `${id}.jsonl`);
+  return join16(sessionsDir(), `${id}.jsonl`);
 }
 function createSession(opts) {
-  mkdirSync6(sessionsDir(), { recursive: true });
+  mkdirSync7(sessionsDir(), { recursive: true });
   const id = opts.id ?? newSessionId();
   const header = { ...opts, type: "header", version: 1, id, created: (/* @__PURE__ */ new Date()).toISOString() };
-  writeFileSync7(sessionPath(id), JSON.stringify(header) + "\n", { flag: "wx", mode: 384 });
+  writeFileSync8(sessionPath(id), JSON.stringify(header) + "\n", { flag: "wx", mode: 384 });
   return id;
 }
 function appendSessionEntry(sessionId, entry) {
   const path2 = sessionPath(sessionId);
-  if (!existsSync8(path2)) throw new Error(`No such session: ${sessionId}`);
+  if (!existsSync9(path2)) throw new Error(`No such session: ${sessionId}`);
   appendFileSync(path2, "\n" + JSON.stringify(entry) + "\n");
 }
 function windowMessage(window) {
@@ -4901,12 +5238,12 @@ function validWindowStart(messages, start) {
 }
 function loadSession(sessionId) {
   const path2 = sessionPath(sessionId);
-  if (!existsSync8(path2)) throw new Error(`No such session: ${sessionId}`);
+  if (!existsSync9(path2)) throw new Error(`No such session: ${sessionId}`);
   let header = null;
   const messages = [];
   const entries = [];
   let window;
-  for (const [index, line] of readFileSync10(path2, "utf8").split("\n").entries()) {
+  for (const [index, line] of readFileSync11(path2, "utf8").split("\n").entries()) {
     if (!line.trim()) continue;
     try {
       const obj = JSON.parse(line);
@@ -4915,7 +5252,7 @@ function loadSession(sessionId) {
         if (!header) header = obj;
         continue;
       }
-      const id = typeof obj.id === "string" ? obj.id : `legacy-${createHash4("sha256").update(`${sessionId}:${index}:${line}`).digest("hex").slice(0, 24)}`;
+      const id = typeof obj.id === "string" ? obj.id : `legacy-${createHash5("sha256").update(`${sessionId}:${index}:${line}`).digest("hex").slice(0, 24)}`;
       if (["user", "assistant", "toolResult"].includes(obj.role)) {
         if (obj.role === "user" ? typeof obj.content !== "string" : !Array.isArray(obj.content)) continue;
         if (obj.role !== "user" && !obj.content.every((part) => part && typeof part === "object" && (part.type === "text" && typeof part.text === "string" || obj.role === "assistant" && part.type === "thinking" && typeof part.thinking === "string" || obj.role === "assistant" && part.type === "toolCall" && typeof part.id === "string" && typeof part.name === "string" && part.arguments && typeof part.arguments === "object" && !Array.isArray(part.arguments)))) continue;
@@ -4984,12 +5321,12 @@ var sessionsDir;
 var init_session = __esm({
   "src/agent/session.ts"() {
     init_workspace();
-    sessionsDir = () => join14(process.env.REIN_HOME || join14(homedir9(), ".rein"), "sessions");
+    sessionsDir = () => join16(process.env.REIN_HOME || join16(homedir11(), ".rein"), "sessions");
   }
 });
 
 // src/harness/posthorse.ts
-import { randomUUID as randomUUID6 } from "node:crypto";
+import { randomUUID as randomUUID7 } from "node:crypto";
 function messageText(message) {
   if (message.role === "user") return message.content;
   return message.content.map((part) => part.type === "text" ? part.text : part.type === "thinking" ? part.thinking : `${part.name} ${JSON.stringify(part.arguments)}`).join("\n");
@@ -5061,7 +5398,7 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
         this.entries.push(entry);
       }
       record(message) {
-        const entry = { ...message, id: randomUUID6() };
+        const entry = { ...message, id: randomUUID7() };
         this.store(entry);
         this.messages.push(entry);
         if (message.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted" && Number.isFinite(message.usage?.totalTokens) && message.usage.totalTokens > 0) {
@@ -5096,7 +5433,7 @@ Use get_context_remaining when the context budget matters. Automatic rollover st
       rollover(handoff, reason = "manual", start = this.messages.length) {
         this.validateHandoff(handoff);
         if (!validWindowStart(this.messages, start) || start < (this.window?.start ?? 0)) throw new Error("Context boundary must follow a complete tool batch and advance within the transcript");
-        const window = { type: "context_window", id: randomUUID6(), timestamp: Date.now(), start, handoff: handoff?.trim() || void 0, reason };
+        const window = { type: "context_window", id: randomUUID7(), timestamp: Date.now(), start, handoff: handoff?.trim() || void 0, reason };
         this.store(window);
         this.window = window;
         this.usage = void 0;
@@ -5164,7 +5501,7 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
         if (this.enabled && used >= remindAt && used < this.line) {
           const seen = this.entries.some((e) => "type" in e && e.type === "posthorse-reminder" && e.windowId === this.windowId && e.contextWindow === this.model.contextWindow && e.reserveTokens === this.reserveTokens);
           if (!seen) {
-            this.store({ type: "posthorse-reminder", id: randomUUID6(), timestamp: Date.now(), windowId: this.windowId, contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens });
+            this.store({ type: "posthorse-reminder", id: randomUUID7(), timestamp: Date.now(), windowId: this.windowId, contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens });
             active2 = [...active2, { role: "user", timestamp: Date.now(), content: "[posthorse] Checkpoint now: save goal/progress/decisions/next steps in notes, then call new_context. This reminder is best-effort; automatic rollover may occur without it." }];
           }
         }
@@ -5201,18 +5538,18 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
 });
 
 // src/harness/tools/context.ts
-import { constants as constants4, closeSync as closeSync2, existsSync as existsSync9, fstatSync as fstatSync2, lstatSync as lstatSync3, mkdirSync as mkdirSync7, openSync as openSync2, readSync, readdirSync as readdirSync3, readFileSync as readFileSync11, realpathSync as realpathSync3, writeFileSync as writeFileSync8, renameSync as renameSync2, unlinkSync as unlinkSync2 } from "node:fs";
-import { dirname as dirname5, isAbsolute as isAbsolute3, join as join15, relative, resolve as resolve8, sep as sep2 } from "node:path";
+import { constants as constants5, closeSync as closeSync2, existsSync as existsSync10, fstatSync as fstatSync2, lstatSync as lstatSync4, mkdirSync as mkdirSync8, openSync as openSync2, readSync, readdirSync as readdirSync3, readFileSync as readFileSync12, realpathSync as realpathSync3, writeFileSync as writeFileSync9, renameSync as renameSync3, unlinkSync as unlinkSync3 } from "node:fs";
+import { dirname as dirname6, isAbsolute as isAbsolute3, join as join17, relative, resolve as resolve9, sep as sep2 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { randomUUID as randomUUID7 } from "node:crypto";
+import { randomUUID as randomUUID8 } from "node:crypto";
 function notesRoot(cwd) {
   try {
     const options = { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3, maxBuffer: 1024 * 1024 };
-    const common = realpathSync3(resolve8(cwd, execFileSync2("git", ["rev-parse", "--git-common-dir"], options).trim()));
-    if (common.endsWith(`${sep2}.git`)) return dirname5(common);
+    const common = realpathSync3(resolve9(cwd, execFileSync2("git", ["rev-parse", "--git-common-dir"], options).trim()));
+    if (common.endsWith(`${sep2}.git`)) return dirname6(common);
     try {
       const worktree = execFileSync2("git", ["--git-dir", common, "config", "--path", "--get", "core.worktree"], options).trim();
-      if (worktree) return realpathSync3(resolve8(common, worktree));
+      if (worktree) return realpathSync3(resolve9(common, worktree));
     } catch {
     }
     return common;
@@ -5228,14 +5565,14 @@ function safePath(root2, note, checkLeaf = true) {
   if (isAbsolute3(note) || /^[A-Za-z]:/.test(note) || note.includes("\\") || note.includes("\0")) throw new Error("Note path must be relative to .pi/notes.");
   while (note.startsWith("./")) note = note.slice(2);
   while (note.startsWith(".pi/notes/")) note = note.slice(".pi/notes/".length);
-  const path2 = resolve8(root2, note);
+  const path2 = resolve9(root2, note);
   const rel = relative(root2, path2);
   if (!rel || rel === ".." || rel.startsWith(`..${sep2}`) || isAbsolute3(rel)) throw new Error("Note path must stay inside .pi/notes.");
-  for (const part of [dirname5(root2), root2, ...rel.split(sep2).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join15(root2, ...parts.slice(0, i + 1)))]) {
+  for (const part of [dirname6(root2), root2, ...rel.split(sep2).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join17(root2, ...parts.slice(0, i + 1)))]) {
     try {
-      const stat2 = lstatSync3(part);
-      if (stat2.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
-      if (part === path2 ? !stat2.isFile() || stat2.nlink > 1 : !stat2.isDirectory()) throw new Error("Notes require regular files without hard links and ordinary directories.");
+      const stat3 = lstatSync4(part);
+      if (stat3.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
+      if (part === path2 ? !stat3.isFile() || stat3.nlink > 1 : !stat3.isDirectory()) throw new Error("Notes require regular files without hard links and ordinary directories.");
     } catch (err) {
       if (err.code !== "ENOENT") throw err;
     }
@@ -5244,10 +5581,10 @@ function safePath(root2, note, checkLeaf = true) {
 }
 function* noteFiles(root2, dir = root2) {
   safePath(root2, ".path-check", false);
-  if (!existsSync9(dir)) return;
+  if (!existsSync10(dir)) return;
   for (const file of readdirSync3(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (file.isSymbolicLink()) continue;
-    const path2 = join15(dir, file.name);
+    const path2 = join17(dir, file.name);
     if (file.isDirectory()) yield* noteFiles(root2, path2);
     else if (file.isFile()) {
       safePath(root2, relative(root2, path2));
@@ -5270,7 +5607,7 @@ function offsetOf(args) {
   return offset;
 }
 function contextTools(state, cwd) {
-  const root2 = join15(notesRoot(cwd), ".pi", "notes");
+  const root2 = join17(notesRoot(cwd), ".pi", "notes");
   const outputPage = (text, offset, prefix = "") => page(text, offset, state.pageLimit(offset, Math.max(0, text.length - offset) + prefix.length), prefix);
   const notes = {
     name: "notes",
@@ -5285,26 +5622,26 @@ function contextTools(state, cwd) {
       if (op === "write" || op === "append") {
         const path2 = safePath(root2, required(args.path, "path"));
         if (typeof args.content !== "string") throw new Error('"content" is required; use "" to clear a note.');
-        mkdirSync7(dirname5(path2), { recursive: true });
+        mkdirSync8(dirname6(path2), { recursive: true });
         if (op === "write") {
-          const temp = `${path2}.${randomUUID7()}.tmp`;
+          const temp = `${path2}.${randomUUID8()}.tmp`;
           try {
-            writeFileSync8(temp, args.content, { flag: "wx", mode: 384 });
-            renameSync2(temp, path2);
+            writeFileSync9(temp, args.content, { flag: "wx", mode: 384 });
+            renameSync3(temp, path2);
           } finally {
             try {
-              unlinkSync2(temp);
+              unlinkSync3(temp);
             } catch {
             }
           }
         } else {
-          const fd = openSync2(path2, constants4.O_RDWR | constants4.O_APPEND | constants4.O_CREAT | (constants4.O_NOFOLLOW ?? 0), 384);
+          const fd = openSync2(path2, constants5.O_RDWR | constants5.O_APPEND | constants5.O_CREAT | (constants5.O_NOFOLLOW ?? 0), 384);
           try {
-            const stat2 = fstatSync2(fd);
-            if (!stat2.isFile() || stat2.nlink > 1) throw new Error("Notes require regular files without hard links.");
+            const stat3 = fstatSync2(fd);
+            if (!stat3.isFile() || stat3.nlink > 1) throw new Error("Notes require regular files without hard links.");
             const last = Buffer.alloc(1);
-            if (stat2.size) readSync(fd, last, 0, 1, stat2.size - 1);
-            writeFileSync8(fd, `${stat2.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
+            if (stat3.size) readSync(fd, last, 0, 1, stat3.size - 1);
+            writeFileSync9(fd, `${stat3.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
           } finally {
             closeSync2(fd);
           }
@@ -5313,15 +5650,15 @@ function contextTools(state, cwd) {
       }
       if (op === "read") {
         const path2 = safePath(root2, required(args.path, "path"));
-        if (!existsSync9(path2)) return { isError: true, content: `No note ${relative(root2, path2)}. Use notes op=list to discover existing notes, or op=write/append to save verified facts.` };
-        return { content: outputPage(readFileSync11(path2, "utf8"), offset) };
+        if (!existsSync10(path2)) return { isError: true, content: `No note ${relative(root2, path2)}. Use notes op=list to discover existing notes, or op=write/append to save verified facts.` };
+        return { content: outputPage(readFileSync12(path2, "utf8"), offset) };
       }
       if (op === "list") return { content: outputPage([...noteFiles(root2)].map((p) => relative(root2, p)).join("\n") || "(no notes yet)", offset) };
       const query = required(args.query, "query").toLowerCase();
       const hits = [];
       for (const file of noteFiles(root2)) {
         if (signal?.aborted) throw new Error("Operation aborted");
-        for (const [index, line] of readFileSync11(file, "utf8").split("\n").entries()) {
+        for (const [index, line] of readFileSync12(file, "utf8").split("\n").entries()) {
           const match = line.toLowerCase().indexOf(query);
           if (match >= 0) hits.push(`${relative(root2, file)}:${index + 1}: ${line.slice(Math.max(0, match - 60), match + 240)}`);
           if (hits.length >= 200) break;
@@ -5351,7 +5688,7 @@ function contextTools(state, cwd) {
       else if (id) {
         try {
           const saved = loadSession(id);
-          if (saved.header?.cwd && notesRoot(saved.header.cwd) === dirname5(dirname5(root2))) sources.push({ id, entries: saved.entries });
+          if (saved.header?.cwd && notesRoot(saved.header.cwd) === dirname6(dirname6(root2))) sources.push({ id, entries: saved.entries });
         } catch {
         }
       }
@@ -5369,7 +5706,7 @@ function contextTools(state, cwd) {
           if (!session.cwd) continue;
           try {
             if (!roots.has(session.cwd)) roots.set(session.cwd, notesRoot(session.cwd));
-            if (roots.get(session.cwd) === dirname5(dirname5(root2))) {
+            if (roots.get(session.cwd) === dirname6(dirname6(root2))) {
               scoped++;
               if (!sources.some((s) => s.id === session.id)) sources.push({ id: session.id, entries: args.op === "list" ? [] : loadSession(session.id).entries });
             }
@@ -5448,19 +5785,19 @@ __export(skills_exports, {
   skillRoster: () => skillRoster,
   skillTool: () => skillTool
 });
-import { readFileSync as readFileSync12, realpathSync as realpathSync4, existsSync as existsSync10 } from "node:fs";
-import { dirname as dirname6, resolve as resolve9, sep as sep3 } from "node:path";
+import { readFileSync as readFileSync13, realpathSync as realpathSync4, existsSync as existsSync11 } from "node:fs";
+import { dirname as dirname7, resolve as resolve10, sep as sep3 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function readSkill(name, file = "SKILL.md") {
   if (!BUNDLED_SKILLS.some((s) => s.name === name)) throw new Error(`Unknown bundled skill. Choose: ${BUNDLED_SKILLS.map((s) => s.name).join(", ")}.`);
   if (!skillsDir) throw new Error("Bundled skills are missing. Reinstall the complete rein-agent package.");
   if (!file || file.includes("\\") || file.includes("\0") || file.startsWith("/") || file.split("/").some((p) => p === "..")) throw new Error("Skill references must stay inside the selected skill directory.");
-  const root2 = realpathSync4(resolve9(skillsDir, name));
-  const path2 = realpathSync4(resolve9(root2, file));
+  const root2 = realpathSync4(resolve10(skillsDir, name));
+  const path2 = realpathSync4(resolve10(root2, file));
   if (!path2.startsWith(root2 + sep3)) throw new Error("Skill references must stay inside the selected skill directory.");
-  const manifest2 = JSON.parse(readFileSync12(resolve9(skillsDir, "../manifest.json"), "utf8"));
+  const manifest2 = JSON.parse(readFileSync13(resolve10(skillsDir, "../manifest.json"), "utf8"));
   if (!Object.hasOwn(manifest2.files, `skills/${name}/${file}`)) throw new Error("This file is not a bundled skill reference.");
-  const body = readFileSync12(path2, "utf8");
+  const body = readFileSync13(path2, "utf8");
   if (Buffer.byteLength(body) > 24e3) throw new Error("Skill reference exceeds the 24 KB output limit.");
   return body;
 }
@@ -5483,8 +5820,8 @@ var init_skills = __esm({
       { name: "tdd", description: "Build behavior through red-green-refactor tests at public interfaces." },
       { name: "code-review", description: "Review a change against its requirements and the repository's standards." }
     ].map((skill) => Object.freeze(skill)));
-    here2 = dirname6(fileURLToPath3(import.meta.url));
-    skillsDir = [resolve9(here2, "../../vendor/mattpocock/skills"), resolve9(here2, "../vendor/mattpocock/skills")].find((dir) => existsSync10(resolve9(dir, "diagnosing-bugs/SKILL.md")));
+    here2 = dirname7(fileURLToPath3(import.meta.url));
+    skillsDir = [resolve10(here2, "../../vendor/mattpocock/skills"), resolve10(here2, "../vendor/mattpocock/skills")].find((dir) => existsSync11(resolve10(dir, "diagnosing-bugs/SKILL.md")));
     SKILL_GUIDANCE = `
 Bundled workflows (Matt Pocock; load with the skill tool when useful):
 ${skillRoster()}
@@ -5725,26 +6062,26 @@ var init_runner = __esm({
 });
 
 // src/harness/autonomy/state.ts
-import { existsSync as existsSync11, linkSync, lstatSync as lstatSync4, mkdirSync as mkdirSync8, readFileSync as readFileSync13, realpathSync as realpathSync5, renameSync as renameSync3, statSync as statSync5, unlinkSync as unlinkSync3, writeFileSync as writeFileSync9 } from "node:fs";
-import { homedir as homedir10 } from "node:os";
-import { join as join16, resolve as resolve10 } from "node:path";
-import { createHash as createHash5, randomUUID as randomUUID8 } from "node:crypto";
+import { existsSync as existsSync12, linkSync, lstatSync as lstatSync5, mkdirSync as mkdirSync9, readFileSync as readFileSync14, realpathSync as realpathSync5, renameSync as renameSync4, statSync as statSync5, unlinkSync as unlinkSync4, writeFileSync as writeFileSync10 } from "node:fs";
+import { homedir as homedir12 } from "node:os";
+import { join as join18, resolve as resolve11 } from "node:path";
+import { createHash as createHash6, randomUUID as randomUUID9 } from "node:crypto";
 function privateDirectory() {
   const directory = autonomyDirectory();
-  mkdirSync8(directory, { recursive: true, mode: 448 });
-  if (lstatSync4(directory).isSymbolicLink() || !lstatSync4(directory).isDirectory()) throw new Error("Autonomy state must be an ordinary directory.");
+  mkdirSync9(directory, { recursive: true, mode: 448 });
+  if (lstatSync5(directory).isSymbolicLink() || !lstatSync5(directory).isDirectory()) throw new Error("Autonomy state must be an ordinary directory.");
   return directory;
 }
 function regularFile(path2, lock = false) {
-  const stat2 = lstatSync4(path2);
-  if (!stat2.isFile() || stat2.isSymbolicLink() || !lock && stat2.nlink !== 1 || stat2.size > (lock ? 1024 : 4e6)) throw new Error("Autonomy state must be a bounded regular file without links.");
+  const stat3 = lstatSync5(path2);
+  if (!stat3.isFile() || stat3.isSymbolicLink() || !lock && stat3.nlink !== 1 || stat3.size > (lock ? 1024 : 4e6)) throw new Error("Autonomy state must be a bounded regular file without links.");
 }
 function readState() {
-  if (existsSync11(autonomyDirectory()) && lstatSync4(autonomyDirectory()).isSymbolicLink()) throw new Error("Autonomy state directory cannot be a symbolic link.");
-  const path2 = join16(autonomyDirectory(), "state.json");
-  if (!existsSync11(path2)) return initialState();
+  if (existsSync12(autonomyDirectory()) && lstatSync5(autonomyDirectory()).isSymbolicLink()) throw new Error("Autonomy state directory cannot be a symbolic link.");
+  const path2 = join18(autonomyDirectory(), "state.json");
+  if (!existsSync12(path2)) return initialState();
   regularFile(path2);
-  const state = JSON.parse(readFileSync13(path2, "utf8"));
+  const state = JSON.parse(readFileSync14(path2, "utf8"));
   return validateState(state);
 }
 function validateState(state) {
@@ -5761,15 +6098,15 @@ function validateState(state) {
     if (!p || !string2(p.id, 64) || !string2(p.title, 120) || !["routine", "loop", "project"].includes(p.kind) || !string2(p.workspace, 4096) || !string2(p.prompt, 4e3) || !string2(p.reason, 1200) || !["pending", "enabled", "dismissed"].includes(p.status) || typeof p.allowWrites !== "boolean" || !time(p.created) || p.approvedAt !== void 0 && !time(p.approvedAt) || p.nextRun !== void 0 && !time(p.nextRun) || !Number.isSafeInteger(p.intervalMinutes) || p.intervalMinutes < 60 || p.intervalMinutes > 10080 || !Array.isArray(p.evidenceIds) || p.evidenceIds.length > 12 || !p.evidenceIds.every((id) => string2(id, 256))) throw new Error("Invalid autonomy proposal record.");
     if (p.evidence !== void 0 && (!Array.isArray(p.evidence) || p.evidence.length > 12 || !p.evidence.every((e) => e && string2(e.id, 256) && string2(e.sessionId, 160) && string2(e.workspace, 4096) && string2(e.excerpt, 1400) && ["user", "assistant"].includes(e.role) && time(e.timestamp)))) throw new Error("Invalid autonomy evidence record.");
   }
-  for (const run2 of state.runs) {
-    if (!run2 || !string2(run2.id, 64) || !["scan", "routine"].includes(run2.kind) || !["running", "success", "error", "cancelled"].includes(run2.status) || !time(run2.started) || run2.ended !== void 0 && !time(run2.ended) || !string2(run2.detail)) throw new Error("Invalid autonomy run record.");
+  for (const run3 of state.runs) {
+    if (!run3 || !string2(run3.id, 64) || !["scan", "routine"].includes(run3.kind) || !["running", "success", "error", "cancelled"].includes(run3.status) || !time(run3.started) || run3.ended !== void 0 && !time(run3.ended) || !string2(run3.detail)) throw new Error("Invalid autonomy run record.");
   }
   return state;
 }
 function deadLockOwner(path2, minimumAge) {
   try {
     regularFile(path2, true);
-    const owner = JSON.parse(readFileSync13(path2, "utf8"));
+    const owner = JSON.parse(readFileSync14(path2, "utf8"));
     if (!Number.isSafeInteger(owner.pid) || owner.pid < 1 || typeof owner.token !== "string" || Date.now() - statSync5(path2).mtimeMs < minimumAge) return false;
     try {
       process.kill(owner.pid, 0);
@@ -5784,15 +6121,15 @@ function deadLockOwner(path2, minimumAge) {
 function releaseOwnedLock(path2, token2) {
   try {
     regularFile(path2, true);
-    if (JSON.parse(readFileSync13(path2, "utf8")).token === token2) unlinkSync3(path2);
+    if (JSON.parse(readFileSync14(path2, "utf8")).token === token2) unlinkSync4(path2);
   } catch {
   }
 }
 function acquireLock(name) {
-  const path2 = join16(privateDirectory(), `${name}.lock`);
-  const token2 = randomUUID8();
+  const path2 = join18(privateDirectory(), `${name}.lock`);
+  const token2 = randomUUID9();
   const temp = `${path2}.${token2}.tmp`;
-  writeFileSync9(temp, JSON.stringify({ pid: process.pid, token: token2 }), { flag: "wx", mode: 384 });
+  writeFileSync10(temp, JSON.stringify({ pid: process.pid, token: token2 }), { flag: "wx", mode: 384 });
   try {
     try {
       linkSync(temp, path2);
@@ -5811,7 +6148,7 @@ function acquireLock(name) {
     }
     try {
       if (!deadLockOwner(path2, 6e4)) return void 0;
-      unlinkSync3(path2);
+      unlinkSync4(path2);
       try {
         linkSync(temp, path2);
       } catch (error) {
@@ -5824,7 +6161,7 @@ function acquireLock(name) {
     }
   } finally {
     try {
-      unlinkSync3(temp);
+      unlinkSync4(temp);
     } catch {
     }
   }
@@ -5833,28 +6170,28 @@ async function updateState(change) {
   let unlock;
   for (let attempt = 0; attempt < 50 && !unlock; attempt++) {
     unlock = acquireLock("state");
-    if (!unlock) await new Promise((resolve19) => setTimeout(resolve19, 100));
+    if (!unlock) await new Promise((resolve20) => setTimeout(resolve20, 100));
   }
   if (!unlock) throw new Error("Autonomy state is busy. Try again shortly.");
-  const temp = join16(autonomyDirectory(), `state-${randomUUID8()}.tmp`);
+  const temp = join18(autonomyDirectory(), `state-${randomUUID9()}.tmp`);
   try {
     const state = readState();
     change(state);
     state.runs = state.runs.slice(-200);
     validateState(state);
-    writeFileSync9(temp, JSON.stringify(state, null, 2) + "\n", { flag: "wx", mode: 384 });
-    renameSync3(temp, join16(autonomyDirectory(), "state.json"));
+    writeFileSync10(temp, JSON.stringify(state, null, 2) + "\n", { flag: "wx", mode: 384 });
+    renameSync4(temp, join18(autonomyDirectory(), "state.json"));
     return state;
   } finally {
     try {
-      unlinkSync3(temp);
+      unlinkSync4(temp);
     } catch {
     }
     unlock();
   }
 }
 function canonicalWorkspace(path2) {
-  const canonical = realpathSync5(resolve10(path2));
+  const canonical = realpathSync5(resolve11(path2));
   if (!statSync5(canonical).isDirectory()) throw new Error("Workspace must be a directory.");
   return canonical;
 }
@@ -5871,54 +6208,54 @@ async function decideProposal(id, status2, allowWrites = false) {
 var autonomyHome, autonomyDirectory, initialState, runsToday, proposalId;
 var init_state = __esm({
   "src/harness/autonomy/state.ts"() {
-    autonomyHome = () => resolve10(process.env.REIN_HOME || join16(homedir10(), ".rein"));
-    autonomyDirectory = () => join16(autonomyHome(), "autonomy");
+    autonomyHome = () => resolve11(process.env.REIN_HOME || join18(homedir12(), ".rein"));
+    autonomyDirectory = () => join18(autonomyHome(), "autonomy");
     initialState = () => ({ version: 1, paused: true, controlRevision: 0, workspaces: [], intervalMinutes: 60, maxRunsPerDay: 6, maxTurns: 8, timeoutSeconds: 180, proposals: [], runs: [] });
-    runsToday = (state, now = Date.now()) => state.runs.filter((run2) => run2.started >= now - 864e5).length;
-    proposalId = (draft) => createHash5("sha256").update(`${draft.workspace}
+    runsToday = (state, now = Date.now()) => state.runs.filter((run3) => run3.started >= now - 864e5).length;
+    proposalId = (draft) => createHash6("sha256").update(`${draft.workspace}
 ${draft.kind}
 ${draft.title.trim().toLowerCase()}`).digest("hex").slice(0, 16);
   }
 });
 
 // src/harness/autonomy/inspect.ts
-import { constants as constants5, lstatSync as lstatSync5 } from "node:fs";
-import { lstat, open as open2, opendir } from "node:fs/promises";
-import { isAbsolute as isAbsolute4, join as join17, relative as relative2, resolve as resolve11, sep as sep4 } from "node:path";
+import { constants as constants6, lstatSync as lstatSync6 } from "node:fs";
+import { lstat as lstat2, open as open2, opendir } from "node:fs/promises";
+import { isAbsolute as isAbsolute4, join as join19, relative as relative2, resolve as resolve12, sep as sep4 } from "node:path";
 function inspectionTools(cwd) {
   const root2 = canonicalWorkspace(cwd);
-  const originalRoot = lstatSync5(root2);
+  const originalRoot = lstatSync6(root2);
   const pathSchema = { type: "string", description: "Path within the enrolled workspace" };
   async function scoped(input, signal) {
     aborted(signal);
     if (typeof input !== "string" || input.includes("\0") || input.length > 4096) throw new Error("A workspace-relative path is required.");
-    const path2 = resolve11(root2, input);
+    const path2 = resolve12(root2, input);
     const rel = relative2(root2, path2);
     if (rel === ".." || rel.startsWith(`..${sep4}`) || isAbsolute4(rel)) throw new Error("Path is outside the approved workspace.");
-    const rootStat = await lstat(root2);
+    const rootStat = await lstat2(root2);
     aborted(signal);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || rootStat.dev !== originalRoot.dev || rootStat.ino !== originalRoot.ino) throw new Error("The enrolled workspace directory changed. Restart inspection before continuing.");
     let current = root2;
-    let stat2 = rootStat;
+    let stat3 = rootStat;
     for (const part of rel.split(sep4).filter(Boolean)) {
       if (privateName(part)) throw new Error("Hidden and private configuration paths are excluded from background inspection.");
-      current = join17(current, part);
-      stat2 = await lstat(current);
+      current = join19(current, part);
+      stat3 = await lstat2(current);
       aborted(signal);
-      if (stat2.isSymbolicLink() || !stat2.isDirectory() && (!stat2.isFile() || stat2.nlink !== 1)) throw new Error("Links and special files are excluded from background inspection.");
+      if (stat3.isSymbolicLink() || !stat3.isDirectory() && (!stat3.isFile() || stat3.nlink !== 1)) throw new Error("Links and special files are excluded from background inspection.");
     }
-    return { path: path2, stat: stat2 };
+    return { path: path2, stat: stat3 };
   }
   async function readOrdinary(input, maximum, signal) {
-    const { path: path2, stat: stat2 } = await scoped(input, signal);
+    const { path: path2, stat: stat3 } = await scoped(input, signal);
     aborted(signal);
-    if (!stat2.isFile() || stat2.size > maximum) throw new Error(`Read requires a regular file no larger than ${maximum} bytes.`);
-    const handle = await open2(path2, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0) | (constants5.O_NONBLOCK ?? 0));
+    if (!stat3.isFile() || stat3.size > maximum) throw new Error(`Read requires a regular file no larger than ${maximum} bytes.`);
+    const handle = await open2(path2, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0) | (constants6.O_NONBLOCK ?? 0));
     try {
       aborted(signal);
       const opened = await handle.stat();
       aborted(signal);
-      if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== stat2.dev || opened.ino !== stat2.ino || opened.size > maximum) throw new Error("The inspected file changed or is not a bounded ordinary file.");
+      if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== stat3.dev || opened.ino !== stat3.ino || opened.size > maximum) throw new Error("The inspected file changed or is not a bounded ordinary file.");
       const buffer = Buffer.alloc(opened.size);
       let bytes = 0;
       while (bytes < buffer.length) {
@@ -5933,9 +6270,9 @@ function inspectionTools(cwd) {
     }
   }
   async function* entries(input, maximum, signal) {
-    const { path: path2, stat: stat2 } = await scoped(input, signal);
+    const { path: path2, stat: stat3 } = await scoped(input, signal);
     aborted(signal);
-    if (!stat2.isDirectory()) throw new Error("Inspection requires a directory.");
+    if (!stat3.isDirectory()) throw new Error("Inspection requires a directory.");
     const directory = await opendir(path2, { bufferSize: 32 });
     try {
       aborted(signal);
@@ -5943,7 +6280,7 @@ function inspectionTools(cwd) {
         const entry = await directory.read();
         aborted(signal);
         if (!entry) break;
-        yield { entry, path: join17(path2, entry.name) };
+        yield { entry, path: join19(path2, entry.name) };
       }
     } finally {
       await directory.close();
@@ -6036,14 +6373,14 @@ var init_inspect = __esm({
 
 // src/harness/meat/runtime.ts
 import { Worker } from "node:worker_threads";
-import { existsSync as existsSync12 } from "node:fs";
-import { dirname as dirname7, resolve as resolve12 } from "node:path";
+import { existsSync as existsSync13 } from "node:fs";
+import { dirname as dirname8, resolve as resolve13 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 async function runMeatEngine(options) {
   options.signal?.throwIfAborted();
   if (!root) throw new Error("The embedded Meat runtime is missing. Reinstall the complete Rein package.");
-  const workerPath = existsSync12(resolve12(here3, "worker.ts")) ? resolve12(here3, "worker.ts") : resolve12(here3, "meat-worker.js");
-  const worker = new Worker(workerPath, { workerData: { vendor: resolve12(root, "vendor/meat"), input: { Diff: options.diff, Root: options.cwd ?? "", MaxTurns: options.maxTurns ?? 8, ChunkBytes: options.chunkBytes ?? 24e3 } }, execArgv: [] });
+  const workerPath = existsSync13(resolve13(here3, "worker.ts")) ? resolve13(here3, "worker.ts") : resolve13(here3, "meat-worker.js");
+  const worker = new Worker(workerPath, { workerData: { vendor: resolve13(root, "vendor/meat"), input: { Diff: options.diff, Root: options.cwd ?? "", MaxTurns: options.maxTurns ?? 8, ChunkBytes: options.chunkBytes ?? 24e3 } }, execArgv: [] });
   return await new Promise((resolveResult, reject) => {
     let done = false;
     const finish = (error, result) => {
@@ -6091,8 +6428,8 @@ async function runMeatEngine(options) {
 var here3, root;
 var init_runtime2 = __esm({
   "src/harness/meat/runtime.ts"() {
-    here3 = dirname7(fileURLToPath4(import.meta.url));
-    root = [resolve12(here3, "../../.."), resolve12(here3, "..")].find((path2) => existsSync12(resolve12(path2, "vendor/meat/meat.wasm.gz")));
+    here3 = dirname8(fileURLToPath4(import.meta.url));
+    root = [resolve13(here3, "../../.."), resolve13(here3, "..")].find((path2) => existsSync13(resolve13(path2, "vendor/meat/meat.wasm.gz")));
   }
 });
 
@@ -6102,20 +6439,20 @@ __export(review_exports, {
   reviewDiff: () => reviewDiff,
   runMeatReview: () => runMeatReview
 });
-import { execFile as execFile6 } from "node:child_process";
-import { promisify as promisify6 } from "node:util";
+import { execFile as execFile8 } from "node:child_process";
+import { promisify as promisify8 } from "node:util";
 async function reviewDiff(cwd, options = {}) {
   const refs = options.refs ?? [];
   if (refs.length > 2 || [refs.length > 0, !!options.staged, !!options.workingTree].filter(Boolean).length > 1) throw new Error("Choose up to two commit refs, --staged, or --working-tree.");
   const shas = [];
   for (const ref of refs) {
     if (!ref || ref.startsWith("-") || ref.includes("\0")) throw new Error("Use valid commit refs for Meat review.");
-    shas.push((await exec2("git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd, signal: options.signal, timeout: 5e3 })).stdout.trim());
+    shas.push((await exec4("git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd, signal: options.signal, timeout: 5e3 })).stdout.trim());
   }
   const safe = ["--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/"];
   const args = options.staged ? ["diff", ...safe, "--cached", "--"] : options.workingTree ? ["diff", ...safe, "HEAD", "--"] : shas.length === 2 ? ["diff", ...safe, ...shas, "--"] : ["show", "--format=", "--diff-merges=first-parent", ...safe, shas[0] ?? "HEAD", "--"];
   try {
-    return (await exec2("git", args, { cwd, signal: options.signal, maxBuffer: 4 * 1024 * 1024, timeout: 1e4 })).stdout;
+    return (await exec4("git", args, { cwd, signal: options.signal, maxBuffer: 4 * 1024 * 1024, timeout: 1e4 })).stdout;
   } catch (error) {
     if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") throw new Error("Diff exceeds Meat's 4 MB limit. Select a smaller commit range.");
     throw error;
@@ -6198,7 +6535,7 @@ async function runMeatReview(options) {
     await Promise.allSettled(modelCalls);
   }
 }
-var exec2;
+var exec4;
 var init_review = __esm({
   "src/harness/meat/review.ts"() {
     init_runner();
@@ -6208,13 +6545,13 @@ var init_review = __esm({
     init_compat();
     init_inspect();
     init_runtime2();
-    exec2 = promisify6(execFile6);
+    exec4 = promisify8(execFile8);
   }
 });
 
 // src/harness/obscura/cli.ts
-var cli_exports = {};
-__export(cli_exports, {
+var cli_exports2 = {};
+__export(cli_exports2, {
   webCommand: () => webCommand
 });
 async function webCommand(args, flags) {
@@ -6262,9 +6599,9 @@ Search: DuckDuckGo. Page extraction: local browser.` : "Obscura is not installed
     for (const [signal, handler] of signals) process.off(signal, handler);
   }
 }
-var init_cli = __esm({
+var init_cli2 = __esm({
   "src/harness/obscura/cli.ts"() {
-    init_install();
+    init_install2();
     init_runtime();
     init_web();
   }
@@ -6276,8 +6613,8 @@ __export(debug_exports, {
   analyzeDebugFolder: () => analyzeDebugFolder,
   formatDebugReport: () => formatDebugReport
 });
-import { lstat as lstat2, readdir, realpath, open as open3 } from "node:fs/promises";
-import { resolve as resolve13 } from "node:path";
+import { lstat as lstat3, readdir, realpath, open as open3 } from "node:fs/promises";
+import { resolve as resolve14 } from "node:path";
 function emptyCounts() {
   return {
     users: 0,
@@ -6315,12 +6652,12 @@ async function analyzeDebugFolder(folder) {
   }
 }
 async function readExport(folder) {
-  const root2 = await realpath(resolve13(folder));
+  const root2 = await realpath(resolve14(folder));
   let directory;
   let files = [];
-  for (const path2 of [resolve13(root2, "sessions/raw"), resolve13(root2, "raw"), root2]) {
+  for (const path2 of [resolve14(root2, "sessions/raw"), resolve14(root2, "raw"), root2]) {
     try {
-      if (await realpath(path2) !== path2 || !(await lstat2(path2)).isDirectory()) continue;
+      if (await realpath(path2) !== path2 || !(await lstat3(path2)).isDirectory()) continue;
       const entries = await readdir(path2, { withFileTypes: true });
       files = entries.filter((e) => e.isFile() && e.name.endsWith(".jsonl")).map((e) => e.name).sort();
       if (files.length) {
@@ -6336,23 +6673,23 @@ async function readExport(folder) {
   const perSession = [];
   let totalBytes = 0;
   for (const name of files) {
-    const path2 = resolve13(directory, name);
+    const path2 = resolve14(directory, name);
     if (await realpath(path2) !== path2) throw new DebugInputError("Symlinked session files are not supported.");
     const handle = await open3(path2, "r");
     const counts = emptyCounts();
     let repeatState = initialDoomLoopState, turns = 0;
     try {
-      const stat2 = await handle.stat();
-      totalBytes += stat2.size;
-      if (!stat2.isFile() || stat2.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
-      const bytes = Buffer.alloc(stat2.size + 1);
+      const stat3 = await handle.stat();
+      totalBytes += stat3.size;
+      if (!stat3.isFile() || stat3.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
+      const bytes = Buffer.alloc(stat3.size + 1);
       let read = 0;
       while (read < bytes.length) {
         const chunk = await handle.read(bytes, read, bytes.length - read, read);
         if (!chunk.bytesRead) break;
         read += chunk.bytesRead;
       }
-      if (read > stat2.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
+      if (read > stat3.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
       for (const line of bytes.subarray(0, read).toString("utf8").split("\n")) {
         if (!line.trim()) continue;
         if (Buffer.byteLength(line) > 8 * 1024 * 1024) {
@@ -6584,8 +6921,8 @@ __export(auth_exports, {
   checkCliAuth: () => checkCliAuth,
   loginCli: () => loginCli
 });
-import { spawn as spawn8, execFile as execFile7 } from "node:child_process";
-import { mkdirSync as mkdirSync9 } from "node:fs";
+import { spawn as spawn8, execFile as execFile9 } from "node:child_process";
+import { mkdirSync as mkdirSync10 } from "node:fs";
 function openLoginPage(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
   const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
@@ -6600,10 +6937,10 @@ async function loginCli(provider, options = {}) {
   if (options.signal?.aborted) return { ok: false, detail: "Login canceled" };
   const env = cliEnvironment(provider, options.env);
   const directory = cliAuthDirectory(provider, env);
-  mkdirSync9(directory, { recursive: true, mode: 448 });
+  mkdirSync10(directory, { recursive: true, mode: 448 });
   const device = options.deviceAuth !== false;
   const args = ["login", ...device ? [provider === "codex" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
-  return new Promise((resolve19) => {
+  return new Promise((resolve20) => {
     const child = spawn8(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: "inherit", shell: false });
     child.once("spawn", () => {
       if (device && options.openBrowser !== false) openLoginPage(CLI_PROVIDERS[provider].loginUrl);
@@ -6629,25 +6966,25 @@ async function loginCli(provider, options = {}) {
     };
     child.on("error", (error) => {
       cleanup();
-      resolve19({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
+      resolve20({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
     });
     child.on("close", (code) => {
       cleanup();
-      if (options.signal?.aborted || timedOut) resolve19({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
-      else resolve19(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
+      if (options.signal?.aborted || timedOut) resolve20({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
+      else resolve20(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
     });
   });
 }
 async function checkCliAuth(provider, options = {}) {
   if (!(provider in CLI_PROVIDERS)) return { available: false, authenticated: false, detail: `Unknown CLI provider: ${provider}` };
   const env = cliEnvironment(provider, options.env);
-  const run2 = (args) => new Promise((resolve19) => {
-    execFile7(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve19({ ok: !error, missing: error?.code === "ENOENT" }));
+  const run3 = (args) => new Promise((resolve20) => {
+    execFile9(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve20({ ok: !error, missing: error?.code === "ENOENT" }));
   });
-  const version = await run2(["--version"]);
+  const version = await run3(["--version"]);
   if (!version.ok) return { available: false, authenticated: false, detail: version.missing ? missingCli(provider) : `${provider} CLI could not be checked. Update it and try again.` };
   if (provider === "copilot") return { available: true, authenticated: null, detail: "Copilot CLI is installed. Authentication cannot be checked without starting a session; run 'rein login copilot' if needed." };
-  const status2 = await run2(["login", "status"]);
+  const status2 = await run3(["login", "status"]);
   return { available: true, authenticated: status2.ok, detail: status2.ok ? "Codex CLI reports authenticated in Rein's isolated profile." : "Codex CLI is not authenticated in Rein's profile. Run 'rein login codex'." };
 }
 var init_auth = __esm({
@@ -6667,9 +7004,9 @@ __export(doctor_exports, {
   usesLocalHardware: () => usesLocalHardware
 });
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { existsSync as existsSync13, lstatSync as lstatSync6, readFileSync as readFileSync14, readdirSync as readdirSync4, realpathSync as realpathSync6, statSync as statSync6 } from "node:fs";
-import { homedir as homedir11 } from "node:os";
-import { dirname as dirname8, join as join18 } from "node:path";
+import { existsSync as existsSync14, lstatSync as lstatSync7, readFileSync as readFileSync15, readdirSync as readdirSync4, realpathSync as realpathSync6, statSync as statSync6 } from "node:fs";
+import { homedir as homedir13 } from "node:os";
+import { dirname as dirname9, join as join20 } from "node:path";
 function checkNodeRuntime(version = process.versions.node) {
   const major = Number(version.split(".")[0]);
   const supported = Number.isSafeInteger(major) && major >= 18;
@@ -6718,10 +7055,10 @@ function sh2(cmd, opts = {}) {
   }
 }
 function gitRootOf(file, maxDepth = 4) {
-  let dir = existsSync13(file) && statSync6(file).isFile() ? dirname8(file) : file;
+  let dir = existsSync14(file) && statSync6(file).isFile() ? dirname9(file) : file;
   for (let i = 0; i < maxDepth; i++) {
-    if (existsSync13(join18(dir, ".git"))) return dir;
-    const up = dirname8(dir);
+    if (existsSync14(join20(dir, ".git"))) return dir;
+    const up = dirname9(dir);
     if (up === dir) return void 0;
     dir = up;
   }
@@ -6732,7 +7069,7 @@ function newestMtime(dir) {
   const walk = (d) => {
     for (const entry of readdirSync4(d, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name === ".git") continue;
-      const p = join18(d, entry.name);
+      const p = join20(d, entry.name);
       if (entry.isDirectory()) walk(p);
       else newest = Math.max(newest, statSync6(p).mtimeMs);
     }
@@ -6806,11 +7143,11 @@ async function runDoctor(opts = {}) {
       repo = gitRootOf(real);
       let installedPackage = false;
       try {
-        const packageRoot = dirname8(dirname8(real));
-        installedPackage = JSON.parse(readFileSync14(join18(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join18(packageRoot, "dist", "rein.js");
+        const packageRoot = dirname9(dirname9(real));
+        installedPackage = JSON.parse(readFileSync15(join20(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join20(packageRoot, "dist", "rein.js");
       } catch {
       }
-      const distOk = installedPackage || repo && existsSync13(join18(repo, "dist", "rein.js"));
+      const distOk = installedPackage || repo && existsSync14(join20(repo, "dist", "rein.js"));
       checks.push({
         name: "bin",
         status: distOk ? "ok" : "fail",
@@ -6840,8 +7177,8 @@ async function runDoctor(opts = {}) {
     }
   }
   if (repo) {
-    const bundle = join18(repo, "dist", "rein.js");
-    if (!existsSync13(bundle)) {
+    const bundle = join20(repo, "dist", "rein.js");
+    if (!existsSync14(bundle)) {
       checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => {
         const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
         if (r.err) throw new Error(r.err);
@@ -6849,7 +7186,7 @@ async function runDoctor(opts = {}) {
       } });
     } else {
       const bundleMtime = statSync6(bundle).mtimeMs;
-      const srcMtime = newestMtime(join18(repo, "src"));
+      const srcMtime = newestMtime(join20(repo, "src"));
       const fresh = bundleMtime >= srcMtime;
       checks.push({
         name: "bundle",
@@ -6897,9 +7234,9 @@ async function runDoctor(opts = {}) {
       checks.push({ name: "hardware", status: "warn", detail: "hardware profile failed (continuing)" });
     }
   }
-  const cfgPath = join18(process.env.REIN_HOME || join18(homedir11(), ".rein"), "config.json");
-  if (existsSync13(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
-    const mode = lstatSync6(cfgPath).mode & 511;
+  const cfgPath = join20(process.env.REIN_HOME || join20(homedir13(), ".rein"), "config.json");
+  if (existsSync14(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
+    const mode = lstatSync7(cfgPath).mode & 511;
     checks.push({
       name: "perms",
       status: (mode & 63) === 0 ? "ok" : "warn",
@@ -6914,7 +7251,7 @@ async function runDoctor(opts = {}) {
   }
   try {
     const { statfsSync } = await import("node:fs");
-    const free = statfsSync(homedir11()).bavail * statfsSync(homedir11()).bsize;
+    const free = statfsSync(homedir13()).bavail * statfsSync(homedir13()).bsize;
     const GiB3 = free / 2 ** 30;
     checks.push({ name: "disk", status: GiB3 >= 1 ? "ok" : "warn", detail: `${GiB3.toFixed(1)} GiB free in $HOME` });
   } catch {
@@ -6966,9 +7303,9 @@ var init_doctor = __esm({
 
 // src/harness/autonomy/history.ts
 import { execFileSync as execFileSync4 } from "node:child_process";
-import { createHash as createHash6 } from "node:crypto";
-import { closeSync as closeSync3, constants as constants6, fstatSync as fstatSync3, lstatSync as lstatSync7, openSync as openSync3, readSync as readSync2, readdirSync as readdirSync5, realpathSync as realpathSync7 } from "node:fs";
-import { join as join19 } from "node:path";
+import { createHash as createHash7 } from "node:crypto";
+import { closeSync as closeSync3, constants as constants7, fstatSync as fstatSync3, lstatSync as lstatSync8, openSync as openSync3, readSync as readSync2, readdirSync as readdirSync5, realpathSync as realpathSync7 } from "node:fs";
+import { join as join21 } from "node:path";
 function redact(value) {
   return value.replace(/-----BEGIN [^-]*(?:PRIVATE KEY|OPENSSH)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/g, "[credential omitted]").split("\n").map((line) => {
     if (/(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|passwd|authorization|token|secret)["']?(?:\s*[=:]\s*|\s+is\s+)\S/i.test(line) || /\bBearer\s+[\w./+~-]{8,}/i.test(line) || /\b(?:sk-[\w-]{12,}|gh[pousr]_[\w]{12,}|github_pat_[\w]{12,}|AKIA[A-Z0-9]{16})\b/.test(line) || /https?:\/\/[^\s/@]+:[^\s/@]+@/i.test(line) || /[?&](?:key|token|api_key|secret|password)=[^\s&#]+/i.test(line)) return "[credential omitted]";
@@ -6979,7 +7316,7 @@ function canonicalDirectory(value) {
   if (typeof value !== "string" || !value || value.length > 4096) return void 0;
   try {
     const result = realpathSync7(value);
-    return lstatSync7(result).isDirectory() ? result : void 0;
+    return lstatSync8(result).isDirectory() ? result : void 0;
   } catch {
     return void 0;
   }
@@ -6999,12 +7336,12 @@ function parsedLines(text) {
 function readBoundedSession(path2, allowed) {
   let fd;
   try {
-    const before = lstatSync7(path2);
+    const before = lstatSync8(path2);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) return void 0;
-    fd = openSync3(path2, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0));
-    const stat2 = fstatSync3(fd);
-    if (!stat2.isFile() || stat2.nlink !== 1 || stat2.ino !== before.ino || stat2.dev !== before.dev) return void 0;
-    const metadata = Buffer.alloc(Math.min(stat2.size, 8192));
+    fd = openSync3(path2, constants7.O_RDONLY | (constants7.O_NOFOLLOW ?? 0));
+    const stat3 = fstatSync3(fd);
+    if (!stat3.isFile() || stat3.nlink !== 1 || stat3.ino !== before.ino || stat3.dev !== before.dev) return void 0;
+    const metadata = Buffer.alloc(Math.min(stat3.size, 8192));
     const metadataText = metadata.subarray(0, readSync2(fd, metadata, 0, metadata.length, 0)).toString("utf8");
     const headerLine = metadataText.split("\n").find((line) => line.trim());
     if (!headerLine || headerLine.length > 8192) return void 0;
@@ -7012,12 +7349,12 @@ function readBoundedSession(path2, allowed) {
     if (!header || header.type !== "header" || header.purpose === "autonomy") return void 0;
     const workspace = canonicalDirectory(header.cwd);
     if (!workspace || !allowed.has(workspace)) return void 0;
-    const prefix = Buffer.alloc(Math.min(stat2.size, PREFIX_BYTES));
+    const prefix = Buffer.alloc(Math.min(stat3.size, PREFIX_BYTES));
     const prefixText = prefix.subarray(0, readSync2(fd, prefix, 0, prefix.length, 0)).toString("utf8");
     const first = parsedLines(prefixText).filter((value) => value.type !== "header");
-    if (stat2.size <= PREFIX_BYTES) return { header, workspace, entries: first };
-    const tailStart = Math.max(PREFIX_BYTES, stat2.size - TAIL_BYTES);
-    const tail = Buffer.alloc(stat2.size - tailStart);
+    if (stat3.size <= PREFIX_BYTES) return { header, workspace, entries: first };
+    const tailStart = Math.max(PREFIX_BYTES, stat3.size - TAIL_BYTES);
+    const tail = Buffer.alloc(stat3.size - tailStart);
     const tailText = tail.subarray(0, readSync2(fd, tail, 0, tail.length, tailStart)).toString("utf8");
     const firstBreak = tailText.indexOf("\n");
     return { header, workspace, entries: [...first.slice(0, 40), ...parsedLines(firstBreak < 0 ? "" : tailText.slice(firstBreak + 1)).slice(-80)] };
@@ -7057,7 +7394,7 @@ function collectAutonomyEvidence(workspaces, options = {}) {
   }
   const candidates = [];
   for (const file of files) {
-    const session = readBoundedSession(join19(sessionsDir(), file), allowed);
+    const session = readBoundedSession(join21(sessionsDir(), file), allowed);
     if (!session) continue;
     const workspace = session.workspace;
     const sessionId = file.slice(0, -6);
@@ -7145,7 +7482,7 @@ var hash, PREFIX_BYTES, TAIL_BYTES, MAX_LINE_BYTES, SECRET_PATH;
 var init_history = __esm({
   "src/harness/autonomy/history.ts"() {
     init_session();
-    hash = (value) => createHash6("sha256").update(value).digest("hex");
+    hash = (value) => createHash7("sha256").update(value).digest("hex");
     PREFIX_BYTES = 96 * 1024;
     TAIL_BYTES = 160 * 1024;
     MAX_LINE_BYTES = 64 * 1024;
@@ -7154,7 +7491,7 @@ var init_history = __esm({
 });
 
 // src/harness/autonomy/engine.ts
-import { randomUUID as randomUUID9 } from "node:crypto";
+import { randomUUID as randomUUID10 } from "node:crypto";
 async function generate(system, prompt, cwd, signal) {
   const runner = await createRunner({ cwd, tools: [], systemPrompt: system, maxTurns: 1, autoContext: false });
   const messages = await runner.run({ role: "user", content: prompt, timestamp: Date.now() }, { signal });
@@ -7208,11 +7545,11 @@ async function runCycle(kind, id, options = {}, deps = {}) {
     };
     const deadline = Date.now() + state.timeoutSeconds * 1e3;
     timer = setTimeout(abort, state.timeoutSeconds * 1e3);
-    if (state.runs.some((run2) => run2.status === "running")) await updateState((s) => {
-      for (const run2 of s.runs) if (run2.status === "running") {
-        run2.status = "error";
-        run2.ended = now;
-        run2.detail = "Previous operation stopped before reporting a result. Inspect its saved session before retrying.";
+    if (state.runs.some((run3) => run3.status === "running")) await updateState((s) => {
+      for (const run3 of s.runs) if (run3.status === "running") {
+        run3.status = "error";
+        run3.ended = now;
+        run3.detail = "Previous operation stopped before reporting a result. Inspect its saved session before retrying.";
       }
     });
     if (controller.signal.aborted) return "Autonomy cancelled.";
@@ -7239,7 +7576,7 @@ async function runCycle(kind, id, options = {}, deps = {}) {
     }
     if (Date.now() >= deadline) controller.abort();
     controller.signal.throwIfAborted();
-    runId = randomUUID9();
+    runId = randomUUID10();
     const activeId = runId;
     await updateState((s) => {
       if (s.paused && !(options.manual && kind === "scan")) throw new Error("Autonomy was paused.");
@@ -7269,7 +7606,7 @@ async function runCycle(kind, id, options = {}, deps = {}) {
       const analysisInput = JSON.stringify({
         evidence: evidence.text,
         previousDecisions: state.proposals.filter((p) => state.workspaces.includes(p.workspace)).slice(-30).map((p) => ({ title: p.title, workspace: p.workspace, kind: p.kind, status: p.status })),
-        priorAutonomyResults: state.runs.filter((run2) => run2.kind === "routine" && run2.status !== "running" && state.proposals.some((p) => p.id === run2.proposalId && state.workspaces.includes(p.workspace))).slice(-4).map((run2) => ({ proposalId: run2.proposalId, status: run2.status, report: run2.detail.slice(0, 700), sessionId: run2.sessionId })),
+        priorAutonomyResults: state.runs.filter((run3) => run3.kind === "routine" && run3.status !== "running" && state.proposals.some((p) => p.id === run3.proposalId && state.workspaces.includes(p.workspace))).slice(-4).map((run3) => ({ proposalId: run3.proposalId, status: run3.status, report: run3.detail.slice(0, 700), sessionId: run3.sessionId })),
         instruction: "Prior autonomy reports are recorded claims for comparison, not new user intent. Respect dismissed and enabled proposals; do not suggest them again under another title."
       });
       checkScan();
@@ -7313,17 +7650,17 @@ async function runCycle(kind, id, options = {}, deps = {}) {
     } else {
       detail = await (deps.execute ?? execute)(proposal, state, controller.signal, async (sessionId) => {
         await updateState((s) => {
-          s.runs.find((run2) => run2.id === activeId).sessionId = sessionId;
+          s.runs.find((run3) => run3.id === activeId).sessionId = sessionId;
         });
       });
       if (!approvalMatches(proposal, readState())) controller.abort();
       controller.signal.throwIfAborted();
     }
     await updateState((s) => {
-      const run2 = s.runs.find((r) => r.id === activeId);
-      run2.status = "success";
-      run2.ended = Date.now();
-      run2.detail = detail.slice(0, 8e3);
+      const run3 = s.runs.find((r) => r.id === activeId);
+      run3.status = "success";
+      run3.ended = Date.now();
+      run3.detail = detail.slice(0, 8e3);
       s.lastError = void 0;
     });
     return detail;
@@ -7332,11 +7669,11 @@ async function runCycle(kind, id, options = {}, deps = {}) {
     await updateState((s) => {
       s.lastError = detail;
       if (kind === "scan") s.nextScan = Date.now() + s.intervalMinutes * 6e4;
-      const run2 = s.runs.find((r) => r.id === runId);
-      if (run2) {
-        run2.status = controller.signal.aborted ? "cancelled" : "error";
-        run2.ended = Date.now();
-        run2.detail = detail;
+      const run3 = s.runs.find((r) => r.id === runId);
+      if (run3) {
+        run3.status = controller.signal.aborted ? "cancelled" : "error";
+        run3.ended = Date.now();
+        run3.detail = detail;
       }
     });
     return detail;
@@ -7363,11 +7700,11 @@ async function runDaemon(signal) {
         const due = state.proposals.find((p) => p.status === "enabled" && p.nextRun !== void 0 && p.nextRun <= Date.now());
         await runCycle(due ? "routine" : "scan", due?.id, { signal: controller.signal });
       }
-      if (!controller.signal.aborted) await new Promise((resolve19) => {
+      if (!controller.signal.aborted) await new Promise((resolve20) => {
         const done = () => {
           clearTimeout(timer);
           controller.signal.removeEventListener("abort", done);
-          resolve19();
+          resolve20();
         };
         const timer = setTimeout(done, 15e3);
         controller.signal.addEventListener("abort", done, { once: true });
@@ -7395,25 +7732,25 @@ var init_engine = __esm({
 
 // src/harness/autonomy/service.ts
 import { spawnSync } from "node:child_process";
-import { createHash as createHash7, randomUUID as randomUUID10 } from "node:crypto";
-import { closeSync as closeSync4, constants as constants7, fstatSync as fstatSync4, lstatSync as lstatSync8, mkdirSync as mkdirSync10, openSync as openSync4, readFileSync as readFileSync15, renameSync as renameSync4, unlinkSync as unlinkSync4, writeFileSync as writeFileSync10 } from "node:fs";
-import { homedir as homedir12 } from "node:os";
-import { basename, dirname as dirname9, isAbsolute as isAbsolute5, join as join20, relative as relative3, resolve as resolve14 } from "node:path";
+import { createHash as createHash8, randomUUID as randomUUID11 } from "node:crypto";
+import { closeSync as closeSync4, constants as constants8, fstatSync as fstatSync4, lstatSync as lstatSync9, mkdirSync as mkdirSync11, openSync as openSync4, readFileSync as readFileSync16, renameSync as renameSync5, unlinkSync as unlinkSync5, writeFileSync as writeFileSync11 } from "node:fs";
+import { homedir as homedir14 } from "node:os";
+import { basename, dirname as dirname10, isAbsolute as isAbsolute5, join as join22, relative as relative3, resolve as resolve15 } from "node:path";
 function absolute(value, name) {
   if (!isAbsolute5(value) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${name} must be an absolute path without control characters.`);
-  return resolve14(value);
+  return resolve15(value);
 }
 function configuration(options) {
   const home = absolute(options.home, "REIN_HOME");
-  const userHome = absolute(options.userHome ?? homedir12(), "User home");
+  const userHome = absolute(options.userHome ?? homedir14(), "User home");
   const nodePath = absolute(options.nodePath ?? process.execPath, "Node executable");
   const cliPath = absolute(options.cliPath, "Rein bundle");
   const uid = options.uid ?? process.getuid?.();
   const platform = options.platform ?? process.platform;
   if (platform === "darwin" && (!Number.isSafeInteger(uid) || uid < 0)) throw new Error("A user ID is required for a launchd user agent.");
-  const scope = createHash7("sha256").update(home).digest("hex").slice(0, 24);
+  const scope = createHash8("sha256").update(home).digest("hex").slice(0, 24);
   const label = `dev.rein.autonomy.${scope}`;
-  const paths = [dirname9(nodePath), join20(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  const paths = [dirname10(nodePath), join22(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
   const path2 = [...new Set(paths.filter((p) => isAbsolute5(p) && !/[\x00-\x1f\x7f:]/.test(p)))].join(":");
   return { home, userHome, nodePath, cliPath, uid, platform, scope, label, path: path2 };
 }
@@ -7424,14 +7761,14 @@ function unit(value) {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%")}"`;
 }
 function signedContent(body, scope, xmlFormat) {
-  const marker = `rein-autonomy:${scope}:${createHash7("sha256").update(body).digest("hex")}`;
+  const marker = `rein-autonomy:${scope}:${createHash8("sha256").update(body).digest("hex")}`;
   return `${xmlFormat ? `<!-- ${marker} -->` : `# ${marker}`}
 ${body}`;
 }
 function servicePlan(options) {
   const cfg = configuration(options);
   if (cfg.platform === "darwin") {
-    const path2 = join20(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
+    const path2 = join22(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
     const target = `gui/${cfg.uid}/${cfg.label}`;
     const body = `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -7451,7 +7788,7 @@ function servicePlan(options) {
   }
   if (cfg.platform === "linux") {
     const name = `${cfg.label}.service`;
-    const path2 = join20(cfg.userHome, ".config", "systemd", "user", name);
+    const path2 = join22(cfg.userHome, ".config", "systemd", "user", name);
     const body = `[Unit]
 Description=Rein autonomy supervisor
 StartLimitIntervalSec=300
@@ -7482,33 +7819,33 @@ WantedBy=default.target
 }
 function ownedContent(path2, options) {
   const cfg = configuration(options);
-  let directory = dirname9(path2);
+  let directory = dirname10(path2);
   for (; ; ) {
     try {
-      const stat2 = lstatSync8(directory);
-      if (!stat2.isDirectory() || stat2.isSymbolicLink() || stat2.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory}`);
+      const stat3 = lstatSync9(directory);
+      if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory}`);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
     if (directory === cfg.userHome) break;
-    const parent = dirname9(directory);
+    const parent = dirname10(directory);
     if (parent === directory) throw new Error("Service path must be within the user home directory.");
     directory = parent;
   }
   let fd;
   try {
-    const stat2 = lstatSync8(path2);
-    if (!stat2.isFile() || stat2.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
-    fd = openSync4(path2, constants7.O_RDONLY | (constants7.O_NOFOLLOW ?? 0));
+    const stat3 = lstatSync9(path2);
+    if (!stat3.isFile() || stat3.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
+    fd = openSync4(path2, constants8.O_RDONLY | (constants8.O_NOFOLLOW ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
   }
   try {
-    const stat2 = fstatSync4(fd);
+    const stat3 = fstatSync4(fd);
     const uid = options.uid ?? process.getuid?.();
-    if (!stat2.isFile() || stat2.size > 64 * 1024 || stat2.mode & 18 || uid !== void 0 && stat2.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
-    const text = readFileSync15(fd, "utf8");
+    if (!stat3.isFile() || stat3.size > 64 * 1024 || stat3.mode & 18 || uid !== void 0 && stat3.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
+    const text = readFileSync16(fd, "utf8");
     const boundary = text.indexOf("\n");
     const body = text.slice(boundary + 1);
     if (boundary < 0 || text !== signedContent(body, cfg.scope, cfg.platform === "darwin")) throw new Error(`Refusing to overwrite or delete a modified or unrelated service file: ${path2}`);
@@ -7521,21 +7858,21 @@ function prepareDirectory(path2, userHome) {
   const components = relative3(userHome, path2).split("/");
   let current = userHome;
   for (const component of components) {
-    current = join20(current, component);
+    current = join22(current, component);
     try {
-      mkdirSync10(current, { mode: 448 });
+      mkdirSync11(current, { mode: 448 });
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
-    const stat2 = lstatSync8(current);
-    if (!stat2.isDirectory() || stat2.isSymbolicLink() || stat2.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
+    const stat3 = lstatSync9(current);
+    if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
   }
 }
-function run(options, command, timeoutMs = 15e3) {
+function run2(options, command, timeoutMs = 15e3) {
   return options.commandRunner ? options.commandRunner(command[0], command.slice(1)) : spawnSync(command[0], command.slice(1), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: timeoutMs, maxBuffer: 32 * 1024 });
 }
 function checkedRun(options, command) {
-  const result = run(options, command);
+  const result = run2(options, command);
   if (result.status !== 0 || result.error) throw new Error(`${command[0]} ${command.slice(1).join(" ")} failed: ${String(result.error?.message || result.stderr || result.stdout || `exit ${result.status}`).trim().slice(0, 1e3)}. You can run rein autonomy daemon in the foreground.`);
 }
 function foreground() {
@@ -7548,7 +7885,7 @@ function serviceStatus(options) {
   if (!installed) return { manager: plan.manager, path: plan.path, installed, active: false, message: "Autonomy service is not installed." };
   const cfg = configuration(options);
   const command = plan.manager === "launchd" ? ["/bin/launchctl", "print", `gui/${cfg.uid}/${cfg.label}`] : ["systemctl", "--user", "is-active", basename(plan.path)];
-  const result = run(options, command, 1e3);
+  const result = run2(options, command, 1e3);
   let active2 = null;
   if (!result.error && result.status === 0) active2 = plan.manager === "systemd" || /\bstate\s*=\s*running\b/.test(result.stdout ?? "");
   else if (!result.error && (plan.manager === "systemd" && (result.status === 3 || result.status === 4) || /could not find service|service not found/i.test(result.stderr ?? ""))) active2 = false;
@@ -7561,7 +7898,7 @@ async function waitForService(options, initial, polling = {}) {
   const deadline = Date.now() + timeout;
   let result = initial;
   while (result.installed && result.active !== true && Date.now() < deadline) {
-    await new Promise((resolve19) => setTimeout(resolve19, Math.min(interval, Math.max(0, deadline - Date.now()))));
+    await new Promise((resolve20) => setTimeout(resolve20, Math.min(interval, Math.max(0, deadline - Date.now()))));
     result = serviceStatus(options);
   }
   return result;
@@ -7571,20 +7908,20 @@ function installService(options) {
   if (plan.manager === "foreground") return foreground();
   const cfg = configuration(options);
   const previous = ownedContent(plan.path, options);
-  prepareDirectory(dirname9(plan.path), cfg.userHome);
-  mkdirSync10(cfg.home, { recursive: true, mode: 448 });
+  prepareDirectory(dirname10(plan.path), cfg.userHome);
+  mkdirSync11(cfg.home, { recursive: true, mode: 448 });
   if (previous !== void 0 && plan.manager === "launchd") {
-    const result = run(options, plan.uninstallCommands[0]);
+    const result = run2(options, plan.uninstallCommands[0]);
     if ((result.status !== 0 || result.error) && !/could not find service|no such process|service not found/i.test(result.stderr ?? "")) throw new Error(`Cannot unload the existing Rein service: ${result.error?.message || result.stderr || result.status}`);
   }
-  const temp = `${plan.path}.${randomUUID10()}.tmp`;
+  const temp = `${plan.path}.${randomUUID11()}.tmp`;
   try {
-    writeFileSync10(temp, plan.content, { flag: "wx", mode: 384 });
+    writeFileSync11(temp, plan.content, { flag: "wx", mode: 384 });
     if (ownedContent(plan.path, options) !== previous) throw new Error("The Rein service file changed while installing; retry the command.");
-    renameSync4(temp, plan.path);
+    renameSync5(temp, plan.path);
   } finally {
     try {
-      unlinkSync4(temp);
+      unlinkSync5(temp);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -7598,11 +7935,11 @@ function uninstallService(options) {
   if (plan.manager === "foreground") return foreground();
   const previous = ownedContent(plan.path, options);
   if (previous === void 0) return { manager: plan.manager, path: plan.path, installed: false, active: false, message: "Autonomy service is not installed." };
-  const result = run(options, plan.uninstallCommands[0]);
+  const result = run2(options, plan.uninstallCommands[0]);
   const absent = plan.manager === "launchd" && /could not find service|no such process|service not found/i.test(result.stderr ?? "");
   if ((result.status !== 0 || result.error) && !absent) throw new Error(`Cannot stop the Rein service; its file was kept: ${result.error?.message || result.stderr || result.status}`);
   if (ownedContent(plan.path, options) !== previous) throw new Error("The Rein service file changed while uninstalling; its file was kept.");
-  unlinkSync4(plan.path);
+  unlinkSync5(plan.path);
   for (const command of plan.uninstallCommands.slice(1)) checkedRun(options, command);
   return { manager: plan.manager, path: plan.path, installed: false, active: false, message: "Autonomy service stopped and uninstalled." };
 }
@@ -7620,7 +7957,7 @@ __export(command_exports, {
   serviceConfigurationIssue: () => serviceConfigurationIssue
 });
 import { realpathSync as realpathSync8 } from "node:fs";
-import { resolve as resolve15 } from "node:path";
+import { resolve as resolve16 } from "node:path";
 function serviceConfigurationIssue(config, env = process.env) {
   const provider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0);
   const cli = provider === "codex" || provider === "copilot";
@@ -7661,7 +7998,7 @@ function numberOption(flags, name, min, max) {
   return n;
 }
 function autonomyServiceOptions() {
-  return { home: autonomyHome(), cliPath: realpathSync8(resolve15(process.argv[1])), nodePath: process.execPath };
+  return { home: autonomyHome(), cliPath: realpathSync8(resolve16(process.argv[1])), nodePath: process.execPath };
 }
 function autonomySnapshot() {
   const state = readState();
@@ -7678,7 +8015,7 @@ function autonomySnapshot() {
     budget: `${runsToday(state)}/${state.maxRunsPerDay} operations in the last 24h; at most 2 model calls per scan, ${state.maxTurns} turns per run; ${state.timeoutSeconds}s timeout`,
     lastError: state.lastError,
     proposals: state.proposals,
-    recentRuns: state.runs.slice(-5).reverse().map((run2) => ({ id: run2.id, status: run2.status, detail: `${run2.detail}${run2.sessionId ? ` [session ${run2.sessionId}]` : ""}` }))
+    recentRuns: state.runs.slice(-5).reverse().map((run3) => ({ id: run3.id, status: run3.status, detail: `${run3.detail}${run3.sessionId ? ` [session ${run3.sessionId}]` : ""}` }))
   };
 }
 async function runAutonomyCommand(args, flags = {}, dependencies = {}) {
@@ -7729,7 +8066,7 @@ async function runAutonomyCommand(args, flags = {}, dependencies = {}) {
     return;
   }
   if (command === "unenroll") {
-    let workspace = resolve15(typeof flags.workspace === "string" ? flags.workspace : process.cwd());
+    let workspace = resolve16(typeof flags.workspace === "string" ? flags.workspace : process.cwd());
     try {
       workspace = canonicalWorkspace(workspace);
     } catch {
@@ -7875,9 +8212,9 @@ __export(loop_exports, {
   runExperimentLoop: () => runExperimentLoop
 });
 import { execFileSync as execFileSync5 } from "node:child_process";
-import { existsSync as existsSync14, readFileSync as readFileSync16, appendFileSync as appendFileSync2, realpathSync as realpathSync9 } from "node:fs";
-import { join as join21, resolve as resolve16 } from "node:path";
-import { randomUUID as randomUUID11 } from "node:crypto";
+import { existsSync as existsSync15, readFileSync as readFileSync17, appendFileSync as appendFileSync2, realpathSync as realpathSync9 } from "node:fs";
+import { join as join23, resolve as resolve17 } from "node:path";
+import { randomUUID as randomUUID12 } from "node:crypto";
 function sh3(cmd, cwd) {
   return execFileSync5("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
@@ -7909,7 +8246,7 @@ function requireCleanGit(cwd) {
   } catch {
     throw new Error("Autonomous keep/discard requires a Git repository with an initial commit");
   }
-  if (realpathSync9(root2) !== realpathSync9(resolve16(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
+  if (realpathSync9(root2) !== realpathSync9(resolve17(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
   if (execFileSync5("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf8" }).trim()) {
     throw new Error("Working tree is dirty; commit or stash existing work before autonomous keep/discard");
   }
@@ -7920,7 +8257,7 @@ function discardIteration(cwd, expectedHead) {
   execFileSync5("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
 }
 function recordLesson(cwd, text, commitMessage) {
-  appendFileSync2(join21(cwd, "LESSONS.md"), `
+  appendFileSync2(join23(cwd, "LESSONS.md"), `
 ${text}
 `);
   execFileSync5("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
@@ -7930,16 +8267,16 @@ async function runExperimentLoop(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join21(cwd, taskFile);
-  const metricPath = join21(cwd, metricFile);
-  if (!existsSync14(taskPath)) {
+  const taskPath = join23(cwd, taskFile);
+  const metricPath = join23(cwd, metricFile);
+  if (!existsSync15(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
-  if (!existsSync14(metricPath)) {
+  if (!existsSync15(metricPath)) {
     throw new Error(`No ${metricFile} in ${cwd} \u2014 put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
   }
-  const task = readFileSync16(taskPath, "utf8");
-  const metricDoc = readFileSync16(metricPath, "utf8");
+  const task = readFileSync17(taskPath, "utf8");
+  const metricDoc = readFileSync17(metricPath, "utf8");
   const metricCmd = readMetricCommand(metricDoc);
   if (!metricCmd) throw new Error("METRIC.md has no metric command");
   requireCleanGit(cwd);
@@ -7984,7 +8321,7 @@ Rules:
   let stale = 0;
   for (let i = 0; i < maxIters; i++) {
     const head = sh3("git rev-parse HEAD", cwd);
-    const tag = randomUUID11().slice(0, 8);
+    const tag = randomUUID12().slice(0, 8);
     console.log(`
 ${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
     try {
@@ -8041,19 +8378,19 @@ __export(improve_exports, {
   runImproveLoop: () => runImproveLoop
 });
 import { execFileSync as execFileSync6 } from "node:child_process";
-import { cpSync, existsSync as existsSync15, mkdtempSync as mkdtempSync2, readFileSync as readFileSync17, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
-import { tmpdir as tmpdir4 } from "node:os";
-import { join as join22, dirname as dirname10, resolve as resolve17 } from "node:path";
+import { cpSync, existsSync as existsSync16, mkdtempSync as mkdtempSync2, readFileSync as readFileSync18, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
+import { tmpdir as tmpdir5 } from "node:os";
+import { join as join24, dirname as dirname11, resolve as resolve18 } from "node:path";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
-import { randomUUID as randomUUID12 } from "node:crypto";
+import { randomUUID as randomUUID13 } from "node:crypto";
 function sh4(cmd, cwd) {
   return execFileSync6("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function runHarnessTests(repoDir) {
-  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join22(tmpdir4(), "rein-validation-")) : repoDir;
+  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join24(tmpdir5(), "rein-validation-")) : repoDir;
   try {
     if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
-      if (existsSync15(join22(repoDir, name))) cpSync(join22(repoDir, name), join22(dir, name), { recursive: true });
+      if (existsSync16(join24(repoDir, name))) cpSync(join24(repoDir, name), join24(dir, name), { recursive: true });
     }
     const output = execFileSync6(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
       cwd: dir,
@@ -8069,9 +8406,9 @@ function runHarnessTests(repoDir) {
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join22(repoDir, "LESSONS.md");
-  if (!existsSync15(path2)) return "";
-  const text = readFileSync17(path2, "utf8");
+  const path2 = join24(repoDir, "LESSONS.md");
+  if (!existsSync16(path2)) return "";
+  const text = readFileSync18(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
   return m?.[1]?.trim() ?? "";
 }
@@ -8110,7 +8447,7 @@ ${lessons}` : "(no harness lessons recorded yet \u2014 look for the weakest part
   while (iterations < maxIters) {
     iterations++;
     const head = sh4("git rev-parse HEAD", repoDir);
-    const tag = randomUUID12().slice(0, 8);
+    const tag = randomUUID13().slice(0, 8);
     console.log(`
 ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
     const prompt = iterations === 1 ? queueText + "\n\nDo not commit, reset, stage, or switch Git branches; the harness owns keep/discard. Pick the single most concrete weakness and fix it with the smallest change that works. Then run npm test and report the result as: RESULT: improved | no-change | failed" : "Continue: pick the next concrete weakness (not the one you just fixed). Same rules. Do not commit, reset, stage, or switch Git branches. Report as: RESULT: improved | no-change | failed";
@@ -8133,7 +8470,7 @@ ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
         const test = runHarnessTests(repoDir);
         if (sh4("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
         if (test.pass) {
-          appendFileSync3(join22(repoDir, "LESSONS.md"), `
+          appendFileSync3(join24(repoDir, "LESSONS.md"), `
 - [improve ${tag}] fixed: ${firstLine(report)}
 `);
           if (useGit) sh4(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
@@ -8174,8 +8511,8 @@ var init_improve = __esm({
     init_loop();
     init_runner();
     init_system_prompt();
-    here4 = dirname10(fileURLToPath5(import.meta.url));
-    REIN_REPO = [here4, resolve17(here4, ".."), resolve17(here4, "..", "..")].find((dir) => existsSync15(join22(dir, "test", "smoke.ts"))) ?? resolve17(here4, "..", "..");
+    here4 = dirname11(fileURLToPath5(import.meta.url));
+    REIN_REPO = [here4, resolve18(here4, ".."), resolve18(here4, "..", "..")].find((dir) => existsSync16(join24(dir, "test", "smoke.ts"))) ?? resolve18(here4, "..", "..");
   }
 });
 
@@ -8186,9 +8523,9 @@ __export(heartbeat_exports, {
   parseHeartbeat: () => parseHeartbeat,
   runHeartbeat: () => runHeartbeat
 });
-import { appendFileSync as appendFileSync4, existsSync as existsSync16, mkdirSync as mkdirSync11, readFileSync as readFileSync18, writeFileSync as writeFileSync11 } from "node:fs";
-import { homedir as homedir13 } from "node:os";
-import { isAbsolute as isAbsolute6, join as join23, resolve as resolve18 } from "node:path";
+import { appendFileSync as appendFileSync4, existsSync as existsSync17, mkdirSync as mkdirSync12, readFileSync as readFileSync19, writeFileSync as writeFileSync12 } from "node:fs";
+import { homedir as homedir15 } from "node:os";
+import { isAbsolute as isAbsolute6, join as join25, resolve as resolve19 } from "node:path";
 function parseHeartbeat(text) {
   const tasks = [];
   let improveGoal;
@@ -8205,15 +8542,15 @@ function parseHeartbeat(text) {
   return { tasks, improveGoal };
 }
 function resolveHeartbeatFile(explicit) {
-  if (explicit) return isAbsolute6(explicit) ? explicit : resolve18(explicit);
-  const local = resolve18(process.cwd(), "HEARTBEAT.md");
-  if (existsSync16(local)) return local;
-  return join23(process.env.REIN_HOME || join23(homedir13(), ".rein"), "HEARTBEAT.md");
+  if (explicit) return isAbsolute6(explicit) ? explicit : resolve19(explicit);
+  const local = resolve19(process.cwd(), "HEARTBEAT.md");
+  if (existsSync17(local)) return local;
+  return join25(process.env.REIN_HOME || join25(homedir15(), ".rein"), "HEARTBEAT.md");
 }
 function logBeat(result) {
-  const dir = process.env.REIN_HOME || join23(homedir13(), ".rein");
-  mkdirSync11(dir, { recursive: true });
-  const path2 = join23(dir, "heartbeat.log");
+  const dir = process.env.REIN_HOME || join25(homedir15(), ".rein");
+  mkdirSync12(dir, { recursive: true });
+  const path2 = join25(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     file: result.file,
@@ -8230,18 +8567,18 @@ async function runHeartbeat(opts = {}) {
     if (!opts.quiet) console.log(s);
   };
   if (opts.init) {
-    const path2 = opts.file ? isAbsolute6(opts.file) ? opts.file : resolve18(opts.file) : resolve18(process.cwd(), "HEARTBEAT.md");
-    writeFileSync11(path2, HEARTBEAT_TEMPLATE);
+    const path2 = opts.file ? isAbsolute6(opts.file) ? opts.file : resolve19(opts.file) : resolve19(process.cwd(), "HEARTBEAT.md");
+    writeFileSync12(path2, HEARTBEAT_TEMPLATE);
     say(green(`wrote ${path2} \u2014 edit it, then run: rein heartbeat`));
     return 0;
   }
   const file = resolveHeartbeatFile(opts.file);
-  if (!existsSync16(file)) {
+  if (!existsSync17(file)) {
     say(red(`no HEARTBEAT.md (looked in cwd and ~/.rein)`));
     say(dim(`create one: rein heartbeat --init --file ${file}`));
     return 1;
   }
-  const { tasks, improveGoal } = parseHeartbeat(readFileSync18(file, "utf8"));
+  const { tasks, improveGoal } = parseHeartbeat(readFileSync19(file, "utf8"));
   say(bold(`heartbeat \xB7 ${file}`) + dim(` \xB7 ${(/* @__PURE__ */ new Date()).toISOString()}`));
   say(`
 ${bold("1/4 self-heal")}`);
@@ -8252,7 +8589,7 @@ ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync16(join23(process.env.REIN_HOME || join23(homedir13(), ".rein"), "config.json"))) {
+  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync17(join25(process.env.REIN_HOME || join25(homedir15(), ".rein"), "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -8334,24 +8671,24 @@ __export(setup_exports, {
   runSetup: () => runSetup,
   testConnection: () => testConnection
 });
-import { mkdirSync as mkdirSync12, renameSync as renameSync5, unlinkSync as unlinkSync5, writeFileSync as writeFileSync12 } from "node:fs";
-import { homedir as homedir14 } from "node:os";
-import { dirname as dirname11, join as join24 } from "node:path";
-import { randomUUID as randomUUID13 } from "node:crypto";
-import { execFile as execFile8 } from "node:child_process";
-import { promisify as promisify7 } from "node:util";
+import { mkdirSync as mkdirSync13, renameSync as renameSync6, unlinkSync as unlinkSync6, writeFileSync as writeFileSync13 } from "node:fs";
+import { homedir as homedir16 } from "node:os";
+import { dirname as dirname12, join as join26 } from "node:path";
+import { randomUUID as randomUUID14 } from "node:crypto";
+import { execFile as execFile10 } from "node:child_process";
+import { promisify as promisify9 } from "node:util";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 function saveConfig(config) {
   const path2 = configPath();
-  mkdirSync12(dirname11(path2), { recursive: true, mode: 448 });
-  const temp = `${path2}.${randomUUID13()}.tmp`;
+  mkdirSync13(dirname12(path2), { recursive: true, mode: 448 });
+  const temp = `${path2}.${randomUUID14()}.tmp`;
   try {
-    writeFileSync12(temp, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 384 });
-    renameSync5(temp, path2);
+    writeFileSync13(temp, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 384 });
+    renameSync6(temp, path2);
   } finally {
     try {
-      unlinkSync5(temp);
+      unlinkSync6(temp);
     } catch {
     }
   }
@@ -8384,8 +8721,8 @@ function createSetupPrompt(input = process.stdin, output = process.stdout) {
     output.write(text);
     if (queue.length) return queue.shift().trim() || fallback;
     if (closed) throw eof();
-    const answer = await new Promise((resolve19, reject) => {
-      pending = { resolve: resolve19, reject };
+    const answer = await new Promise((resolve20, reject) => {
+      pending = { resolve: resolve20, reject };
     });
     return answer.trim() || fallback;
   };
@@ -8411,7 +8748,7 @@ async function openBrowser(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   try {
-    await promisify7(execFile8)(command, args, { timeout: 5e3 });
+    await promisify9(execFile10)(command, args, { timeout: 5e3 });
     return true;
   } catch {
     return false;
@@ -8678,7 +9015,7 @@ var init_setup = __esm({
       huggingface: "https://huggingface.co/settings/tokens",
       gemini: "https://aistudio.google.com/apikey"
     };
-    configPath = () => join24(process.env.REIN_HOME || join24(homedir14(), ".rein"), "config.json");
+    configPath = () => join26(process.env.REIN_HOME || join26(homedir16(), ".rein"), "config.json");
   }
 });
 
@@ -8745,6 +9082,154 @@ var init_print = __esm({
   }
 });
 
+// src/harness/reply-presentation.ts
+function createReplyPresentation(options) {
+  const write = options.write;
+  const color = options.color ?? Boolean(process.stdout.isTTY && !("NO_COLOR" in process.env));
+  const paint = (code, text) => color ? `\x1B[1;${code}m${text}\x1B[0m` : text;
+  const markers = ["\u25D0", "\u25D3", "\u25D1", "\u25D2"];
+  const accents = [32, 35, 33, 94];
+  let operators = 0, replies = 0;
+  let open4 = false, continued = false, lineOpen = false, textSeen = false, thinkingShown = false;
+  let canceledShown = false;
+  const number = (n) => String(n).padStart(2, "0");
+  const operatorLabel = () => paint(36, `[OPERATOR \xB7 turn ${number(operators + 1)}]`);
+  const replyLabel = (continuation = false) => {
+    const index = (replies - 1) % markers.length;
+    return paint(accents[index], `[REIN \xB7 reply ${number(replies)} ${markers[index]}${continuation ? " \xB7 continued" : ""}]`);
+  };
+  const flush = () => {
+    if (lineOpen) write("\n");
+    lineOpen = false;
+  };
+  const beginReply = () => {
+    flush();
+    replies++;
+    open4 = true;
+    continued = false;
+    textSeen = false;
+    thinkingShown = false;
+    write(`
+${replyLabel()}
+`);
+  };
+  const ensureReply = () => {
+    if (!open4) beginReply();
+    else if (continued) {
+      flush();
+      write(`
+${replyLabel(true)}
+`);
+      continued = false;
+      thinkingShown = false;
+    }
+  };
+  const status2 = (text) => {
+    flush();
+    write(`${text}
+`);
+  };
+  return {
+    prompt: () => `${operatorLabel()} \u276F `,
+    startRun() {
+      canceledShown = false;
+    },
+    pauseForInput() {
+      flush();
+      if (open4) continued = true;
+    },
+    /** echoed means readline already displayed this numbered prompt and input. */
+    operator(text, echoed = false, steering = false) {
+      flush();
+      if (!echoed) write(`
+${operatorLabel()}${steering ? " \xB7 steering queued" : ""}
+${text}
+`);
+      operators++;
+      if (open4) continued = true;
+    },
+    flush,
+    /** Finish a run that failed/canceled before the provider emitted message_end. */
+    finish(error, aborted2 = false) {
+      if (error || aborted2) {
+        if (aborted2 && canceledShown) return;
+        ensureReply();
+        status2(aborted2 ? "Reply canceled." : `Error: ${error}`);
+      } else if (open4 && !textSeen) {
+        ensureReply();
+        status2("No text reply.");
+      }
+      flush();
+      open4 = false;
+    },
+    event(event) {
+      switch (event.type) {
+        case "message_start":
+          if (event.message.role === "assistant") beginReply();
+          break;
+        case "message_update": {
+          const delta = event.event;
+          if (delta.type === "text_delta" && delta.delta) {
+            ensureReply();
+            write(delta.delta);
+            lineOpen = !delta.delta.endsWith("\n");
+            textSeen = true;
+          } else if (delta.type === "thinking_delta") {
+            ensureReply();
+            if (!thinkingShown) {
+              status2("Thinking\u2026");
+              thinkingShown = true;
+            }
+          }
+          break;
+        }
+        case "message_end": {
+          if (event.message.role !== "assistant") break;
+          ensureReply();
+          const message = event.message;
+          if (!textSeen) {
+            const finalText = message.content.filter((part) => part.type === "text").map((part) => part.text).join("");
+            if (finalText) {
+              write(finalText);
+              lineOpen = !finalText.endsWith("\n");
+              textSeen = true;
+            }
+          }
+          flush();
+          if (message.stopReason === "error") status2(`Error: ${message.errorMessage ?? "model error"}`);
+          else if (message.stopReason === "aborted") {
+            status2("Reply canceled.");
+            canceledShown = true;
+          } else if (message.stopReason === "length") status2("Reply reached the output limit.");
+          else if (!textSeen && !message.content.some((part) => part.type === "toolCall")) status2("No text reply.");
+          open4 = false;
+          break;
+        }
+        case "tool_execution_start": {
+          flush();
+          const args = JSON.stringify(event.args ?? {});
+          write(`
+${paint(90, `[TOOL \xB7 ${event.toolName}]`)} ${args.length > 120 ? `${args.slice(0, 120)}\u2026` : args}
+`);
+          break;
+        }
+        case "tool_execution_end": {
+          flush();
+          const content = event.result?.content ?? "";
+          const preview = content.replace(/\n/g, " ").slice(0, 100);
+          write(`${paint(event.isError ? 31 : 90, `[TOOL \xB7 ${event.toolName} \xB7 ${event.isError ? "failed" : "done"}]`)} ${preview}${content.length > 100 ? "\u2026" : ""}
+`);
+          break;
+        }
+      }
+    }
+  };
+}
+var init_reply_presentation = __esm({
+  "src/harness/reply-presentation.ts"() {
+  }
+});
+
 // src/harness/repl.ts
 var repl_exports = {};
 __export(repl_exports, {
@@ -8755,7 +9240,11 @@ async function startRepl(opts) {
   const { runner } = opts;
   let sessionId = opts.resumeSessionId ?? createSession({ model: runner.model.id, provider: runner.model.provider, cwd: process.cwd() });
   runner.setSession(sessionId);
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY), prompt: dim("\u276F ") });
+  let busy = false, terminating = false;
+  const presentation = createReplyPresentation({ write: (text) => {
+    if (!terminating) process.stdout.write(text);
+  } });
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY), prompt: presentation.prompt() });
   console.log(
     gray(
       `rein \xB7 ${runner.model.provider}/${runner.model.id} \xB7 tools: ${runner.toolsMode} (${runner.toolsModeSource}) \xB7 session ${sessionId.slice(-8)}
@@ -8765,7 +9254,6 @@ async function startRepl(opts) {
   if (active()) {
     console.log(gray("nodeterm node detected \u2014 status badges on; approvals can be answered from the canvas or the phone."));
   }
-  let busy = false, terminating = false;
   let lastProposalAlert = "";
   const proposalAlert = () => {
     try {
@@ -8778,57 +9266,24 @@ async function startRepl(opts) {
   };
   let controller;
   let approvalAnswer;
-  let currentText = "";
-  let thinkingOn = false;
-  const flushLine = () => {
-    if (!terminating && (currentText || thinkingOn)) process.stdout.write("\n");
-    thinkingOn = false;
-    currentText = "";
-  };
+  let typing = false, runFinished = false;
+  let typingDone;
+  let resolveTyping;
+  const heldEvents = [];
   const onEvent = (event) => {
     if (terminating) return;
-    switch (event.type) {
-      case "message_update": {
-        const e = event.event;
-        if (e.type === "text_delta") {
-          if (thinkingOn) {
-            process.stdout.write("\n");
-            thinkingOn = false;
-          }
-          process.stdout.write(e.delta);
-          currentText += e.delta;
-        } else if (e.type === "thinking_delta") {
-          if (!thinkingOn) {
-            process.stdout.write("\n" + gray("\xB7 thinking\u2026 "));
-            thinkingOn = true;
-          }
-        }
-        break;
-      }
-      case "message_end": {
-        flushLine();
-        if (event.message.role === "assistant" && event.message.stopReason === "error") {
-          console.log(red(event.message.errorMessage ?? "model error"));
-        }
-        break;
-      }
-      case "tool_execution_start": {
-        if (thinkingOn) {
-          process.stdout.write("\n");
-          thinkingOn = false;
-        }
-        const args = JSON.stringify(event.args ?? {});
-        process.stdout.write("\n" + cyan("\u26A1 ") + bold(event.toolName) + " " + dim(args.length > 120 ? args.slice(0, 120) + "\u2026" : args) + "\n");
-        break;
-      }
-      case "tool_execution_end": {
-        const mark = event.isError ? red("\u2717") : green("\u2713");
-        const preview = (event.result?.content ?? "").replace(/\n/g, " ").slice(0, 100);
-        process.stdout.write(dim(`  ${mark} ${preview}${(event.result?.content ?? "").length > 100 ? "\u2026" : ""}
-`));
-        break;
-      }
-    }
+    if (typing || approvalAnswer) {
+      if (!["message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_end"].includes(event.type)) return;
+      if (event.type === "message_update" && !["text_delta", "thinking_delta"].includes(event.event.type)) return;
+      heldEvents.push(event.type === "message_update" ? { type: event.type, event: { type: event.event.type, delta: event.event.type === "text_delta" ? event.event.delta : "" } } : event);
+    } else presentation.event(event);
+  };
+  const releaseTyping = () => {
+    typing = false;
+    for (const event of heldEvents.splice(0)) onEvent(event);
+    resolveTyping?.();
+    resolveTyping = void 0;
+    typingDone = void 0;
   };
   const handleCommand = async (line) => {
     const [cmd, ...rest] = line.slice(1).split(/\s+/);
@@ -8947,53 +9402,82 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     }
   };
   let resolveLine = null;
+  let promptVisible = false;
   let inputClosed = false;
   const lineQueue = [];
+  const onKeypress = (text, key) => {
+    if (!busy || approvalAnswer || typing || !text || key.ctrl || key.meta || ["return", "enter"].includes(key.name ?? "")) return;
+    presentation.pauseForInput();
+    typing = true;
+    typingDone = new Promise((resolve20) => {
+      resolveTyping = resolve20;
+    });
+    rl.setPrompt(presentation.prompt());
+    promptVisible = true;
+    rl.prompt();
+  };
+  if (process.stdin.isTTY && process.stdout.isTTY) process.stdin.prependListener("keypress", onKeypress);
   rl.on("line", (line) => {
     if (terminating) return;
+    const input = { line, echoed: promptVisible };
+    promptVisible = false;
     if (/^\/(stop|quit|exit)\s*$/.test(line.trim()) && busy) {
       controller?.abort();
       approvalAnswer?.("");
       approvalAnswer = void 0;
       lineQueue.length = 0;
-      lineQueue.push(line.trim());
+      lineQueue.push({ ...input, line: line.trim() });
+      releaseTyping();
       return;
     }
     if (approvalAnswer) {
       const answer = approvalAnswer;
       approvalAnswer = void 0;
       answer(line);
+      releaseTyping();
       return;
     }
-    if (busy && !controller?.signal.aborted && line.trim() && !line.startsWith("/")) {
+    if (busy && !runFinished && !controller?.signal.aborted && line.trim() && !line.startsWith("/")) {
+      presentation.operator(line, input.echoed, true);
       runner.steer({ role: "user", content: line, timestamp: Date.now() });
-      console.log(gray("(queued \u2014 I'll fold that in after the current step)"));
+      releaseTyping();
       return;
     }
     if (busy && /^\/(quit|exit)\s*$/.test(line)) controller?.abort();
     if (resolveLine) {
       const r = resolveLine;
       resolveLine = null;
-      r(line);
+      r(input);
     } else {
-      lineQueue.push(line);
+      lineQueue.push(input);
     }
+    releaseTyping();
   });
   rl.on("close", () => {
     inputClosed = true;
     approvalAnswer?.("");
     approvalAnswer = void 0;
+    releaseTyping();
     if (resolveLine) {
       const r = resolveLine;
       resolveLine = null;
-      r("");
+      r({ line: "", echoed: false });
     }
   });
   rl.on("SIGINT", () => {
     if (busy) {
       controller?.abort();
+      if (process.stdin.isTTY && process.stdout.isTTY && !rl.closed && (typing || approvalAnswer || rl.line.length)) {
+        rl.write(null, { ctrl: true, name: "a" });
+        rl.write(null, { ctrl: true, name: "k" });
+        rl.line = "";
+        rl.cursor = 0;
+        process.stdout.write("\n");
+      }
+      promptVisible = false;
       approvalAnswer?.("");
       approvalAnswer = void 0;
+      releaseTyping();
     } else rl.close();
   });
   const terminate = (code) => {
@@ -9011,12 +9495,14 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
   let approvalTail = Promise.resolve(false);
   runner.askFallback = (name, args) => {
     const pending = approvalTail.then(async () => {
+      if (typingDone) await typingDone;
       if (!process.stdin.isTTY || inputClosed || controller?.signal.aborted) return false;
       const s = JSON.stringify(args);
+      presentation.flush();
       process.stdout.write(`
 \u26A1 approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} \u2014 [y/N] `);
-      const line = await new Promise((resolve19) => {
-        approvalAnswer = resolve19;
+      const line = await new Promise((resolve20) => {
+        approvalAnswer = resolve20;
       });
       return /^y(es)?$/i.test(line.trim());
     });
@@ -9026,9 +9512,13 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
   const ask = () => {
     if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift());
     if (inputClosed) return Promise.resolve(null);
-    return new Promise((resolve19) => {
-      resolveLine = (line) => resolve19(line);
-      if (!rl.closed && process.stdout.isTTY) rl.prompt();
+    return new Promise((resolve20) => {
+      resolveLine = (line) => resolve20(line);
+      if (!rl.closed && process.stdin.isTTY && process.stdout.isTTY) {
+        rl.setPrompt(presentation.prompt());
+        promptVisible = true;
+        rl.prompt();
+      }
     });
   };
   if (runner.context.messages.length === 0) {
@@ -9037,8 +9527,9 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
   try {
     while (!terminating) {
       proposalAlert();
-      let line = await ask();
-      if (line === null) break;
+      const input = await ask();
+      if (input === null) break;
+      let line = input.line;
       if (!line) continue;
       if (/^\/skill(?:\s|$)/.test(line)) {
         try {
@@ -9057,27 +9548,36 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
         }
         continue;
       }
+      presentation.operator(input.line, input.echoed);
+      presentation.startRun();
       const userMsg = { role: "user", content: line, timestamp: Date.now() };
       try {
         const started = Date.now();
         busy = true;
+        runFinished = false;
         controller = new AbortController();
         await runner.run(userMsg, { signal: controller.signal, onEvent });
+        runFinished = true;
+        if (typingDone) await typingDone;
         if (terminating) continue;
+        presentation.finish(void 0, controller.signal.aborted);
         if (process.stdout.isTTY) process.stdout.write("\n");
         const secs = ((Date.now() - started) / 1e3).toFixed(1);
         const usage2 = runner.context.messages[runner.context.messages.length - 1];
         const tokens = usage2?.usage?.output;
         console.log(gray(`${secs}s${tokens ? ` \xB7 ${tokens} out-tokens` : ""}`));
       } catch (err) {
-        if (!terminating) console.log(red(`something broke: ${err.message}`));
+        runFinished = true;
+        if (typingDone) await typingDone;
+        if (!terminating) presentation.finish(err.message, controller?.signal.aborted);
       } finally {
         busy = false;
         controller = void 0;
-        flushLine();
+        presentation.flush();
       }
     }
   } finally {
+    process.stdin.off("keypress", onKeypress);
     for (const [signal, handler] of signals) process.off(signal, handler);
     if (!rl.closed) rl.close();
   }
@@ -9089,12 +9589,54 @@ var init_repl = __esm({
     init_nodeterm();
     init_state();
     init_skills();
+    init_reply_presentation();
+  }
+});
+
+// src/harness/desktop/activity.ts
+var activity_exports = {};
+__export(activity_exports, {
+  openDesktopActivity: () => openDesktopActivity
+});
+import { execFile as execFile11 } from "node:child_process";
+import { promisify as promisify10 } from "node:util";
+import { existsSync as existsSync18 } from "node:fs";
+import { homedir as homedir17 } from "node:os";
+import { join as join27 } from "node:path";
+async function openDesktopActivity(id) {
+  const canvas = await startCanvas(id);
+  const base = process.platform === "darwin" ? join27(homedir17(), "Library/Application Support/node-terminal") : join27(process.env.XDG_CONFIG_HOME || join27(homedir17(), ".config"), "node-terminal");
+  const script = join27(base, "canvas-control/nodeterm.sh");
+  try {
+    if (process.env.NODETERM_NODE_ID && process.env.NODETERM_CANVAS_CONTROL && existsSync18(script)) {
+      try {
+        await exec5("sh", [script, "show-web", "--url", canvas.url], { timeout: 1e4, maxBuffer: 64 * 1024 });
+        console.error("Rein activity opened as a NodeTerm canvas node.");
+        return canvas;
+      } catch {
+        console.error(`NodeTerm could not embed this activity view. Open it manually if wanted: ${canvas.url}`);
+        return canvas;
+      }
+    } else console.error("This NodeTerm node has no browser-node capability. Opening Rein's activity view in your browser.");
+    openCanvas(canvas.url);
+    console.error(`Activity view: ${canvas.url}`);
+    return canvas;
+  } catch (error) {
+    await canvas.close();
+    throw error;
+  }
+}
+var exec5;
+var init_activity = __esm({
+  "src/harness/desktop/activity.ts"() {
+    init_server();
+    exec5 = promisify10(execFile11);
   }
 });
 
 // src/cli.ts
 init_models();
-import { readFileSync as readFileSync19 } from "node:fs";
+import { readFileSync as readFileSync20 } from "node:fs";
 async function printHardwareSection() {
   try {
     const { summarizeHardware: summarizeHardware2 } = await Promise.resolve().then(() => (init_profile(), profile_exports));
@@ -9114,7 +9656,7 @@ async function printHardwareSection() {
 }
 function cliVersion() {
   try {
-    return JSON.parse(readFileSync19(new URL("../package.json", import.meta.url), "utf8")).version;
+    return JSON.parse(readFileSync20(new URL("../package.json", import.meta.url), "utf8")).version;
   } catch {
     return "0.0.0";
   }
@@ -9137,6 +9679,10 @@ Usage:
   rein web search <query>        search DuckDuckGo through Obscura (--json optional)
   rein web fetch <url>           render a page to markdown (--max-chars 20000)
   rein update                   curl the latest installer and update the installed build
+  rein desktop install          install NodeTerm and register Rein as its default agent
+  rein desktop open|status      open or inspect the native desktop surface
+  rein desktop use terminal     keep future bare rein sessions in the current terminal
+  rein --terminal               stay in this terminal for this session
   rein --visual                 split the terminal into chat and live activity (tmux)
   rein watch <activity-id>       inspect activity; press c for the node canvas
   rein canvas <activity-id>      open the local interactive node canvas
@@ -9192,7 +9738,7 @@ Options:
   -h, --help                       this help
   -v, --version                    print version`);
 }
-var BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent"]);
+var BOOLEAN_FLAGS = /* @__PURE__ */ new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported"]);
 function parseArgs(argv) {
   const positional = [];
   const flags = {};
@@ -9256,6 +9802,11 @@ async function main(argv = process.argv.slice(2)) {
     process.exitCode = await runUpdate2();
     return;
   }
+  if (_[0] === "desktop") {
+    const { desktopCommand: desktopCommand2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    await desktopCommand2(_.slice(1), flags);
+    return;
+  }
   if (flags.tools !== void 0 && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
   const maxIterations = numberFlag(flags, "max-iterations", 1);
   const common = {
@@ -9289,14 +9840,14 @@ async function main(argv = process.argv.slice(2)) {
       return;
     }
     const { startCanvas: startCanvas2, openCanvas: openCanvas2 } = await Promise.resolve().then(() => (init_server(), server_exports));
-    const canvas = await startCanvas2(_[1]);
-    console.log(canvas.url);
-    if (flags["no-browser"] !== true) openCanvas2(canvas.url);
-    await new Promise((resolve19) => {
+    const canvas2 = await startCanvas2(_[1]);
+    console.log(canvas2.url);
+    if (flags["no-browser"] !== true) openCanvas2(canvas2.url);
+    await new Promise((resolve20) => {
       const stop = () => {
         process.off("SIGINT", stop);
         process.off("SIGTERM", stop);
-        void canvas.close().finally(resolve19);
+        void canvas2.close().finally(resolve20);
       };
       process.on("SIGINT", stop);
       process.on("SIGTERM", stop);
@@ -9339,7 +9890,7 @@ ${result.smart_diff}`);
     return;
   }
   if (_[0] === "web") {
-    const { webCommand: webCommand2 } = await Promise.resolve().then(() => (init_cli(), cli_exports));
+    const { webCommand: webCommand2 } = await Promise.resolve().then(() => (init_cli2(), cli_exports2));
     await webCommand2(_.slice(1), flags);
     return;
   }
@@ -9516,10 +10067,49 @@ config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, s
     process.exitCode = code;
     return;
   }
+  const { desktopAvailable: desktopAvailable2, nativeApp: nativeApp2, openNodeTerm: openNodeTerm2, preferredSurface: preferredSurface2, shouldOpenDesktop: shouldOpenDesktop2, remoteDesktopSession: remoteDesktopSession2 } = await Promise.resolve().then(() => (init_surface(), surface_exports));
+  if (shouldOpenDesktop2({
+    interactive: !!(process.stdin.isTTY && process.stdout.isTTY),
+    insideNodeTerm: !!process.env.NODETERM_NODE_ID,
+    terminal: flags.terminal === true,
+    visual: typeof flags.visual === "boolean" ? flags.visual : void 0,
+    activity: common.activityId,
+    hasSessionOptions: argv.length > 0,
+    available: desktopAvailable2() && !!nativeApp2(),
+    preference: preferredSurface2()
+  })) {
+    try {
+      await openNodeTerm2();
+      console.log(`NodeTerm is open. Choose a project and add a Rein agent node.
+To use this directory (${common.cwd}) in an existing NodeTerm terminal, run rein --terminal there.
+Use rein --terminal here to stay in this terminal.`);
+      return;
+    } catch (error) {
+      console.error(`Could not open NodeTerm: ${error.message}. Continuing in this terminal.`);
+    }
+  }
+  const desktopActivity = !!(process.env.NODETERM_NODE_ID && process.stdin.isTTY && process.stdout.isTTY && !remoteDesktopSession2() && !process.env.CI && flags["no-browser"] !== true && flags.visual !== false && !common.activityId);
+  if (desktopActivity) {
+    const { newActivityId: newActivityId2 } = await Promise.resolve().then(() => (init_store(), store_exports));
+    common.activityId = newActivityId2();
+  }
   const { createRunner: createRunner2 } = await Promise.resolve().then(() => (init_runner(), runner_exports));
   const { startRepl: startRepl2 } = await Promise.resolve().then(() => (init_repl(), repl_exports));
   const runner = await createRunner2({ ...common, tools: flags["no-tools"] === true ? [] : void 0, askTools: common.askTools });
-  await startRepl2({ runner, resumeSessionId: typeof flags.resume === "string" ? flags.resume : void 0 });
+  let canvas;
+  try {
+    if (desktopActivity) {
+      try {
+        const { openDesktopActivity: openDesktopActivity2 } = await Promise.resolve().then(() => (init_activity(), activity_exports));
+        canvas = await openDesktopActivity2(common.activityId);
+      } catch (error) {
+        console.error(`Activity view unavailable: ${error.message}. Chat remains available.`);
+      }
+    }
+    await startRepl2({ runner, resumeSessionId: typeof flags.resume === "string" ? flags.resume : void 0 });
+  } finally {
+    await canvas?.close();
+  }
 }
 
 // bin/rein.js

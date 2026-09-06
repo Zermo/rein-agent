@@ -175,7 +175,7 @@ if (process.argv.includes('--global') && process.env.REIN_UPDATE_NPM_FAIL === '1
 	const gitAt = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args], { cwd, env, encoding: "utf8", stdio: "pipe" }).trim();
 	gitAt(remote, "init", "-b", "main"); gitAt(remote, "config", "user.name", "Update Fixture"); gitAt(remote, "config", "user.email", "fixture@example.invalid");
 	const publish = (version: string) => {
-		writeFileSync(join(remote, "dist/rein.js"), `console.log(${JSON.stringify("rein " + version)});\n`);
+		writeFileSync(join(remote, "dist/rein.js"), `require('node:fs').appendFileSync(require('node:path').join(process.env.REIN_UPDATE_FIXTURE, 'installed-cli.jsonl'), JSON.stringify(process.argv.slice(2)) + '\\n'); console.log(${JSON.stringify("rein " + version)});\n`);
 		writeFileSync(join(remote, "package.json"), JSON.stringify({ name: "rein-agent", version }));
 		gitAt(remote, "add", "."); gitAt(remote, "commit", "-m", `Publish ${version}`);
 		return gitAt(remote, "rev-parse", "HEAD");
@@ -198,6 +198,20 @@ test("published installer clones and updates the latest build without probing th
 		assert.equal(existsSync(join(f.root, "setup-called")), false);
 		assert.equal(f.npmCalls().filter(args => args[0] === "ci").length, 2);
 		assert.equal(f.npmCalls().filter(args => args.includes("--global")).length, 2);
+		const calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+		assert.equal(calls.filter(args => args.join(" ") === "desktop install --if-supported --no-launch").length, 2);
+		f.unchanged();
+	} finally { f.close(); }
+});
+
+test("terminal-only installer saves its opt-out instead of installing a native app", posix, async () => {
+	const f = installFixture();
+	try {
+		const result = await f.install(["--skip-setup", "--terminal-only", "--no-launch"]);
+		assert.equal(result.code, 0, result.stdout + result.stderr);
+		const calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+		assert.ok(calls.some(args => args.join(" ") === "desktop use terminal"));
+		assert.equal(calls.some(args => args[0] === "desktop" && args[1] === "install"), false);
 		f.unchanged();
 	} finally { f.close(); }
 });

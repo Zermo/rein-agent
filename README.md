@@ -64,7 +64,35 @@ model setup (the openclaw / hermes style onboarding):
 curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
 ```
 
-Flags after `bash -s --`: `--skip-setup` (install only), `--yes` (no prompts).
+On a local macOS desktop, the installer also downloads the separate official
+NodeTerm app, verifies its checksum and signature, and installs it in
+`~/Applications` if it is missing. Existing copies stay in place. Rein becomes
+NodeTerm's default agent when the app is closed during registration. If NodeTerm
+is already running, its settings stay untouched; close it later and run
+`rein desktop install --no-launch` to finish registration.
+
+Bare `rein` in an interactive local macOS shell opens NodeTerm when installed.
+Choose a project and add an agent node to start Rein. NodeTerm currently has no
+external session-launch API, so this is one manual step; Rein does not silently
+drop a supplied prompt, resume ID, model option, or working directory into a
+different session. Commands with options continue in their original terminal.
+
+Flags after `bash -s --`: `--skip-setup` skips model checks and app launch,
+`--yes` avoids model prompts, `--no-launch` leaves the app closed, and
+`--terminal-only` skips NodeTerm and saves a terminal preference.
+Linux, WSL, remote shells, and CI keep the CLI path. Install NodeTerm separately
+from its [official releases](https://nodeterm.dev/releases) on other supported desktops.
+
+```sh
+rein --terminal                 # stay in this terminal for this session
+rein desktop use terminal       # save that preference for future sessions
+rein desktop install            # install/register NodeTerm and prefer it again
+rein desktop status
+```
+
+The NodeTerm app is downloaded from the verified upstream release, not bundled
+inside Rein. See [desktop integration](docs/nodeterm-desktop.md) for supported
+platforms, setup details, and the current native-app limits.
 The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM),
 accepts remote hosts, and offers cloud API keys or supported subscription logins.
 It tests API connections and saves `~/.rein/config.json` (or `$REIN_HOME/config.json`).
@@ -164,6 +192,15 @@ Official subscription CLIs keep their own transport and login; HTTP protocol
 flags are rejected when a CLI provider is selected. `model-host` must be your configured
 SSH alias; Rein does not create a public listener on the remote machine.
 
+### Clear operator and agent replies
+
+Interactive chat labels every operator turn and agent reply. Operator prompts
+are cyan. The `REIN` label keeps its name and cycles its accent and quarter-circle
+marker with each numbered reply. Tools have separate named labels. While you
+type steering, the display pauses under an operator prompt; agent execution
+continues, and its output resumes under the same reply identity after Enter.
+`NO_COLOR` removes ANSI color while preserving the labels and spacing.
+
 ### Persistent bash and a live node canvas
 
 ```sh
@@ -182,6 +219,12 @@ The separate `tmux` tool exposes start/list/capture/send/interrupt/stop. Environ
 working directory and interactive programs persist across turns. Rein uses its
 own server and scopes sessions by workspace. `/stop` cancels foreground work;
 intentionally persistent tmux sessions remain until explicitly stopped.
+
+Inside a local NodeTerm session, interactive Rein records and opens its activity
+view automatically. Eligible nodes embed it on the native canvas. Baseless custom
+agent nodes lack that capability, so the detailed view opens in a browser while
+chat stays in NodeTerm. Use `--no-browser` or `--visual=false` to skip automatic
+activity opening. Remote sessions do not auto-open a remote loopback URL.
 
 `--visual` opens chat beside a terminal activity tree. Press **Ctrl-b Right** to
 focus the activity pane, then **c** to open the interactive node canvas. Select

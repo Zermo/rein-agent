@@ -1,29 +1,34 @@
-# Gates: reasoning-model setup and installation guide
+# Gates: reply identities and native desktop setup
 
-Scope: reasoning-aware setup probes and the retro installation guide,
-with packaged runtime and existing native integration coverage.
+Scope: Rein 0.10.0 interactive labels, input isolation, NodeTerm installation,
+registration, default routing, and activity-view compatibility.
 
-- [x] G1: source smoke and regression suites pass on Node 26.8.1
-  CHECK: npm exec --yes --package=node@26.8.1 -- npm test
+- [x] G1: Source smoke and regression suite passes
+  CHECK: npm test
   EXPECT: smoke test OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=[local checkout path redacted]; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=603e1d84650a89f04a9513cad01f155c6976baba5376dcd8d4b4807d1ad4fd5a; output-bytes=31959
+  EVIDENCE: exit=0; output-sha256=f338116f4c7486ea92768ca31ce3e9afee6f449de410c4d1d3e6375f1bcaf382; output-bytes=34675
 
-- [x] G2: built CLI and embedded assets work on Node 18
-  CHECK: bash -c 'npm run bundle && npm exec --yes --package=node@18.20.8 -- node test/bundle-smoke.mjs'
+- [x] G2: Built CLI works on Node 18
+  CHECK: npm exec --yes --package=node@18.20.8 -- node test/bundle-smoke.mjs
   EXPECT: bundle smoke OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=[local checkout path redacted]; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=8c7930c56fef2758fd48c2d0ec667fce90ce8ccc1c77eec23bd25b15bd46e3b1; output-bytes=123
+  EVIDENCE: exit=0; output-sha256=314300802bb3163b493ea7326ef542c1e7ece16617c61f4ab01afaba6a7b77dc; output-bytes=27
 
-- [x] G3: upstream source and release provenance remain intact
+- [x] G3: Native dependency provenance is intact
   CHECK: bash -c 'npm run check:posthorse && npm run check:natives'
   EXPECT: Obscura provenance OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=[local checkout path redacted]; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=bbb86a09c7c798e191a6703afc7d5c5de78b30458d4371b611e2a4e9d9fd6ff1; output-bytes=243
+  EVIDENCE: exit=0; output-sha256=82fdff32288bc5ef211538d1384beeb320921b578039000ab44285a539e9e9ff; output-bytes=245
 
-- [x] G4: real Obscura extracts a JavaScript page through the packaged CLI
-  CHECK: npm exec --yes --package=node@18.20.8 -- node test/obscura-live-smoke.mjs
-  EXPECT: Obscura live smoke OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=[local checkout path redacted]; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=c22d9946edd1d8facba5346b134bf42bd6e33bee925022f39f683087b09bbdf3; output-bytes=47
+- [x] G4: Desktop installer and registration contracts pass offline tests
+  CHECK: node --test test/desktop-install.test.ts test/desktop-surface.test.ts
+  EXPECT: fail 0
+  EVIDENCE: exit=0; output-sha256=f06a05645f23aa4d6b4b28c33b4ee252765b0d22af48f666cea0705f8f0e4e26; output-bytes=1323
 
-- [x] G5: release package includes native integration assets
+- [x] G5: Release package includes the new desktop integration
   CHECK: npm pack --dry-run
-  EXPECT: rein-agent-0.9.3.tgz
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=[local checkout path redacted]; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=3de2f6c98a48ddfb4d395d2c2600430ab2ab4d751b05acc1c1f22a78aee1f804; output-bytes=11490
+  EXPECT: rein-agent-0.10.0.tgz
+  EVIDENCE: exit=0; output-sha256=168de0838f4ba792f055e6645cf8ca500d9f8735b36762991b55583b45d42cf9; output-bytes=12851
+
+Source suite: 334 tests on Node 26.3.0. The native macOS download was also
+installed into an isolated temporary directory: official checksum, signature,
+Gatekeeper, staging, and cleanup passed. No installed app was replaced by that
+check.

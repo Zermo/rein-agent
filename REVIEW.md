@@ -1,5 +1,32 @@
 # Posthorse and harness review
 
+## 0.10.0 Reply identities and NodeTerm desktop
+
+Operator turns and REIN replies have distinct numbered labels; REIN cycles its
+accent and marker per reply. Tool results have separate labels. Live typing
+holds display events while agent execution continues. Review reproduced and
+fixed hidden input remaining after Ctrl-C and parallel tool output interrupting
+an approval answer. The independent correction review passed all 22 focused
+presentation and typing tests. The complete source suite passes 334 tests.
+
+The curl installer adds the separate official NodeTerm app on local macOS
+desktops, preserving existing installations. Registration preserves unrelated
+settings and runs only with NodeTerm closed. Bare interactive invocations prefer
+NodeTerm; explicit session options, pipes, remote shells, and terminal opt-outs
+remain in their original terminal. NodeTerm lacks an external project/session
+launch API, so the final project-and-node selection is manual. Baseless custom
+agent nodes lack browser-node capability; their detailed activity opens in a
+browser. Native embedding refusals are not retried through another app.
+
+A contract review caught and fixed remote loopback URLs being opened on the
+desktop, ignored no-browser flags, and versioned Node executable paths in the
+registered launcher. Offline tests cover checksum failure, invalid existing
+apps, concurrent installs/settings changes, unsupported platforms, and
+configuration preservation. A real official macOS download passed checksum,
+signature, Gatekeeper, staging, and cleanup in a temporary installation. The
+Node 18 bundle, upstream provenance, and package checks pass. See
+[desktop integration](docs/nodeterm-desktop.md) for exact upstream limitations.
+
 ## Public self-hosted setup
 
 Public examples now use synthetic hosts and ports. The guide and wiki cover

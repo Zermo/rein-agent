@@ -10,13 +10,14 @@
  */
 import * as readline from "node:readline";
 import { branchSession, createSession, listSessions } from "../agent/session.ts";
-import type { AgentMessage } from "../agent/agent-loop.ts";
-import { cyan, dim, gray, green, red, yellow, bold } from "../util/ansi.ts";
+import type { AgentEvent, AgentMessage } from "../agent/agent-loop.ts";
+import { dim, gray, red, yellow, bold } from "../util/ansi.ts";
 import type { Runner } from "./runner.ts";
 import type { AgentTool } from "../agent/agent-loop.ts";
 import * as nodeterm from "./nodeterm.ts";
 import { readState as autonomyState } from "./autonomy/state.ts";
 import { skillRequest, skillRoster } from "./skills.ts";
+import { createReplyPresentation } from "./reply-presentation.ts";
 
 interface ReplOptions {
 	runner: Runner;
@@ -29,7 +30,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
 	runner.setSession(sessionId);
 
-	const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY), prompt: dim("❯ ") });
+	let busy = false, terminating = false;
+	const presentation = createReplyPresentation({ write: text => { if (!terminating) process.stdout.write(text); } });
+	const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY), prompt: presentation.prompt() });
 
 	console.log(
 		gray(
@@ -40,7 +43,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		console.log(gray("nodeterm node detected — status badges on; approvals can be answered from the canvas or the phone."));
 	}
 
-	let busy = false, terminating = false;
 	let lastProposalAlert = "";
 	const proposalAlert = () => {
 		try {
@@ -52,61 +54,29 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	};
 	let controller: AbortController | undefined;
 	let approvalAnswer: ((line: string) => void) | undefined;
+	let typing = false, runFinished = false;
+	let typingDone: Promise<void> | undefined;
+	let resolveTyping: (() => void) | undefined;
+	const heldEvents: AgentEvent[] = [];
 
-	// --- live rendering state -------------------------------------------------
-	let currentText = "";
-	let thinkingOn = false;
-
-	const flushLine = () => {
-		if (!terminating && (currentText || thinkingOn)) process.stdout.write("\n");
-		thinkingOn = false;
-		currentText = "";
-	};
-
-	const onEvent = (event: any) => {
+	// --- live rendering -------------------------------------------------------
+	const onEvent = (event: AgentEvent) => {
 		if (terminating) return;
-		switch (event.type) {
-			case "message_update": {
-				const e = event.event;
-				if (e.type === "text_delta") {
-					if (thinkingOn) {
-						process.stdout.write("\n");
-						thinkingOn = false;
-					}
-					process.stdout.write(e.delta);
-					currentText += e.delta;
-				} else if (e.type === "thinking_delta") {
-					if (!thinkingOn) {
-						process.stdout.write("\n" + gray("· thinking… "));
-						thinkingOn = true;
-					}
-					// thinking is shown only as "thinking…", not the full trace
-				}
-				break;
-			}
-			case "message_end": {
-				flushLine();
-				if (event.message.role === "assistant" && event.message.stopReason === "error") {
-					console.log(red(event.message.errorMessage ?? "model error"));
-				}
-				break;
-			}
-			case "tool_execution_start": {
-				if (thinkingOn) {
-					process.stdout.write("\n");
-					thinkingOn = false;
-				}
-				const args = JSON.stringify(event.args ?? {});
-				process.stdout.write("\n" + cyan("⚡ ") + bold(event.toolName) + " " + dim(args.length > 120 ? args.slice(0, 120) + "…" : args) + "\n");
-				break;
-			}
-			case "tool_execution_end": {
-				const mark = event.isError ? red("✗") : green("✓");
-				const preview = (event.result?.content ?? "").replace(/\n/g, " ").slice(0, 100);
-				process.stdout.write(dim(`  ${mark} ${preview}${(event.result?.content ?? "").length > 100 ? "…" : ""}\n`));
-				break;
-			}
-		}
+		if (typing || approvalAnswer) {
+			if (!["message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_end"].includes(event.type)) return;
+			if (event.type === "message_update" && !["text_delta", "thinking_delta"].includes(event.event.type)) return;
+			// Retain deltas only, not a full growing partial message per token.
+			heldEvents.push(event.type === "message_update"
+				? { type: event.type, event: { type: event.event.type, delta: event.event.type === "text_delta" ? event.event.delta : "" } } as AgentEvent
+				: event);
+		} else presentation.event(event);
+	};
+	const releaseTyping = () => {
+		typing = false;
+		for (const event of heldEvents.splice(0)) onEvent(event);
+		resolveTyping?.();
+		resolveTyping = undefined;
+		typingDone = undefined;
 	};
 
 	// --- command handling ------------------------------------------------------
@@ -228,47 +198,69 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	// --- main loop ---------------------------------------------------------------
 	// Line queue over rl.on("line"): works for a TTY and for piped stdin alike
 	// (rl.question races when input is queued faster than the loop turns).
-	let resolveLine: ((line: string) => void) | null = null;
+	interface InputLine { line: string; echoed: boolean }
+	let resolveLine: ((input: InputLine) => void) | null = null;
+	let promptVisible = false;
 	let inputClosed = false;
-	const lineQueue: string[] = [];
+	const lineQueue: InputLine[] = [];
+	// Readline must move to an operator prompt before echoing a steering key.
+	// While the operator types, hold rendering until Enter so token output cannot
+	// split their input. The agent itself keeps running and can be canceled.
+	const onKeypress = (text: string | undefined, key: readline.Key) => {
+		if (!busy || approvalAnswer || typing || !text || key.ctrl || key.meta || ["return", "enter"].includes(key.name ?? "")) return;
+		presentation.pauseForInput();
+		typing = true;
+		typingDone = new Promise(resolve => { resolveTyping = resolve; });
+		rl.setPrompt(presentation.prompt());
+		promptVisible = true;
+		rl.prompt();
+	};
+	if (process.stdin.isTTY && process.stdout.isTTY) process.stdin.prependListener("keypress", onKeypress);
 	rl.on("line", (line) => {
 		if (terminating) return;
+		const input = { line, echoed: promptVisible };
+		promptVisible = false;
 		if (/^\/(stop|quit|exit)\s*$/.test(line.trim()) && busy) {
 			controller?.abort();
 			approvalAnswer?.("");
 			approvalAnswer = undefined;
 			lineQueue.length = 0;
-			lineQueue.push(line.trim());
+			lineQueue.push({ ...input, line: line.trim() });
+			releaseTyping();
 			return;
 		}
 		if (approvalAnswer) {
 			const answer = approvalAnswer;
 			approvalAnswer = undefined;
 			answer(line);
+			releaseTyping();
 			return;
 		}
-		if (busy && !controller?.signal.aborted && line.trim() && !line.startsWith("/")) {
+		if (busy && !runFinished && !controller?.signal.aborted && line.trim() && !line.startsWith("/")) {
+			presentation.operator(line, input.echoed, true);
 			runner.steer({ role: "user", content: line, timestamp: Date.now() });
-			console.log(gray("(queued — I'll fold that in after the current step)"));
+			releaseTyping();
 			return;
 		}
 		if (busy && /^\/(quit|exit)\s*$/.test(line)) controller?.abort();
 		if (resolveLine) {
 			const r = resolveLine;
 			resolveLine = null;
-			r(line);
+			r(input);
 		} else {
-			lineQueue.push(line);
+			lineQueue.push(input);
 		}
+		releaseTyping();
 	});
 	rl.on("close", () => {
 		inputClosed = true;
 		approvalAnswer?.("");
 		approvalAnswer = undefined;
+		releaseTyping();
 		if (resolveLine) {
 			const r = resolveLine;
 			resolveLine = null;
-			r("");
+			r({ line: "", echoed: false });
 		}
 	});
 
@@ -276,8 +268,20 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	rl.on("SIGINT", () => {
 		if (busy) {
 			controller?.abort();
+			if (process.stdin.isTTY && process.stdout.isTTY && !rl.closed && (typing || approvalAnswer || rl.line.length)) {
+				// A new prompt alone hides, but does not discard, a canceled draft.
+				rl.write(null, { ctrl: true, name: "a" });
+				rl.write(null, { ctrl: true, name: "k" });
+				// TERM=dumb ignores editing keys. Reset both documented properties
+				// as well so the hidden buffer cannot survive cancellation there.
+				rl.line = "";
+				rl.cursor = 0;
+				process.stdout.write("\n");
+			}
+			promptVisible = false;
 			approvalAnswer?.("");
 			approvalAnswer = undefined;
+			releaseTyping();
 		} else rl.close();
 	});
 	// Closing a tmux pane sends SIGHUP. Await the active run's cancellation so
@@ -298,8 +302,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	let approvalTail = Promise.resolve(false);
 	runner.askFallback = (name, args) => {
 		const pending = approvalTail.then(async () => {
+			// Do not consume an operator's half-typed steering request as approval.
+			if (typingDone) await typingDone;
 			if (!process.stdin.isTTY || inputClosed || controller?.signal.aborted) return false;
 			const s = JSON.stringify(args);
+			presentation.flush();
 			process.stdout.write(`\n\u26a1 approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} \u2014 [y/N] `);
 			const line = await new Promise<string>((resolve) => { approvalAnswer = resolve; });
 			return /^y(es)?$/i.test(line.trim());
@@ -309,12 +316,16 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	};
 
 	/** Next line; null means input is gone (EOF/Ctrl-D) and the queue is empty. */
-	const ask = (): Promise<string | null> => {
+	const ask = (): Promise<InputLine | null> => {
 		if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift()!);
 		if (inputClosed) return Promise.resolve(null);
 		return new Promise((resolve) => {
 			resolveLine = (line) => resolve(line);
-			if (!rl.closed && process.stdout.isTTY) rl.prompt();
+			if (!rl.closed && process.stdin.isTTY && process.stdout.isTTY) {
+				rl.setPrompt(presentation.prompt());
+				promptVisible = true;
+				rl.prompt();
+			}
 		});
 	};
 
@@ -325,8 +336,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
 	try { while (!terminating) {
 		proposalAlert();
-		let line = await ask();
-		if (line === null) break;
+		const input = await ask();
+		if (input === null) break;
+		let line = input.line;
 		if (!line) continue;
 
 		if (/^\/skill(?:\s|$)/.test(line)) {
@@ -347,27 +359,36 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			continue;
 		}
 
+		presentation.operator(input.line, input.echoed);
+		presentation.startRun();
 		const userMsg: AgentMessage = { role: "user", content: line, timestamp: Date.now() };
 
 		try {
 			const started = Date.now();
 			busy = true;
+			runFinished = false;
 			controller = new AbortController();
 			await runner.run(userMsg, { signal: controller.signal, onEvent });
+			runFinished = true;
+			if (typingDone) await typingDone;
 			if (terminating) continue;
+			presentation.finish(undefined, controller.signal.aborted);
 			if (process.stdout.isTTY) process.stdout.write("\n");
 			const secs = ((Date.now() - started) / 1000).toFixed(1);
 			const usage = runner.context.messages[runner.context.messages.length - 1];
 			const tokens = (usage as any)?.usage?.output;
 			console.log(gray(`${secs}s${tokens ? ` · ${tokens} out-tokens` : ""}`));
 		} catch (err) {
-			if (!terminating) console.log(red(`something broke: ${(err as Error).message}`));
+			runFinished = true;
+			if (typingDone) await typingDone;
+			if (!terminating) presentation.finish((err as Error).message, controller?.signal.aborted);
 		} finally {
 			busy = false;
 			controller = undefined;
-			flushLine();
+			presentation.flush();
 		}
 	} } finally {
+		process.stdin.off("keypress", onKeypress);
 		for (const [signal, handler] of signals) process.off(signal, handler);
 		if (!rl.closed) rl.close();
 	}

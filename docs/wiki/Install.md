@@ -17,7 +17,15 @@ curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh \
 rein --version
 ```
 
-`--skip-setup` skips onboarding and connection checks. Existing configuration and sessions remain in `~/.rein`, or your custom `REIN_HOME`.
+On a local macOS desktop, this also installs the separate official NodeTerm app
+if missing. Existing apps are preserved. When NodeTerm is closed, Rein registers
+itself as its default agent. If it is already running, close it when convenient
+and run `rein desktop install --no-launch` to finish registration.
+
+`--skip-setup` skips onboarding, connection checks, and app launch. Add
+`--terminal-only` to skip the native app and keep Rein in your current terminal.
+Other platforms, remote shells, and CI retain terminal installation.
+ Existing configuration and sessions remain in `~/.rein`, or your custom `REIN_HOME`.
 
 For native Windows, install with npm and rerun the same command to update:
 
@@ -47,7 +55,17 @@ rein --no-tools -p "Reply with the single word: ok"
 
 HTTP connections should report `connection: passed`, followed by a short model reply. Subscription connections report the official CLI's authentication status; the model request checks that the connection works.
 
-Move into the project you want Rein to work on and run `rein`. Install tmux if you want the chat and activity view with `rein --visual`. Ordinary chat does not require tmux.
+Bare `rein` opens an installed NodeTerm on a local macOS desktop. Choose a project
+and add a Rein agent node; NodeTerm has no external API to launch that session
+for you. In a terminal node, run `rein --terminal`. Commands with session options
+stay in the terminal where you entered them. To always stay there, run
+`rein desktop use terminal`.
+
+Interactive chat has numbered OPERATOR and REIN labels with distinct colors.
+Local NodeTerm sessions open the detailed activity view automatically, using a
+browser when the native node cannot embed it. `--no-browser` disables that opening.
+Install tmux for the explicit split view, `rein --visual`. Ordinary chat does not
+require tmux.
 
 ## Update
 

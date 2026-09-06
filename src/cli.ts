@@ -69,6 +69,10 @@ Usage:
   rein web search <query>        search DuckDuckGo through Obscura (--json optional)
   rein web fetch <url>           render a page to markdown (--max-chars 20000)
   rein update                   curl the latest installer and update the installed build
+  rein desktop install          install NodeTerm and register Rein as its default agent
+  rein desktop open|status      open or inspect the native desktop surface
+  rein desktop use terminal     keep future bare rein sessions in the current terminal
+  rein --terminal               stay in this terminal for this session
   rein --visual                 split the terminal into chat and live activity (tmux)
   rein watch <activity-id>       inspect activity; press c for the node canvas
   rein canvas <activity-id>      open the local interactive node canvas
@@ -131,7 +135,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -200,6 +204,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		const { runUpdate } = await import("./harness/update.ts");
 		process.exitCode = await runUpdate();
 		return;
+	}
+	if (_[0] === "desktop") {
+		const { desktopCommand } = await import("./harness/desktop/cli.ts");
+		await desktopCommand(_.slice(1), flags); return;
 	}
 
 	if (flags.tools !== undefined && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
@@ -415,10 +423,30 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	}
 
 	// Default: interactive REPL
+	const { desktopAvailable, nativeApp, openNodeTerm, preferredSurface, shouldOpenDesktop, remoteDesktopSession } = await import("./harness/desktop/surface.ts");
+	if (shouldOpenDesktop({ interactive: !!(process.stdin.isTTY && process.stdout.isTTY), insideNodeTerm: !!process.env.NODETERM_NODE_ID,
+		terminal: flags.terminal === true, visual: typeof flags.visual === "boolean" ? flags.visual : undefined, activity: common.activityId,
+		hasSessionOptions: argv.length > 0, available: desktopAvailable() && !!nativeApp(), preference: preferredSurface() })) {
+		try {
+			await openNodeTerm();
+			console.log(`NodeTerm is open. Choose a project and add a Rein agent node.\nTo use this directory (${common.cwd}) in an existing NodeTerm terminal, run rein --terminal there.\nUse rein --terminal here to stay in this terminal.`);
+			return;
+		} catch (error) { console.error(`Could not open NodeTerm: ${(error as Error).message}. Continuing in this terminal.`); }
+	}
+	const desktopActivity = !!(process.env.NODETERM_NODE_ID && process.stdin.isTTY && process.stdout.isTTY &&
+		!remoteDesktopSession() && !process.env.CI && flags["no-browser"] !== true && flags.visual !== false && !common.activityId);
+	if (desktopActivity) { const { newActivityId } = await import("./harness/activity/store.ts"); common.activityId = newActivityId(); }
 	const { createRunner } = await import("./harness/runner.ts");
 	const { startRepl } = await import("./harness/repl.ts");
 	const runner = await createRunner({ ...common, tools: flags["no-tools"] === true ? [] : undefined, askTools: common.askTools });
-	await startRepl({ runner, resumeSessionId: typeof flags.resume === "string" ? flags.resume : undefined });
+	let canvas: { close(): Promise<void> } | undefined;
+	try {
+		if (desktopActivity) {
+			try { const { openDesktopActivity } = await import("./harness/desktop/activity.ts"); canvas = await openDesktopActivity(common.activityId!); }
+			catch (error) { console.error(`Activity view unavailable: ${(error as Error).message}. Chat remains available.`); }
+		}
+		await startRepl({ runner, resumeSessionId: typeof flags.resume === "string" ? flags.resume : undefined });
+	} finally { await canvas?.close(); }
 }
 
 // (main is invoked by bin/rein.js; the export keeps it testable)

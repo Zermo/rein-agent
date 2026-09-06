@@ -10,6 +10,8 @@
 # Options (after `bash -s --`):
 #   --skip-setup    install only; skip the wizard and connection checks
 #   --yes           non-interactive wizard (first local server / existing config)
+#   --terminal-only skip the native app; keep Rein in your current terminal
+#   --no-launch     install/configure the desktop app without opening it
 #   --branch NAME   clone a different branch (default: main)
 #
 # Env:
@@ -24,11 +26,15 @@ REPO_DIR="$REIN_HOME/repo"
 BRANCH="main"
 RUN_SETUP=true
 ASSUME_YES=false
+RUN_DESKTOP=true
+LAUNCH_DESKTOP=true
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --skip-setup) RUN_SETUP=false ;;
         --yes) ASSUME_YES=true ;;
+        --terminal-only) RUN_DESKTOP=false ;;
+        --no-launch) LAUNCH_DESKTOP=false ;;
         --branch)
             [ $# -ge 2 ] && [ -n "$2" ] || { echo "--branch requires a name" >&2; exit 2; }
             shift; BRANCH="$1" ;;
@@ -110,6 +116,15 @@ fi
 ok "$VERSION"
 echo ""
 
+# The separate official app is optional on servers/CI and preserved when installed.
+# Use the just-installed bundle, not a potentially stale global executable.
+if [ "$RUN_DESKTOP" = true ]; then
+    node "$REPO_DIR/dist/rein.js" desktop install --if-supported --no-launch ||
+        fail "Rein CLI installed, but NodeTerm setup failed. Retry: rein desktop install; or choose --terminal-only."
+else
+    node "$REPO_DIR/dist/rein.js" desktop use terminal
+fi
+
 # ---- onboarding -------------------------------------------------------------
 CONFIG="$REIN_HOME/config.json"
 if [ "$RUN_SETUP" = false ]; then
@@ -137,3 +152,7 @@ echo "    rein -p \"hello, what model are you?\"   # one-shot"
 echo "    rein                                     # interactive session"
 echo "    rein models                              # what rein can see"
 echo "    rein setup --status                      # re-check config + connection"
+if [ "$RUN_DESKTOP" = true ] && [ "$LAUNCH_DESKTOP" = true ] && [ "$RUN_SETUP" = true ] &&
+   [ -t 1 ] && [ "$(uname -s)" = "Darwin" ] && [ -z "${CI:-}${SSH_CONNECTION:-}${SSH_TTY:-}" ]; then
+    node "$REPO_DIR/dist/rein.js" desktop open
+fi
