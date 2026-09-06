@@ -1,8 +1,10 @@
 rein-klaʊd
 Copyright 2026 Zermo contributors.
 
-This app and its droplet artwork were written for Rein. No third-party source
-files, icons, or binary assets were copied or adapted into the app source.
+This app uses Rein's original R/horse mark in the renderer and tray, plus an
+original field-guide computer illustration for the native window and Dock. No
+third-party source files, icons, or binary assets were copied or adapted into
+the app source.
 
 React and React DOM are used under the MIT license. Electron is used under the
 MIT license and includes Chromium and Node.js with their respective notices.

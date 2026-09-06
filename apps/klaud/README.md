@@ -6,6 +6,13 @@ This Electron app connects to `rein serve`. The server runs the agent loop and
 stores bot conversations. The React window displays that state and asks before
 approving an action. Node 22.18+ is required to install and build the Electron app.
 
+The window uses the same retro field guide design as Rein's setup guide and the
+canonical R-horse mark. Light mode uses cream paper with charcoal ink. Night
+mode reverses that contrast for low-light work. Vintage-computer interface
+sounds are on by default, unlock after the first interaction, and can be
+disabled in Settings. The sound choice stays on this device. The renderer
+synthesizes each tone without audio files or an added dependency.
+
 From this directory:
 
 ```sh
@@ -67,7 +74,10 @@ Saved conversations load in bounded pages; use **Load earlier messages** to read
 older turns. Large individual messages show a shortened preview, with the full
 record retained in Rein's session history.
 
-The droplet SVG and tray bitmap are original artwork. See `NOTICE` for dependency
-licenses. Packaging an installable `.app` is outside this first version; the bundle
-id is recorded in package metadata and used for application identity where the
+The app uses the Rein field-guide computer icon for its window and Dock, plus
+dedicated R-horse tray icons for ready and working states. macOS receives native
+template images; Windows and Linux receive outlined field-guide colors that stay
+legible on light and dark panels. See `NOTICE` for dependency licenses.
+Packaging an installable `.app` is outside this first version; the bundle id is
+recorded in package metadata and used for application identity where the
 platform supports it.

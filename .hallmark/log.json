@@ -1,0 +1,12 @@
+[
+  {
+    "date": "2026-09-06",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "light paper and night inverse / display-condensed / warm rust",
+    "vibe": "industrial field manual, vintage computer",
+    "enrichment": "supplied Rein field-guide card",
+    "brief": "Reskin rein-klaud with the established Rein field-guide identity and quiet vintage computer sound cues"
+  }
+]

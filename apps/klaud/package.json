@@ -22,5 +22,5 @@
     "electron": "44.2.0",
     "esbuild": "0.28.2"
   },
-  "build": { "appId": "org.zermo.rein-klaud", "productName": "rein-klaʊd" }
+  "build": { "appId": "org.zermo.rein-klaud", "productName": "rein-klaʊd", "icon": "icon.png" }
 }

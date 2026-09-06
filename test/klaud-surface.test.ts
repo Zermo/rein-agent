@@ -32,17 +32,24 @@ test("missing klaud installation gives manual npm instructions without starting 
 
 test("klaud child gets credentials only through env and closes its owned backend on exit", async () => {
 	const root = appFixture(), signals = new EventEmitter(), output: string[] = [];
-	let closes = 0, started = false;
+	let closes = 0, started = false, calls = 0;
 	try {
 		await launchKlaud({ appDir: root, signals, log: message => output.push(message),
 			start: async () => { started = true; return { url: "http://127.0.0.1:49152", token: "fixture-secret", close: async () => { closes++; } }; },
 			spawn: ((command, args, options) => {
-				assert.equal(started, true); assert.equal(closes, 0);
-				assert.match(command, /node_modules[/\\]\.bin[/\\]electron/);
-				assert.deepEqual(args, [root]);
-				assert.equal(options.env.REIN_KLAUD_URL, "http://127.0.0.1:49152");
-				assert.equal(options.env.REIN_KLAUD_TOKEN, "fixture-secret");
-				assert.equal(options.env.REIN_SURFACE, "klaud");
+				calls++;
+				if (calls === 1) {
+					assert.equal(started, false); assert.match(command, /^npm(?:\.cmd)?$/);
+					assert.deepEqual(args, ["--prefix", root, "run", "build"]);
+					assert.equal(options.env.REIN_KLAUD_TOKEN, undefined);
+				} else {
+					assert.equal(started, true); assert.equal(closes, 0);
+					assert.match(command, /node_modules[/\\]\.bin[/\\]electron/);
+					assert.deepEqual(args, [root]);
+					assert.equal(options.env.REIN_KLAUD_URL, "http://127.0.0.1:49152");
+					assert.equal(options.env.REIN_KLAUD_TOKEN, "fixture-secret");
+					assert.equal(options.env.REIN_SURFACE, "klaud");
+				}
 				assert.equal(options.env.ELECTRON_RUN_AS_NODE, undefined);
 				assert.equal(options.shell, false); assert.equal(options.stdio, "inherit");
 				const child = new EventEmitter();
@@ -58,10 +65,15 @@ test("klaud spawn failures close the owned backend and remove signal listeners",
 	const root = appFixture(), signals = new EventEmitter();
 	try {
 		for (const synchronous of [false, true]) {
-			let closes = 0;
+			let closes = 0, calls = 0;
 			await assert.rejects(launchKlaud({ appDir: root, signals,
 				start: async () => ({ url: "http://127.0.0.1:49152", token: "fixture", close: async () => { closes++; } }),
 				spawn: (() => {
+					if (++calls === 1) {
+						const child = new EventEmitter();
+						queueMicrotask(() => child.emit("close", 0));
+						return child as ChildProcess;
+					}
 					if (synchronous) throw new Error("fixture launch failed");
 					const child = new EventEmitter();
 					queueMicrotask(() => child.emit("error", new Error("fixture launch failed")));
@@ -76,10 +88,15 @@ test("CLI cancellation closes serve promptly, terminates Electron, and preserves
 	const root = appFixture(), previousExitCode = process.exitCode;
 	try {
 		for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
-			const signals = new EventEmitter(); let closes = 0;
+			const signals = new EventEmitter(); let closes = 0, calls = 0;
 			await launchKlaud({ appDir: root, signals,
 				start: async () => ({ url: "http://127.0.0.1:49152", token: "fixture", close: async () => { closes++; } }),
 				spawn: (() => {
+					if (++calls === 1) {
+						const child = new EventEmitter();
+						queueMicrotask(() => child.emit("close", 0));
+						return child as ChildProcess;
+					}
 					const child = new EventEmitter() as ChildProcess;
 					child.kill = (sent) => {
 						assert.ok(sent === "SIGTERM" || sent === "SIGKILL"); assert.equal(closes, 1);
@@ -95,8 +112,8 @@ test("CLI cancellation closes serve promptly, terminates Electron, and preserves
 	} finally { process.exitCode = previousExitCode; rmSync(root, { recursive: true, force: true }); }
 });
 
-test("an installed unbuilt app builds its renderer before starting serve; build failure starts no backend", async () => {
-	const root = appFixture(false), previousExitCode = process.exitCode;
+test("every klaud launch builds its current renderer before starting serve; build failure starts no backend", async () => {
+	const root = appFixture(), previousExitCode = process.exitCode;
 	try {
 		for (const buildCode of [0, 1]) {
 			let starts = 0, closes = 0, calls = 0;

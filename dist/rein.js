@@ -9114,12 +9114,10 @@ async function launchKlaud(deps = {}) {
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.REIN_KLAUD_URL;
   delete env.REIN_KLAUD_TOKEN;
-  if (!existsSync15(join27(appDir, "dist", "index.html"))) {
-    const code = await runDesktopChild(process.platform === "win32" ? "npm.cmd" : "npm", ["--prefix", appDir, "run", "build"], appDir, env, deps);
-    if (code !== 0) {
-      process.exitCode = code;
-      return;
-    }
+  const buildCode = await runDesktopChild(process.platform === "win32" ? "npm.cmd" : "npm", ["--prefix", appDir, "run", "build"], appDir, env, deps);
+  if (buildCode !== 0) {
+    process.exitCode = buildCode;
+    return;
   }
   const start = deps.start ?? (await Promise.resolve().then(() => (init_serve(), serve_exports))).startKlaudServe;
   const handle = await start();

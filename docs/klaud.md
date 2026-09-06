@@ -5,6 +5,13 @@ tools, and Posthorse sessions as the terminal. Each named bot keeps its own
 conversation. Reopening one shows its saved transcript while the runner loads
 current workspace context before acting.
 
+The desktop uses the same retro field guide design as Rein's setup guide. Its
+cream paper, charcoal ink, rust, green, mustard, and R-horse mark carry into
+both Light and Night modes. Small vintage-computer interface sounds are on by
+default, unlock after the first interaction, and can be disabled in Settings.
+The preference stays on that device, and the renderer synthesizes the tones
+without audio assets or an added dependency.
+
 From a checkout, install the desktop dependencies once:
 
 ```sh
@@ -12,8 +19,8 @@ npm --prefix apps/klaud ci
 rein klaud
 ```
 
-For source development, use `node bin/rein.js klaud`. The launcher builds the
-renderer when needed and starts a private loopback server. Closing the window
+For source development, use `node bin/rein.js klaud`. The launcher rebuilds the
+renderer from the current checkout and starts a private loopback server. Closing the window
 hides it; Quit stops the owned server. Terminal sessions remain available with
 `rein --terminal`. `rein desktop use klaud|nodeterm|terminal` changes the optional
 desktop preference and preserves the other launch paths.

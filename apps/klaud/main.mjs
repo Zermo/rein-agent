@@ -10,8 +10,11 @@ import { stopChild } from "./lifecycle.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url)), root = resolve(directory, "../..");
 const rendererUrl = pathToFileURL(join(directory, "dist/index.html")).href;
+const appIconPath = join(directory, "icon.png");
+const trayIconPath = busy => join(directory, `tray-${busy ? "working" : "ready"}${process.platform === "darwin" ? "Template" : ""}.png`);
 const environment = process.env.REIN_KLAUD_URL && process.env.REIN_KLAUD_TOKEN ? { mode: "remote", url: process.env.REIN_KLAUD_URL, token: process.env.REIN_KLAUD_TOKEN } : undefined;
 delete process.env.REIN_KLAUD_TOKEN;
+process.title = "rein-klaʊd";
 app.setName("rein-klaʊd");
 app.setAppUserModelId("org.zermo.rein-klaud");
 let window, tray, connection, state, activeRun, ownedServe, starting, sequence = 0, quitting = false, shutdown = false;
@@ -19,25 +22,17 @@ const send = event => { event.sequence = ++sequence; if (window && !window.isDes
 const show = () => { if (window && !window.isDestroyed()) { window.show(); window.focus(); } };
 const safeError = error => String(error?.message || "Request failed.").replaceAll(connection?.token || "\0", "[redacted]").slice(0, 1000);
 
-// Original 22px droplet, painted into a bitmap so the tray does not depend on SVG support.
-function dropIcon(busy = false) {
-  const size = 22, pixels = Buffer.alloc(size * size * 4);
-  for (let y = 2; y < 21; y++) for (let x = 0; x < size; x++) {
-    const halfWidth = y < 12 ? (y - 2) * 0.65 : Math.sqrt(Math.max(0, 49 - (y - 13) ** 2));
-    if (Math.abs(x - 10.5) > halfWidth) continue;
-    const index = (y * size + x) * 4;
-    pixels[index] = busy ? 230 : 30; pixels[index + 1] = busy ? 145 : 30; pixels[index + 2] = 30; pixels[index + 3] = 255;
-  }
-  const icon = nativeImage.createFromBitmap(pixels, { width: size, height: size });
-  icon.setTemplateImage(!busy);
+function trayIcon(busy = false) {
+  const icon = nativeImage.createFromPath(trayIconPath(busy));
+  icon.setTemplateImage(process.platform === "darwin");
   return icon;
 }
 function updateTray() {
   const mode = state?.shell.chrome.tray ?? "normal";
   if (mode === "hidden") { tray?.destroy(); tray = undefined; return; }
   const busy = mode === "normal" && !!activeRun;
-  if (!tray) { tray = new Tray(dropIcon(busy)); tray.on("click", show); }
-  tray.setImage(dropIcon(busy));
+  if (!tray) { tray = new Tray(trayIcon(busy)); tray.on("click", show); }
+  tray.setImage(trayIcon(busy));
   tray.setToolTip(busy ? "rein-klaʊd · Running" : "rein-klaʊd");
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Open rein-klaʊd", click: show },
@@ -261,12 +256,14 @@ else {
   });
   for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => app.quit());
   await app.whenReady();
+  const appIcon = nativeImage.createFromPath(appIconPath);
+  if (process.platform === "darwin" && !appIcon.isEmpty()) app.dock.setIcon(appIcon);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: "rein-klaʊd", submenu: [{ label: "Open rein-klaʊd", click: show }, { type: "separator" }, { role: "quit", label: "Quit rein-klaʊd" }] },
     { role: "editMenu" }, { role: "windowMenu" },
   ]));
   window = new BrowserWindow({
-    width: 1100, height: 780, minWidth: 720, minHeight: 520, title: "rein-klaʊd", backgroundColor: "#151b22",
+    width: 1100, height: 780, minWidth: 720, minHeight: 520, title: "rein-klaʊd", backgroundColor: "#151b22", icon: appIcon,
     webPreferences: { preload: join(directory, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, webviewTag: false },
   });
   window.on("close", event => { if (!quitting) { event.preventDefault(); window.hide(); } });

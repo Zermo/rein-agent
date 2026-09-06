@@ -1,0 +1,9 @@
+{
+  "date": "2026-09-06",
+  "framework": "React 19 renderer in Electron 44",
+  "fonts": "Local system faces only; no bundled web fonts",
+  "palette": "Existing app CSS variables, replaced by the established Rein field-guide palette",
+  "motion": "No motion library; CSS transforms and opacity only",
+  "spacing": "Introduced repository token scale based on four-point increments",
+  "source": "apps/klaud/package.json and apps/klaud/styles.css"
+}

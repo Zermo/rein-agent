@@ -101,10 +101,10 @@ export async function launchKlaud(deps: KlaudLaunchDependencies = {}): Promise<v
 	}
 	const env: NodeJS.ProcessEnv = { ...process.env, REIN_SURFACE: "klaud", REIN_KLAUD: "1" };
 	delete env.ELECTRON_RUN_AS_NODE; delete env.REIN_KLAUD_URL; delete env.REIN_KLAUD_TOKEN;
-	if (!existsSync(join(appDir, "dist", "index.html"))) {
-		const code = await runDesktopChild(process.platform === "win32" ? "npm.cmd" : "npm", ["--prefix", appDir, "run", "build"], appDir, env, deps);
-		if (code !== 0) { process.exitCode = code; return; }
-	}
+	// Dist is intentionally ignored, so rebuild from the checkout that supplied
+	// this CLI. An update can never keep opening an older renderer by accident.
+	const buildCode = await runDesktopChild(process.platform === "win32" ? "npm.cmd" : "npm", ["--prefix", appDir, "run", "build"], appDir, env, deps);
+	if (buildCode !== 0) { process.exitCode = buildCode; return; }
 	const start = deps.start ?? (await import("../klaud/serve.ts")).startKlaudServe;
 	const handle = await start();
 	let closing: Promise<void> | undefined;

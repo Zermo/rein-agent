@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { applyDelta, applyShellPatch, validateMessages, validateState } from "./model.mjs";
+import { createSoundEngine, readSoundEnabled } from "./sounds.mjs";
 
 const api = window.klaud;
 const errorText = error => String(error?.message || "Something went wrong.").replace(/^Error invoking remote method '[^']+': Error: /, "");
@@ -12,12 +13,15 @@ function App() {
   const [chats, setChats] = useState({}), [message, setMessage] = useState(""), [botName, setBotName] = useState("");
   const [busy, setBusy] = useState(false), [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
+  const [soundEnabled, setSoundEnabled] = useState(() => readSoundEnabled());
   const stateRef = useRef(null), runBot = useRef(null), selectedRef = useRef(""), processed = useRef(new Set()), transcript = useRef(null);
   const pendingLoads = useRef(new Map());
   const [historyBefore, setHistoryBefore] = useState({}), [loadingHistory, setLoadingHistory] = useState(false);
   const lastSequence = useRef(0);
   const prependedHistory = useRef(false);
   const recovering = useRef(false);
+  const sound = useRef(null);
+  const soundedReplies = useRef(new Set());
   function adopt(value) {
     const next = validateState(value);
     stateRef.current = next; setState(next);
@@ -101,23 +105,67 @@ function App() {
           try { adopt(applyDelta(stateRef.current, event.delta)); } catch { await refresh(); }
           break;
         case "TEXT_MESSAGE_START":
-          updateMessage(event.messageId, existing => existing || { id: event.messageId, role: "assistant", content: "" }); break;
+          updateMessage(event.messageId, existing => existing || { id: event.messageId, role: "assistant", content: "" });
+          if (!replay && !soundedReplies.current.has(event.messageId)) {
+            soundedReplies.current.add(event.messageId); sound.current?.play("reply");
+          }
+          break;
         case "TEXT_MESSAGE_CONTENT":
           if (typeof event.delta !== "string") throw new Error("Invalid transcript event.");
-          updateMessage(event.messageId, existing => ({ id: event.messageId, role: "assistant", content: (existing?.content || "") + event.delta })); break;
+          updateMessage(event.messageId, existing => ({ id: event.messageId, role: "assistant", content: (existing?.content || "") + event.delta }));
+          if (!replay && !soundedReplies.current.has(event.messageId)) {
+            soundedReplies.current.add(event.messageId); sound.current?.play("reply");
+          }
+          break;
         case "TOOL_CALL_START":
-          updateMessage(`tool-${event.toolCallId}`, () => ({ id: `tool-${event.toolCallId}`, role: "tool", content: `Calling ${event.toolCallName}…` })); break;
+          updateMessage(`tool-${event.toolCallId}`, () => ({ id: `tool-${event.toolCallId}`, role: "tool", content: `Calling ${event.toolCallName}…` }));
+          if (!replay) sound.current?.play("tool");
+          break;
         case "TOOL_CALL_RESULT":
           updateMessage(`tool-${event.toolCallId}`, () => ({ id: `tool-${event.toolCallId}`, role: "tool", content: String(event.content) })); break;
         case "CUSTOM":
           if (["klaud.frontend_tool", "klaud.approval"].includes(event.name)) await frontend(event); break;
         case "RUN_ERROR": setError(String(event.message || "Run failed.")); break;
         case "RUN_SETTLED":
-          runBot.current = null; setBusy(false); processed.current.clear(); recovering.current = false; setNotice(""); await loadMessages(event.botId); break;
+          runBot.current = null; setBusy(false); processed.current.clear(); recovering.current = false; setNotice("");
+          if (!replay) sound.current?.play("ready");
+          await loadMessages(event.botId); break;
         case "CONNECTION_ERROR": setConnection(null); setError(String(event.message)); runBot.current = null; setBusy(false); recovering.current = false; setNotice(""); break;
       }
     } catch (error) { setError(errorText(error)); }
   }
+  useEffect(() => {
+    const engine = createSoundEngine({ enabled: soundEnabled });
+    sound.current = engine;
+    const controlFor = target => target instanceof Element ? target.closest("button, input, select, textarea, summary, [data-sound-control]") : null;
+    const usable = control => control && !control.matches(":disabled, [aria-disabled='true']");
+    const hover = event => {
+      const control = controlFor(event.target);
+      if (!usable(control) || control.contains(event.relatedTarget) || !matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+      engine.play("hover");
+    };
+    const pointer = event => {
+      const control = controlFor(event.target);
+      if (usable(control)) void engine.playFromEvent("click", event);
+    };
+    const key = event => {
+      const control = controlFor(event.target);
+      if (!usable(control) || event.repeat || ["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(event.key)) return;
+      void engine.unlock(event).then(unlocked => {
+        if (unlocked) engine.play(control.matches("input:not([type='radio']):not([type='checkbox']), textarea") ? "key" : "click");
+      });
+    };
+    document.addEventListener("pointerover", hover);
+    document.addEventListener("pointerdown", pointer);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("pointerover", hover);
+      document.removeEventListener("pointerdown", pointer);
+      document.removeEventListener("keydown", key);
+      sound.current = null;
+      void engine.destroy();
+    };
+  }, []);
   useEffect(() => {
     let initializing = true;
     const queued = [];
@@ -149,12 +197,12 @@ function App() {
   useEffect(() => {
     if (!state) return;
     const root = document.documentElement, shell = state.shell;
-    root.style.setProperty("--klaud-accent", { rain: "#7eb8db", slate: "#a7b7c4", storm: "#bdabef" }[shell.theme.accent]);
-    root.style.setProperty("--klaud-density", { compact: "8px", regular: "14px", roomy: "22px" }[shell.theme.density]);
-    root.style.setProperty("--klaud-tray", shell.chrome.tray);
+    root.dataset.accent = shell.theme.accent;
+    root.dataset.density = shell.theme.density;
     root.dataset.dark = String(shell.theme.dark);
     root.dataset.tray = shell.chrome.tray;
   }, [state]);
+  useEffect(() => { if (error) sound.current?.play("error"); }, [error]);
   useEffect(() => {
     if (prependedHistory.current) { prependedHistory.current = false; return; }
     transcript.current?.scrollTo({ top: transcript.current.scrollHeight });
@@ -166,6 +214,7 @@ function App() {
       recovering.current = false; setNotice("");
       setToken(""); setConnection(status.url); adopt(status.state);
       await loadMessages(selectedRef.current);
+      sound.current?.play("ready");
     } catch (error) { setError(errorText(error)); }
     finally { setConnecting(false); }
   }
@@ -179,6 +228,8 @@ function App() {
     event.preventDefault();
     const bot = stateRef.current.bots.find(item => item.id === selectedRef.current), text = message.trim();
     if (!bot || !text || busy) return;
+    soundedReplies.current.clear();
+    void sound.current?.playFromEvent("send", event.nativeEvent);
     setError(""); setBusy(true); setMessage(""); runBot.current = bot.id; recovering.current = false; setNotice("");
     const id = crypto.randomUUID();
     updateMessage(id, () => ({ id, role: "user", content: text }));
@@ -190,38 +241,95 @@ function App() {
     try { adopt(await api.request("patchShell", { patch: [{ op: "replace", path, value }] })); }
     catch (error) { setError(errorText(error)); } finally { setSaving(false); }
   }
+  async function toggleSound(event) {
+    const engine = sound.current, next = !soundEnabled;
+    if (!engine) return;
+    engine.setEnabled(next);
+    setSoundEnabled(next);
+    if (next) await engine.playFromEvent("ready", event.nativeEvent);
+  }
   const bot = state?.bots.find(item => item.id === selected);
   const botList = <>
-    <h2>Bots</h2>
-    <div className="bot-list">{state?.bots.map(item => <button className={selected === item.id ? "bot active" : "bot"} key={item.id} onClick={() => { void chooseBot(item.id).catch(error => setError(errorText(error))); }}><span>{item.name}</span>{runBot.current === item.id && <span className="running-dot" aria-label="Running"/>}</button>)}</div>
-    {!state?.bots.length && <p className="muted">I’ll keep each bot’s conversation here.</p>}
-    <form className="new-bot" onSubmit={createBot}><label htmlFor={view === "bots" ? "bot-name-page" : "bot-name-sidebar"}>New bot</label><div className="input-row"><input id={view === "bots" ? "bot-name-page" : "bot-name-sidebar"} value={botName} onChange={event => setBotName(event.target.value)} placeholder="Name" maxLength={64}/><button disabled={saving || !botName.trim()} type="submit">Add</button></div></form>
+    <div className="section-heading">
+      <p className="eyebrow">Agent roster / live</p>
+      <h2>Field units</h2>
+    </div>
+    <div className="bot-list">
+      {state?.bots.map((item, index) => <button className={selected === item.id ? "bot active" : "bot"} aria-pressed={selected === item.id} key={item.id} onClick={() => { void chooseBot(item.id).catch(error => setError(errorText(error))); }}>
+        <span className="bot-number">{String(index + 1).padStart(2, "0")}</span>
+        <span className="bot-name">{item.name}</span>
+        {runBot.current === item.id && <span className="running-dot" aria-label="Running"/>}
+      </button>)}
+    </div>
+    {!state?.bots.length && <p className="muted">Name a field unit to begin its durable conversation.</p>}
+    <form className="new-bot" onSubmit={createBot}>
+      <label htmlFor={view === "bots" ? "bot-name-page" : "bot-name-sidebar"}>Register new unit</label>
+      <div className="input-row"><input id={view === "bots" ? "bot-name-page" : "bot-name-sidebar"} value={botName} onChange={event => setBotName(event.target.value)} placeholder="Agent name" maxLength={64}/><button aria-busy={saving} disabled={saving || !botName.trim()} type="submit">Add</button></div>
+    </form>
   </>;
   return <div className="app">
-    <header><div className="brand"><img src="./icon.svg" alt=""/><span>rein-klaʊd</span></div>{connection && <nav aria-label="Main"><button aria-current={view === "bots" ? "page" : undefined} onClick={() => setView("bots")}>Bots</button><button aria-current={view === "chat" ? "page" : undefined} onClick={() => setView("chat")}>Chat</button><button aria-current={view === "settings" ? "page" : undefined} onClick={() => setView("settings")}>Settings</button></nav>}<span className="connection-label">{connection ? "Local connection" : "Connect"}</span></header>
-    {error && <div className="error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
-    {notice && <div className="notice" role="status">{notice}</div>}
-    {!connection ? <main className="welcome"><div><p className="eyebrow">Your agents, on your machine</p><h1>I’m ready when you are.</h1><p className="muted">Start Rein here, or connect to a server already listening on loopback.</p><form onSubmit={connect}>
-      <fieldset><legend>Connection</legend><label className="choice"><input type="radio" name="mode" value="local" checked={mode === "local"} onChange={() => setMode("local")}/>Start local <code>rein serve</code></label><label className="choice"><input type="radio" name="mode" value="remote" checked={mode === "remote"} onChange={() => setMode("remote")}/>URL + token</label></fieldset>
-      {mode === "remote" && <><label htmlFor="server-url">Server URL</label><input id="server-url" type="url" required value={url} onChange={event => setUrl(event.target.value)} spellCheck={false}/><label htmlFor="server-token">Bearer token</label><input id="server-token" type="password" required value={token} onChange={event => setToken(event.target.value)} autoComplete="off" spellCheck={false}/></>}
-      <button className="primary" disabled={connecting} type="submit">{connecting ? "Connecting…" : mode === "local" ? "Start local serve" : "Connect"}</button>
-    </form></div></main> : <div className="workspace">
+    <header className="masthead">
+      <div className="brand"><img src="./rein-logo.svg" alt="Rein"/><span className="brand-name">rein-klaʊd</span><span className="edition">Field console / 01</span></div>
+      {connection && <nav aria-label="Main">
+        <button aria-current={view === "bots" ? "page" : undefined} onClick={() => setView("bots")}><span>01</span> Bots</button>
+        <button aria-current={view === "chat" ? "page" : undefined} onClick={() => setView("chat")}><span>02</span> Chat</button>
+        <button aria-current={view === "settings" ? "page" : undefined} onClick={() => setView("settings")}><span>03</span> Settings</button>
+      </nav>}
+      <div className="masthead-tools">
+        <span className="connection-label">{connection ? "Link / local" : "Awaiting link"}</span>
+        <button className="sound-toggle" type="button" aria-pressed={soundEnabled} aria-label={`Sound effects ${soundEnabled ? "on" : "off"}`} onClick={toggleSound}>SFX <span>{soundEnabled ? "ON" : "OFF"}</span></button>
+      </div>
+    </header>
+    {error && <div className="error" role="alert"><span><strong>Signal fault /</strong> {error}</span><button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
+    {notice && <div className="notice" role="status"><strong>Field note /</strong> {notice}</div>}
+    {!connection ? <main className="welcome">
+      <section className="welcome-art" aria-labelledby="welcome-title">
+        <div className="plate-label"><span>Rein field systems</span><span>Plate 01 / Klaʊd</span></div>
+        <img src="./rein-field-guide-card.jpg" width="1280" height="640" alt="Rein field guide artwork showing a computer linked to a local server"/>
+        <p className="plate-caption">A local-first command surface for durable agents.</p>
+      </section>
+      <section className="welcome-copy">
+        <p className="eyebrow">Boot sequence / connection</p>
+        <h1 id="welcome-title">Fresh context.<br/>Same journey.</h1>
+        <p className="lede">Start Rein on this machine or attach this console to a Rein server already listening on loopback.</p>
+        <form className="connect-form" onSubmit={connect}>
+          <fieldset><legend>Choose the link</legend>
+            <label className="choice" data-sound-control><input type="radio" name="mode" value="local" checked={mode === "local"} onChange={() => setMode("local")}/><span><strong>Start local</strong><small>Launch <code>rein serve</code> here</small></span></label>
+            <label className="choice" data-sound-control><input type="radio" name="mode" value="remote" checked={mode === "remote"} onChange={() => setMode("remote")}/><span><strong>Attach</strong><small>Use a loopback URL and token</small></span></label>
+          </fieldset>
+          {mode === "remote" && <div className="remote-fields"><label htmlFor="server-url">Server URL</label><input id="server-url" type="url" required value={url} onChange={event => setUrl(event.target.value)} spellCheck={false}/><label htmlFor="server-token">Bearer token</label><input id="server-token" type="password" required value={token} onChange={event => setToken(event.target.value)} autoComplete="off" spellCheck={false}/></div>}
+          <button className="primary" aria-busy={connecting} disabled={connecting} type="submit">{connecting ? "Linking…" : mode === "local" ? "Start Rein" : "Attach console"}</button>
+        </form>
+      </section>
+    </main> : <div className="workspace">
       {state?.shell.chrome.sidebar && view !== "bots" && <aside>{botList}</aside>}
       <main className={`content ${view}`}>
-        {view === "bots" ? <section className="page">{botList}</section> : view === "settings" ? <section className="page settings"><p className="eyebrow">Shared shell</p><h1>Make room for your work.</h1><p className="muted">I save these settings through Rein. Changes apply as soon as the server accepts them.</p>
-          <label>Accent<select value={state.shell.theme.accent} disabled={saving} onChange={event => patch("/theme/accent", event.target.value)}><option value="rain">Rain</option><option value="slate">Slate</option><option value="storm">Storm</option></select></label>
-          <label>Density<select value={state.shell.theme.density} disabled={saving} onChange={event => patch("/theme/density", event.target.value)}><option value="compact">Compact</option><option value="regular">Regular</option><option value="roomy">Roomy</option></select></label>
-          <label>Tray<select value={state.shell.chrome.tray} disabled={saving} onChange={event => patch("/chrome/tray", event.target.value)}><option value="normal">Normal</option><option value="quiet">Quiet</option><option value="hidden">Hidden</option></select></label>
-          {[["Dark appearance", "/theme/dark", state.shell.theme.dark], ["Show sidebar", "/chrome/sidebar", state.shell.chrome.sidebar], ["Show activity", "/chrome/showActivity", state.shell.chrome.showActivity]].map(([label, path, checked]) => <label className="toggle" key={path}><span>{label}</span><input type="checkbox" checked={checked} disabled={saving} onChange={event => patch(path, event.target.checked)}/></label>)}
-          <p className="muted small">With the tray hidden, click the Dock icon or launch the app again to reopen this window. Quit from the app menu.</p><p className="muted small">Connected to <code>{connection}</code></p>
-        </section> : <>
-          <div className="chat-heading"><div><p className="eyebrow">Conversation</p><h1>{bot?.name || "Choose a bot"}</h1></div>{state?.shell.chrome.showActivity && <span className="activity">{busy ? "Working…" : "Ready"}</span>}</div>
-          <div className="transcript" ref={transcript} aria-label="Conversation" aria-live="polite" aria-relevant="additions text">
-            {historyBefore[selected] != null && <button disabled={busy || loadingHistory} onClick={earlier}>{loadingHistory ? "Loading…" : "Load earlier messages"}</button>}
-            {!bot ? <div className="empty"><h2>Give your first bot a name.</h2><p className="muted">I’ll keep its conversation between visits.</p><button onClick={() => setView("bots")}>Open bots</button></div> : !(chats[selected]?.length) ? <div className="empty"><h2>What are we working on?</h2><p className="muted">Send a message to start this conversation.</p></div> : chats[selected].map(item => <article className={`message ${item.role}`} key={item.id}><p className="role">{item.role === "user" ? "You" : item.role === "tool" ? "Tool" : bot.name}</p><div className="message-text">{item.content || "…"}</div>{item.toolCalls?.map(call => <details key={call.id}><summary>{call.function?.name || "Tool call"}</summary><pre>{call.function?.arguments}</pre></details>)}</article>)}
+        {view === "bots" ? <section className="page bots-page">{botList}</section> : view === "settings" ? <section className="page settings">
+          <div className="page-heading"><p className="eyebrow">Console controls / device</p><h1>Set the working rhythm.</h1><p className="lede">Rein saves shared shell settings through the server. Sound effects stay with this device.</p></div>
+          <div className="setting-list">
+            <label data-sound-control><span><strong>Accent signal</strong><small>Action and active-state color</small></span><select value={state.shell.theme.accent} disabled={saving} onChange={event => patch("/theme/accent", event.target.value)}><option value="rain">Rein rust</option><option value="slate">Field ink</option><option value="storm">Terminal green</option></select></label>
+            <label data-sound-control><span><strong>Information density</strong><small>Space between working rows</small></span><select value={state.shell.theme.density} disabled={saving} onChange={event => patch("/theme/density", event.target.value)}><option value="compact">Compact</option><option value="regular">Regular</option><option value="roomy">Roomy</option></select></label>
+            <label data-sound-control><span><strong>Tray presence</strong><small>How Rein waits in the system tray</small></span><select value={state.shell.chrome.tray} disabled={saving} onChange={event => patch("/chrome/tray", event.target.value)}><option value="normal">Normal</option><option value="quiet">Quiet</option><option value="hidden">Hidden</option></select></label>
+            {[["Night console", "Charcoal field surface", "/theme/dark", state.shell.theme.dark], ["Show agent rail", "Keep field units at the left", "/chrome/sidebar", state.shell.chrome.sidebar], ["Show activity signal", "Display ready and working state", "/chrome/showActivity", state.shell.chrome.showActivity]].map(([label, help, path, checked]) => <label className="toggle" data-sound-control key={path}><span><strong>{label}</strong><small>{help}</small></span><input type="checkbox" checked={checked} disabled={saving} onChange={event => patch(path, event.target.checked)}/></label>)}
+            <label className="toggle" data-sound-control><span><strong>Vintage console sounds</strong><small>Quiet, local relay and CRT cues</small></span><input type="checkbox" checked={soundEnabled} onChange={toggleSound}/></label>
           </div>
-          {state?.approvals.length > 0 && <div className="approvals">{state.approvals.map(item => <div key={item.id}><span>{item.tool} needs a decision</span><button onClick={() => { void api.confirm(item.id).catch(error => setError(errorText(error))); }}>Review</button></div>)}</div>}
-          <form className="composer" onSubmit={submit}><label className="sr-only" htmlFor="message">Message</label><textarea id="message" value={message} onChange={event => setMessage(event.target.value)} placeholder={bot ? `Message ${bot.name}` : "Choose a bot to begin"} disabled={!bot} rows={3} maxLength={128 * 1024} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(event); } }}/><div><span className="muted small">Enter to send · Shift+Enter for a new line</span>{busy ? <button type="button" onClick={() => { void api.cancel().catch(error => setError(errorText(error))); }}>Stop</button> : <button className="primary" type="submit" disabled={!bot || !message.trim()}>Send</button>}</div></form>
+          <div className="service-note"><p>With the tray hidden, click the Dock icon or launch the app again to reopen this window. Quit from the app menu.</p><p>Connected to <code>{connection}</code></p></div>
+        </section> : <>
+          <div className="chat-heading"><div><p className="eyebrow">Conversation ledger / current</p><h1>{bot?.name || "Choose a field unit"}</h1></div><div className="chat-status"><span className="folio">Thread / {bot ? bot.id.slice(-4).toUpperCase() : "----"}</span>{state?.shell.chrome.showActivity && <span className={`activity ${busy ? "working" : "ready"}`} role="status" aria-live="polite">{busy ? "Working" : "Ready"}</span>}</div></div>
+          <div className="transcript" ref={transcript} aria-label="Conversation" aria-live="polite" aria-relevant="additions text">
+            {historyBefore[selected] != null && <button className="history-control" disabled={busy || loadingHistory} onClick={earlier}>{loadingHistory ? "Opening archive…" : "Open earlier ledger"}</button>}
+            {!bot ? <div className="empty"><p className="eyebrow">No active unit</p><h2>Give your first agent a name.</h2><p className="muted">Rein keeps its conversation between visits.</p><button onClick={() => setView("bots")}>Open field units</button></div> : !(chats[selected]?.length) ? <div className="empty"><p className="eyebrow">Ledger clear</p><h2>What are we working on?</h2><p className="muted">Send an instruction to start this durable conversation.</p></div> : chats[selected].map((item, index) => <article className={`message ${item.role}`} key={item.id}>
+              <div className="role"><span>{item.role === "user" ? "Operator input" : item.role === "tool" ? "Tool call / exec" : "Rein / agent reply"}</span><span>{String(index + 1).padStart(3, "0")}</span></div>
+              <div className="message-text">{item.content || "…"}</div>
+              {item.toolCalls?.map(call => <details key={call.id}><summary>{call.function?.name || "Tool call"}</summary><pre>{call.function?.arguments}</pre></details>)}
+            </article>)}
+          </div>
+          {state?.approvals.length > 0 && <div className="approvals">{state.approvals.map(item => <div key={item.id}><span><strong>Operator decision /</strong> {item.tool} needs review</span><button onClick={() => { void api.confirm(item.id).catch(error => setError(errorText(error))); }}>Review</button></div>)}</div>}
+          <form className="composer" onSubmit={submit}>
+            <div className="composer-label"><label htmlFor="message">Operator input</label><span>{bot ? `Routing to ${bot.name}` : "Select a field unit"}</span></div>
+            <textarea id="message" value={message} onChange={event => setMessage(event.target.value)} placeholder={bot ? `Give ${bot.name} an instruction…` : "Choose a field unit to begin"} disabled={!bot} rows={3} maxLength={128 * 1024} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(event); } }}/>
+            <div className="composer-actions"><span className="muted small">Enter / transmit · Shift+Enter / new line</span>{busy ? <button type="button" onClick={() => { void api.cancel().catch(error => setError(errorText(error))); }}>Stop run</button> : <button className="primary" type="submit" disabled={!bot || !message.trim()}>Transmit</button>}</div>
+          </form>
         </>}
       </main>
     </div>}
