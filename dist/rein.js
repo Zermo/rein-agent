@@ -883,6 +883,123 @@ var init_fit = __esm({
   }
 });
 
+// src/harness/update.ts
+var update_exports = {};
+__export(update_exports, {
+  INSTALLER_URL: () => INSTALLER_URL,
+  runUpdate: () => runUpdate
+});
+import { spawn as spawn2 } from "node:child_process";
+import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as join2 } from "node:path";
+function runProgram(command, args, signal, timeoutMs) {
+  signal.throwIfAborted();
+  return new Promise((resolve19, reject) => {
+    const child = spawn2(command, args, { shell: false, detached: true, stdio: "inherit" });
+    let closed = false, settled = false, code = null, error;
+    let escalation;
+    const kill = (value) => {
+      try {
+        if (child.pid) process.kill(-child.pid, value);
+      } catch {
+      }
+    };
+    const finish = () => {
+      if (settled || !closed || escalation) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      if (error) reject(error);
+      else if (code !== 0) reject(new Error(`${command} exited ${code ?? "after a signal"}.`));
+      else resolve19();
+    };
+    const stop = (reason) => {
+      if (error) return;
+      error = reason;
+      kill("SIGTERM");
+      escalation = setTimeout(() => {
+        kill("SIGKILL");
+        escalation = void 0;
+        finish();
+      }, 1e3);
+    };
+    const abort = () => stop(new Error("Update interrupted."));
+    const timer = setTimeout(() => stop(new Error(`${command} timed out.`)), timeoutMs);
+    signal.addEventListener("abort", abort, { once: true });
+    child.on("error", (cause) => {
+      error ??= new Error(cause.code === "ENOENT" ? `${command} is required for rein update. Install it and retry.` : cause.message);
+      closed = true;
+      finish();
+    });
+    child.on("close", (value) => {
+      code = value;
+      closed = true;
+      finish();
+    });
+    if (signal.aborted) abort();
+  });
+}
+async function runUpdate() {
+  if (process.platform === "win32") {
+    console.error("rein update uses the Bash installer. Run it inside WSL, or use: npm install --global git+https://github.com/Zermo/rein-agent.git");
+    return 1;
+  }
+  const controller = new AbortController();
+  let interruptedCode = 130;
+  const cancel = (code) => {
+    if (!controller.signal.aborted) interruptedCode = code;
+    controller.abort();
+  };
+  const signals = [["SIGINT", () => cancel(130)], ["SIGHUP", () => cancel(129)], ["SIGTERM", () => cancel(143)]];
+  for (const [signal, handler] of signals) process.on(signal, handler);
+  let directory;
+  try {
+    directory = await mkdtemp(join2(tmpdir(), "rein-update-"));
+    const installer = join2(directory, "install.sh");
+    console.log(`Downloading the latest Rein installer from ${INSTALLER_URL}`);
+    await runProgram("curl", [
+      "--fail",
+      "--silent",
+      "--show-error",
+      "--location",
+      "--proto",
+      "=https",
+      "--proto-redir",
+      "=https",
+      "--connect-timeout",
+      "15",
+      "--max-time",
+      "120",
+      "--max-filesize",
+      "1048576",
+      "--header",
+      "Cache-Control: no-cache",
+      "--output",
+      installer,
+      INSTALLER_URL
+    ], controller.signal, 13e4);
+    const downloaded = await stat(installer);
+    if (!downloaded.isFile() || downloaded.size === 0 || downloaded.size > 1048576) throw new Error("The installer download is empty or invalid; it was not executed.");
+    await chmod(installer, 384);
+    await runProgram("bash", [installer, "--skip-setup"], controller.signal, 15 * 6e4);
+    console.log("Rein update complete. Restart any running Rein sessions to use the new build.");
+    return 0;
+  } catch (error) {
+    console.error(controller.signal.aborted ? "Update interrupted." : `Update failed: ${error.message}`);
+    return controller.signal.aborted ? interruptedCode : 1;
+  } finally {
+    for (const [signal, handler] of signals) process.off(signal, handler);
+    if (directory) await rm(directory, { recursive: true, force: true });
+  }
+}
+var INSTALLER_URL;
+var init_update = __esm({
+  "src/harness/update.ts"() {
+    INSTALLER_URL = "https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh";
+  }
+});
+
 // vendor/fold/Truncation.ts
 var defaultMaxLines, defaultMaxBytes, encoder, utf8ByteLength, splitLinesForCounting, tailBytes, truncateTail;
 var init_Truncation = __esm({
@@ -968,12 +1085,12 @@ __export(tmux_exports, {
   createTmuxTool: () => createTmuxTool,
   shellQuote: () => shellQuote
 });
-import { execFile as execFile2, spawn as spawn2 } from "node:child_process";
+import { execFile as execFile2, spawn as spawn3 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { resolve, join as join2, delimiter } from "node:path";
+import { resolve, join as join3, delimiter } from "node:path";
 function validateInput(text) {
   if (typeof text !== "string" || text.length > 32e3 || text.includes("\0")) throw new Error("Shell input must be at most 32000 characters and contain no NUL bytes.");
 }
@@ -1037,7 +1154,7 @@ var init_tmux = __esm({
         if (kind !== "shell" && kind !== "visual") throw new Error("Unknown Rein tmux session kind.");
         this.cwd = realpathSync(resolve(cwd));
         this.scope = digest(this.cwd);
-        this.socket = `rein-${kind === "visual" ? "view-" : ""}${digest(resolve(process.env.REIN_HOME || join2(homedir2(), ".rein")))}`;
+        this.socket = `rein-${kind === "visual" ? "view-" : ""}${digest(resolve(process.env.REIN_HOME || join3(homedir2(), ".rein")))}`;
       }
       executable() {
         for (const directory of (process.env.PATH ?? "/usr/bin:/bin").split(delimiter)) {
@@ -1176,7 +1293,7 @@ var init_tmux = __esm({
         await this.owned(id);
         if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Attach requires an interactive terminal. Use capture to inspect from a pipe.");
         return await new Promise((resolveResult, reject) => {
-          const child = spawn2("tmux", ["-L", this.socket, "attach-session", "-t", id], { stdio: "inherit", env: { ...process.env, TMUX: "" } });
+          const child = spawn3("tmux", ["-L", this.socket, "attach-session", "-t", id], { stdio: "inherit", env: { ...process.env, TMUX: "" } });
           child.on("error", reject);
           child.on("close", (code) => resolveResult(code ?? 1));
         });
@@ -1466,10 +1583,10 @@ var init_tui = __esm({
 import { mkdirSync, writeFileSync, renameSync, openSync, readFileSync as readFileSync2, closeSync, fstatSync, constants as constants2, existsSync as existsSync2, unlinkSync } from "node:fs";
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { homedir as homedir3 } from "node:os";
-import { join as join3, resolve as resolve2 } from "node:path";
+import { join as join4, resolve as resolve2 } from "node:path";
 function activityFile(id) {
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) throw new Error("Use the activity ID printed by rein --visual.");
-  return join3(resolve2(process.env.REIN_HOME ?? join3(homedir3(), ".rein")), "activity", `${id}.json`);
+  return join4(resolve2(process.env.REIN_HOME ?? join4(homedir3(), ".rein")), "activity", `${id}.json`);
 }
 function readActivity(id) {
   let fd;
@@ -1480,8 +1597,8 @@ function readActivity(id) {
     throw error;
   }
   try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > 4 * 1024 * 1024) throw new Error("Activity data is not a bounded ordinary file.");
+    const stat2 = fstatSync(fd);
+    if (!stat2.isFile() || stat2.nlink !== 1 || stat2.size > 4 * 1024 * 1024) throw new Error("Activity data is not a bounded ordinary file.");
     const state = JSON.parse(readFileSync2(fd, "utf8"));
     if (state.id !== id || !Array.isArray(state.nodes) || state.nodes.length > 256) throw new Error("Invalid activity data.");
     return state;
@@ -1509,7 +1626,7 @@ var init_store = __esm({
       disabled = false;
       constructor(id, cwd, model) {
         this.file = activityFile(id);
-        mkdirSync(join3(this.file, ".."), { recursive: true, mode: 448 });
+        mkdirSync(join4(this.file, ".."), { recursive: true, mode: 448 });
         this.snapshot = { id, cwd: resolve2(cwd), model, updated: Date.now(), state: "idle", nodes: [], omitted: 0 };
         writeFileSync(this.file, JSON.stringify(this.snapshot), { flag: "wx", mode: 384 });
       }
@@ -1674,10 +1791,10 @@ __export(server_exports, {
 });
 import { createServer as createServer2 } from "node:http";
 import { randomBytes } from "node:crypto";
-import { spawn as spawn3 } from "node:child_process";
+import { spawn as spawn4 } from "node:child_process";
 function openCanvas(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
-  const child = spawn3(command, process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url], { stdio: "ignore", detached: true, shell: false });
+  const child = spawn4(command, process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url], { stdio: "ignore", detached: true, shell: false });
   child.on("error", () => {
   });
   child.unref();
@@ -2887,19 +3004,19 @@ Rules for tool blocks:
 });
 
 // src/ai/cli-provider.ts
-import { spawn as spawn4 } from "node:child_process";
+import { spawn as spawn5 } from "node:child_process";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, mkdtempSync, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { homedir as homedir4, tmpdir } from "node:os";
-import { join as join4 } from "node:path";
+import { homedir as homedir4, tmpdir as tmpdir2 } from "node:os";
+import { join as join5 } from "node:path";
 function cliAuthDirectory(provider, env = process.env) {
-  return join4(env.REIN_HOME || join4(homedir4(), ".rein"), "cli-auth", provider);
+  return join5(env.REIN_HOME || join5(homedir4(), ".rein"), "cli-auth", provider);
 }
 function cliEnvironment(provider, overrides = {}) {
   const env = { ...process.env, ...overrides };
   for (const key of Object.keys(env)) if (key.startsWith("COPILOT_PROVIDER_")) delete env[key];
   for (const key of ["ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "COPILOT_ALLOW_ALL", "NODE_OPTIONS", "BASH_ENV", "ENV"]) delete env[key];
   env[provider === "codex" ? "CODEX_HOME" : "COPILOT_HOME"] = cliAuthDirectory(provider, env);
-  if (provider === "copilot") env.GH_CONFIG_DIR = join4(cliAuthDirectory(provider, env), "gh");
+  if (provider === "copilot") env.GH_CONFIG_DIR = join5(cliAuthDirectory(provider, env), "gh");
   env.GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS = "false";
   env.GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS = "false";
   return env;
@@ -2923,7 +3040,7 @@ function prepareProfile(provider, env) {
   mkdirSync2(directory, { recursive: true, mode: 448 });
   if (provider !== "copilot") return;
   for (const name of ["mcp-config.json", "hooks.json", "hooks", "plugins", "agents", "extensions"]) {
-    const path2 = join4(directory, name);
+    const path2 = join5(directory, name);
     if (existsSync3(path2)) throw new Error(`Rein's isolated Copilot profile contains custom ${name}. Remove that customization from ${directory} or use the native CLI directly.`);
   }
 }
@@ -2941,10 +3058,10 @@ function streamCli(model, context, options = {}) {
       prepareProfile(provider, env);
       const prompt = renderCliPrompt(context);
       if (Buffer.byteLength(prompt) > 8e6) throw new Error(`${provider} CLI prompt exceeds its transport size limit. Start a fresh context window or use an API provider.`);
-      directory = mkdtempSync(join4(tmpdir(), "rein-cli-"));
+      directory = mkdtempSync(join5(tmpdir2(), "rein-cli-"));
       if (provider === "copilot") {
-        mkdirSync2(join4(directory, ".github", "agents"), { recursive: true });
-        writeFileSync2(join4(directory, ".github", "agents", "rein-bridge.agent.md"), "---\nname: rein-bridge\ndescription: Generate the next Rein assistant message without native tools\ntools: []\n---\nUse only the Rein text-tool protocol in the supplied conversation. Never call native tools.\n", { mode: 384 });
+        mkdirSync2(join5(directory, ".github", "agents"), { recursive: true });
+        writeFileSync2(join5(directory, ".github", "agents", "rein-bridge.agent.md"), "---\nname: rein-bridge\ndescription: Generate the next Rein assistant message without native tools\ntools: []\n---\nUse only the Rein text-tool protocol in the supplied conversation. Never call native tools.\n", { mode: 384 });
       }
       const result = await runCliProcess(provider, cliArguments(provider, model.id, prompt), prompt, directory, env, options);
       let text = result;
@@ -2996,7 +3113,7 @@ function streamCli(model, context, options = {}) {
 }
 function runCliProcess(provider, args, input, cwd, env, options) {
   return new Promise((resolve19, reject) => {
-    const child = spawn4(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
+    const child = spawn5(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
     let stdout = "", stderr = "", pendingLine = "", bytes = 0, error, forceKill;
     let closed = false, settled = false, exitCode = null, exitSignal = null;
     const kill = (signal) => {
@@ -3089,7 +3206,7 @@ var init_cli_provider = __esm({
 // src/ai/compat.ts
 import { readFileSync as readFileSync3, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync4 } from "node:fs";
 import { homedir as homedir5 } from "node:os";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 function readStore() {
   try {
     if (existsSync4(storePath())) return JSON.parse(readFileSync3(storePath(), "utf8"));
@@ -3179,18 +3296,18 @@ var init_compat = __esm({
       /openchat[-_]?3\.5/i,
       /starcoder[-_]?1b/i
     ];
-    reinHome = () => process.env.REIN_HOME || join5(homedir5(), ".rein");
-    storePath = () => join5(reinHome(), "capabilities.json");
+    reinHome = () => process.env.REIN_HOME || join6(homedir5(), ".rein");
+    storePath = () => join6(reinHome(), "capabilities.json");
   }
 });
 
 // src/harness/system-prompt.ts
 import { existsSync as existsSync5 } from "node:fs";
 import { readFileSync as readFileSync4 } from "node:fs";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 function readProjectInstructions(cwd) {
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const path2 = join6(cwd, name);
+    const path2 = join7(cwd, name);
     if (existsSync5(path2)) {
       const text = readFileSync4(path2, "utf8").trim();
       if (text) return `Project instructions:
@@ -3200,7 +3317,7 @@ ${text}`;
   return void 0;
 }
 function readLessons(cwd) {
-  const path2 = join6(cwd, "LESSONS.md");
+  const path2 = join7(cwd, "LESSONS.md");
   if (!existsSync5(path2)) return void 0;
   const text = readFileSync4(path2, "utf8").trim();
   if (!text) return void 0;
@@ -3461,11 +3578,11 @@ var init_edit = __esm({
 });
 
 // src/harness/tools/bash.ts
-import { spawn as spawn5 } from "node:child_process";
+import { spawn as spawn6 } from "node:child_process";
 async function runShell(command, cwd, timeout, signal) {
   if (signal?.aborted) return { stdout: "", stderr: "", code: 1, reason: "Operation aborted" };
   return new Promise((resolve19) => {
-    const child = spawn5("bash", ["-c", command], { cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn6("bash", ["-c", command], { cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, code = 1, reason;
     let closed = false, settled = false, killTimer;
     const kill = (value) => {
@@ -3651,7 +3768,7 @@ var init_find = __esm({
 
 // src/harness/tools/ls.ts
 import { readdirSync, statSync as statSync2 } from "node:fs";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 var lsTool, ls_default;
 var init_ls = __esm({
   "src/harness/tools/ls.ts"() {
@@ -3688,12 +3805,12 @@ var init_ls = __esm({
             }
             let isDir = false;
             try {
-              isDir = statSync2(join7(dir, name)).isDirectory();
+              isDir = statSync2(join8(dir, name)).isDirectory();
             } catch {
               isDir = false;
             }
             lines.push(`${prefix}${name}${isDir ? "/" : ""}`);
-            if (isDir && d > 1) walk(join7(dir, name), prefix + "  ", d - 1);
+            if (isDir && d > 1) walk(join8(dir, name), prefix + "  ", d - 1);
           }
         };
         walk(path2, "", depth);
@@ -3707,9 +3824,9 @@ var init_ls = __esm({
 // src/harness/obscura/install.ts
 import { createHash as createHash2 } from "node:crypto";
 import { accessSync as accessSync2, constants as constants3, createReadStream, existsSync as existsSync6, lstatSync, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
-import { chmod, mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod as chmod2, mkdir, mkdtemp as mkdtemp2, open, readFile, rename, rm as rm2, writeFile } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { delimiter as delimiter2, dirname as dirname2, isAbsolute, join as join8, resolve as resolve4 } from "node:path";
+import { delimiter as delimiter2, dirname as dirname2, isAbsolute, join as join9, resolve as resolve4 } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { createGunzip, createInflateRaw } from "node:zlib";
@@ -3719,8 +3836,8 @@ function manifest() {
   if (!path2) throw new Error("Obscura release metadata is missing. Reinstall the complete Rein package.");
   return JSON.parse(readFileSync7(path2, "utf8"));
 }
-function installRoot(home = process.env.REIN_HOME || join8(homedir6(), ".rein"), platform = process.platform, arch = process.arch) {
-  return join8(resolve4(home), "native", "obscura", OBSCURA_VERSION, `${platform}-${arch}`);
+function installRoot(home = process.env.REIN_HOME || join9(homedir6(), ".rein"), platform = process.platform, arch = process.arch) {
+  return join9(resolve4(home), "native", "obscura", OBSCURA_VERSION, `${platform}-${arch}`);
 }
 function executable(path2) {
   try {
@@ -3734,14 +3851,14 @@ function executable(path2) {
 function managedExecutable(directory, asset) {
   try {
     if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) return void 0;
-    const installed = JSON.parse(readFileSync7(join8(directory, "install.json"), "utf8"));
+    const installed = JSON.parse(readFileSync7(join9(directory, "install.json"), "utf8"));
     const members = asset?.members ?? (process.platform === "win32" ? ["obscura.exe", "obscura-worker.exe"] : ["obscura", "obscura-worker"]);
     if (installed.version !== OBSCURA_VERSION || asset && installed.sha256 !== asset.sha256) return void 0;
     for (const member of members) {
-      const path2 = join8(directory, member);
+      const path2 = join9(directory, member);
       if (lstatSync(path2).isSymbolicLink() || !executable(path2)) return void 0;
     }
-    return join8(directory, members[0]);
+    return join9(directory, members[0]);
   } catch {
     return void 0;
   }
@@ -3756,7 +3873,7 @@ function resolveObscura(override) {
   if (managed) return managed;
   const name = process.platform === "win32" ? "obscura.exe" : "obscura";
   for (const directory of (process.env.PATH || "").split(delimiter2)) {
-    if (isAbsolute(directory) && executable(join8(directory, name))) return join8(directory, name);
+    if (isAbsolute(directory) && executable(join9(directory, name))) return join9(directory, name);
   }
   return void 0;
 }
@@ -3875,7 +3992,7 @@ async function extractTar(path2, stage, asset, signal, maxBytes) {
       const size = octal(header.subarray(124, 136));
       if (!size || size > maxBytes) throw new Error("Invalid Obscura executable size.");
       found.add(name);
-      const output = await open(join8(stage, name), "wx", 448);
+      const output = await open(join9(stage, name), "wx", 448);
       try {
         for (let left = size; left > 0; ) {
           checkAbort(signal);
@@ -3924,7 +4041,7 @@ async function extractZip(path2, stage, asset, signal, maxBytes) {
     if (bytes.readUInt16LE(local + 6) !== flags || bytes.readUInt16LE(local + 8) !== method || bytes.subarray(local + 30, local + 30 + localNameLength).toString("utf8") !== name || start + compressed > directoryOffset || spans.some(([a, b]) => local < b && start + compressed > a)) throw new Error("Invalid Obscura ZIP member bounds.");
     spans.push([local, start + compressed]);
     found.add(name);
-    const output = await open(join8(stage, name), "wx", 448);
+    const output = await open(join9(stage, name), "wx", 448);
     let written = 0;
     const source = Readable.from([bytes.subarray(start, start + compressed)]), stream2 = method === 8 ? source.pipe(createInflateRaw()) : source;
     const abort = () => stream2.destroy(signal.reason instanceof Error ? signal.reason : new Error("Obscura installation cancelled."));
@@ -3966,9 +4083,9 @@ async function installObscura(options = {}, dependencies = {}) {
   try {
     checkAbort(controller.signal);
     await mkdir(dirname2(target), { recursive: true, mode: 448 });
-    temporary = await mkdtemp(join8(dirname2(target), ".install-"));
-    await chmod(temporary, 448);
-    const archive = join8(temporary, "archive"), stage = join8(temporary, "runtime");
+    temporary = await mkdtemp2(join9(dirname2(target), ".install-"));
+    await chmod2(temporary, 448);
+    const archive = join9(temporary, "archive"), stage = join9(temporary, "runtime");
     await mkdir(stage, { mode: 448 });
     options.onProgress?.(`Downloading Obscura ${OBSCURA_VERSION} for ${platform}/${arch} (${Math.ceil(asset.bytes / 1024 / 1024)} MiB)\u2026`);
     await download(asset, archive, controller.signal, dependencies.fetch ?? globalThis.fetch, maxArchive);
@@ -3977,7 +4094,7 @@ async function installObscura(options = {}, dependencies = {}) {
     if (asset.format === "tar.gz") await extractTar(archive, stage, asset, controller.signal, maxExtracted);
     else await extractZip(archive, stage, asset, controller.signal, maxExtracted);
     checkAbort(controller.signal);
-    await writeFile(join8(stage, "install.json"), JSON.stringify({ version: OBSCURA_VERSION, commit: release.commit, sha256: asset.sha256, asset: asset.filename }) + "\n", { mode: 384, flag: "wx" });
+    await writeFile(join9(stage, "install.json"), JSON.stringify({ version: OBSCURA_VERSION, commit: release.commit, sha256: asset.sha256, asset: asset.filename }) + "\n", { mode: 384, flag: "wx" });
     checkAbort(controller.signal);
     try {
       await rename(stage, target);
@@ -3986,11 +4103,11 @@ async function installObscura(options = {}, dependencies = {}) {
       if (concurrent) return concurrent;
       throw error;
     }
-    return join8(target, members[0]);
+    return join9(target, members[0]);
   } finally {
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abort);
-    if (temporary) await rm(temporary, { recursive: true, force: true });
+    if (temporary) await rm2(temporary, { recursive: true, force: true });
   }
 }
 async function ensureObscura(options = {}) {
@@ -4009,10 +4126,10 @@ var init_install = __esm({
 });
 
 // src/harness/obscura/runtime.ts
-import { spawn as spawn6 } from "node:child_process";
-import { mkdtemp as mkdtemp2, rm as rm2 } from "node:fs/promises";
-import { tmpdir as tmpdir2 } from "node:os";
-import { join as join9 } from "node:path";
+import { spawn as spawn7 } from "node:child_process";
+import { mkdtemp as mkdtemp3, rm as rm3 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join10 } from "node:path";
 import { stripVTControlCharacters as stripVTControlCharacters2 } from "node:util";
 function webOptions() {
   const config = loadConfig().obscura;
@@ -4045,7 +4162,7 @@ async function evaluatePage(url, expression, signal, onProgress) {
   const options = webOptions();
   const executable2 = await ensureObscura({ bin: options.bin, signal, onProgress });
   signal?.throwIfAborted();
-  const directory = await mkdtemp2(join9(tmpdir2(), "rein-obscura-page-"));
+  const directory = await mkdtemp3(join10(tmpdir3(), "rein-obscura-page-"));
   try {
     signal?.throwIfAborted();
     onProgress?.(`Obscura: reading ${url.hostname}`);
@@ -4057,7 +4174,7 @@ async function evaluatePage(url, expression, signal, onProgress) {
       throw new Error("Obscura returned invalid extraction data. Update the configured binary or run rein web install.");
     }
   } finally {
-    await rm2(directory, { recursive: true, force: true });
+    await rm3(directory, { recursive: true, force: true });
   }
 }
 function browserEnvironment() {
@@ -4066,7 +4183,7 @@ function browserEnvironment() {
 }
 function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
   return new Promise((resolve19, reject) => {
-    const child = spawn6(executable2, args, { cwd, env: browserEnvironment(), detached: process.platform !== "win32", shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn7(executable2, args, { cwd, env: browserEnvironment(), detached: process.platform !== "win32", shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, closed = false, settled = false, exitCode = null, error;
     let escalation;
     const kill = (value) => {
@@ -4330,7 +4447,7 @@ __export(gates_exports, {
 import { execFile as execFile5 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
 import { existsSync as existsSync7 } from "node:fs";
-import { dirname as dirname3, isAbsolute as isAbsolute2, join as join10, resolve as resolve5 } from "node:path";
+import { dirname as dirname3, isAbsolute as isAbsolute2, join as join11, resolve as resolve5 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var execFileAsync3, here, UNLAZY_CANDIDATES, UNLAZY_DIR, MODES, gatesTool, gates_default;
 var init_gates = __esm({
@@ -4342,7 +4459,7 @@ var init_gates = __esm({
       resolve5(here, "..", "..", "..", "vendor", "unlazy"),
       resolve5(here, "..", "vendor", "unlazy")
     ];
-    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync7(join10(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
+    UNLAZY_DIR = UNLAZY_CANDIDATES.find((dir) => existsSync7(join11(dir, "scripts", "gate-check.mjs"))) ?? UNLAZY_CANDIDATES[1];
     MODES = /* @__PURE__ */ new Set(["status", "approve", "reverify", "lint"]);
     gatesTool = {
       name: "gates",
@@ -4361,11 +4478,11 @@ var init_gates = __esm({
         if (!MODES.has(mode)) return { content: `Unknown mode: ${mode}. Use one of: status, approve, reverify, lint.`, isError: true };
         const file = args.file ? String(args.file) : "GATES.md";
         const root2 = args.root ? resolve5(String(args.root)) : process.cwd();
-        const ledgerPath = isAbsolute2(file) ? file : join10(root2, file);
+        const ledgerPath = isAbsolute2(file) ? file : join11(root2, file);
         if (!existsSync7(ledgerPath)) {
           return { content: `Ledger not found: ${ledgerPath}. Write it first (template: vendor/unlazy/templates/gates-leaf.md), then run gates with mode=lint.`, isError: true };
         }
-        const scriptPath = join10(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
+        const scriptPath = join11(UNLAZY_DIR, "scripts", mode === "lint" ? "gate-lint.mjs" : "gate-check.mjs");
         const cmdArgs = mode === "lint" ? [scriptPath, ledgerPath] : [scriptPath, `--${mode}`, ledgerPath];
         let stdout = "";
         let stderr = "";
@@ -4587,7 +4704,7 @@ var init_nodeterm = __esm({
 import { execFileSync } from "node:child_process";
 import { createHash as createHash3, randomUUID as randomUUID4 } from "node:crypto";
 import { lstatSync as lstatSync2, readFileSync as readFileSync9, realpathSync as realpathSync2 } from "node:fs";
-import { dirname as dirname4, join as join12, resolve as resolve7, sep } from "node:path";
+import { dirname as dirname4, join as join13, resolve as resolve7, sep } from "node:path";
 function digest2(value) {
   return createHash3("sha256").update(value).digest("hex").slice(0, 24);
 }
@@ -4645,14 +4762,14 @@ function sharedNotesRoot(cwd) {
 }
 function sharedMemory(cwd, maxChars) {
   const root2 = sharedNotesRoot(cwd);
-  const path2 = join12(root2, ".pi", "notes", "MEMORY.md");
+  const path2 = join13(root2, ".pi", "notes", "MEMORY.md");
   try {
-    for (const directory of [root2, join12(root2, ".pi"), join12(root2, ".pi", "notes")]) {
-      const stat2 = lstatSync2(directory);
-      if (!stat2.isDirectory() || stat2.isSymbolicLink()) return void 0;
+    for (const directory of [root2, join13(root2, ".pi"), join13(root2, ".pi", "notes")]) {
+      const stat3 = lstatSync2(directory);
+      if (!stat3.isDirectory() || stat3.isSymbolicLink()) return void 0;
     }
-    const stat = lstatSync2(path2);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1) return void 0;
+    const stat2 = lstatSync2(path2);
+    if (!stat2.isFile() || stat2.isSymbolicLink() || stat2.nlink > 1) return void 0;
     const text = readFileSync9(path2, "utf8").trim();
     return text ? text.slice(0, maxChars) : void 0;
   } catch {
@@ -4714,14 +4831,14 @@ var init_workspace = __esm({
 // src/agent/session.ts
 import { appendFileSync, existsSync as existsSync8, mkdirSync as mkdirSync6, readFileSync as readFileSync10, readdirSync as readdirSync2, statSync as statSync4, writeFileSync as writeFileSync7 } from "node:fs";
 import { homedir as homedir9 } from "node:os";
-import { join as join13 } from "node:path";
+import { join as join14 } from "node:path";
 import { randomUUID as randomUUID5, createHash as createHash4 } from "node:crypto";
 function newSessionId() {
   return `session-${Date.now()}-${randomUUID5().slice(0, 8)}`;
 }
 function sessionPath(id) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(id)) throw new Error("Invalid session id. Use the full id from /sessions.");
-  return join13(sessionsDir(), `${id}.jsonl`);
+  return join14(sessionsDir(), `${id}.jsonl`);
 }
 function createSession(opts) {
   mkdirSync6(sessionsDir(), { recursive: true });
@@ -4861,7 +4978,7 @@ var sessionsDir;
 var init_session = __esm({
   "src/agent/session.ts"() {
     init_workspace();
-    sessionsDir = () => join13(process.env.REIN_HOME || join13(homedir9(), ".rein"), "sessions");
+    sessionsDir = () => join14(process.env.REIN_HOME || join14(homedir9(), ".rein"), "sessions");
   }
 });
 
@@ -5079,7 +5196,7 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
 
 // src/harness/tools/context.ts
 import { constants as constants4, closeSync as closeSync2, existsSync as existsSync9, fstatSync as fstatSync2, lstatSync as lstatSync3, mkdirSync as mkdirSync7, openSync as openSync2, readSync, readdirSync as readdirSync3, readFileSync as readFileSync11, realpathSync as realpathSync3, writeFileSync as writeFileSync8, renameSync as renameSync2, unlinkSync as unlinkSync2 } from "node:fs";
-import { dirname as dirname5, isAbsolute as isAbsolute3, join as join14, relative, resolve as resolve8, sep as sep2 } from "node:path";
+import { dirname as dirname5, isAbsolute as isAbsolute3, join as join15, relative, resolve as resolve8, sep as sep2 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { randomUUID as randomUUID7 } from "node:crypto";
 function notesRoot(cwd) {
@@ -5108,11 +5225,11 @@ function safePath(root2, note, checkLeaf = true) {
   const path2 = resolve8(root2, note);
   const rel = relative(root2, path2);
   if (!rel || rel === ".." || rel.startsWith(`..${sep2}`) || isAbsolute3(rel)) throw new Error("Note path must stay inside .pi/notes.");
-  for (const part of [dirname5(root2), root2, ...rel.split(sep2).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join14(root2, ...parts.slice(0, i + 1)))]) {
+  for (const part of [dirname5(root2), root2, ...rel.split(sep2).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join15(root2, ...parts.slice(0, i + 1)))]) {
     try {
-      const stat = lstatSync3(part);
-      if (stat.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
-      if (part === path2 ? !stat.isFile() || stat.nlink > 1 : !stat.isDirectory()) throw new Error("Notes require regular files without hard links and ordinary directories.");
+      const stat2 = lstatSync3(part);
+      if (stat2.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
+      if (part === path2 ? !stat2.isFile() || stat2.nlink > 1 : !stat2.isDirectory()) throw new Error("Notes require regular files without hard links and ordinary directories.");
     } catch (err) {
       if (err.code !== "ENOENT") throw err;
     }
@@ -5124,7 +5241,7 @@ function* noteFiles(root2, dir = root2) {
   if (!existsSync9(dir)) return;
   for (const file of readdirSync3(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (file.isSymbolicLink()) continue;
-    const path2 = join14(dir, file.name);
+    const path2 = join15(dir, file.name);
     if (file.isDirectory()) yield* noteFiles(root2, path2);
     else if (file.isFile()) {
       safePath(root2, relative(root2, path2));
@@ -5147,7 +5264,7 @@ function offsetOf(args) {
   return offset;
 }
 function contextTools(state, cwd) {
-  const root2 = join14(notesRoot(cwd), ".pi", "notes");
+  const root2 = join15(notesRoot(cwd), ".pi", "notes");
   const outputPage = (text, offset, prefix = "") => page(text, offset, state.pageLimit(offset, Math.max(0, text.length - offset) + prefix.length), prefix);
   const notes = {
     name: "notes",
@@ -5177,11 +5294,11 @@ function contextTools(state, cwd) {
         } else {
           const fd = openSync2(path2, constants4.O_RDWR | constants4.O_APPEND | constants4.O_CREAT | (constants4.O_NOFOLLOW ?? 0), 384);
           try {
-            const stat = fstatSync2(fd);
-            if (!stat.isFile() || stat.nlink > 1) throw new Error("Notes require regular files without hard links.");
+            const stat2 = fstatSync2(fd);
+            if (!stat2.isFile() || stat2.nlink > 1) throw new Error("Notes require regular files without hard links.");
             const last = Buffer.alloc(1);
-            if (stat.size) readSync(fd, last, 0, 1, stat.size - 1);
-            writeFileSync8(fd, `${stat.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
+            if (stat2.size) readSync(fd, last, 0, 1, stat2.size - 1);
+            writeFileSync8(fd, `${stat2.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
           } finally {
             closeSync2(fd);
           }
@@ -5604,7 +5721,7 @@ var init_runner = __esm({
 // src/harness/autonomy/state.ts
 import { existsSync as existsSync11, linkSync, lstatSync as lstatSync4, mkdirSync as mkdirSync8, readFileSync as readFileSync13, realpathSync as realpathSync5, renameSync as renameSync3, statSync as statSync5, unlinkSync as unlinkSync3, writeFileSync as writeFileSync9 } from "node:fs";
 import { homedir as homedir10 } from "node:os";
-import { join as join15, resolve as resolve10 } from "node:path";
+import { join as join16, resolve as resolve10 } from "node:path";
 import { createHash as createHash5, randomUUID as randomUUID8 } from "node:crypto";
 function privateDirectory() {
   const directory = autonomyDirectory();
@@ -5613,12 +5730,12 @@ function privateDirectory() {
   return directory;
 }
 function regularFile(path2, lock = false) {
-  const stat = lstatSync4(path2);
-  if (!stat.isFile() || stat.isSymbolicLink() || !lock && stat.nlink !== 1 || stat.size > (lock ? 1024 : 4e6)) throw new Error("Autonomy state must be a bounded regular file without links.");
+  const stat2 = lstatSync4(path2);
+  if (!stat2.isFile() || stat2.isSymbolicLink() || !lock && stat2.nlink !== 1 || stat2.size > (lock ? 1024 : 4e6)) throw new Error("Autonomy state must be a bounded regular file without links.");
 }
 function readState() {
   if (existsSync11(autonomyDirectory()) && lstatSync4(autonomyDirectory()).isSymbolicLink()) throw new Error("Autonomy state directory cannot be a symbolic link.");
-  const path2 = join15(autonomyDirectory(), "state.json");
+  const path2 = join16(autonomyDirectory(), "state.json");
   if (!existsSync11(path2)) return initialState();
   regularFile(path2);
   const state = JSON.parse(readFileSync13(path2, "utf8"));
@@ -5666,7 +5783,7 @@ function releaseOwnedLock(path2, token2) {
   }
 }
 function acquireLock(name) {
-  const path2 = join15(privateDirectory(), `${name}.lock`);
+  const path2 = join16(privateDirectory(), `${name}.lock`);
   const token2 = randomUUID8();
   const temp = `${path2}.${token2}.tmp`;
   writeFileSync9(temp, JSON.stringify({ pid: process.pid, token: token2 }), { flag: "wx", mode: 384 });
@@ -5713,14 +5830,14 @@ async function updateState(change) {
     if (!unlock) await new Promise((resolve19) => setTimeout(resolve19, 100));
   }
   if (!unlock) throw new Error("Autonomy state is busy. Try again shortly.");
-  const temp = join15(autonomyDirectory(), `state-${randomUUID8()}.tmp`);
+  const temp = join16(autonomyDirectory(), `state-${randomUUID8()}.tmp`);
   try {
     const state = readState();
     change(state);
     state.runs = state.runs.slice(-200);
     validateState(state);
     writeFileSync9(temp, JSON.stringify(state, null, 2) + "\n", { flag: "wx", mode: 384 });
-    renameSync3(temp, join15(autonomyDirectory(), "state.json"));
+    renameSync3(temp, join16(autonomyDirectory(), "state.json"));
     return state;
   } finally {
     try {
@@ -5748,8 +5865,8 @@ async function decideProposal(id, status2, allowWrites = false) {
 var autonomyHome, autonomyDirectory, initialState, runsToday, proposalId;
 var init_state = __esm({
   "src/harness/autonomy/state.ts"() {
-    autonomyHome = () => resolve10(process.env.REIN_HOME || join15(homedir10(), ".rein"));
-    autonomyDirectory = () => join15(autonomyHome(), "autonomy");
+    autonomyHome = () => resolve10(process.env.REIN_HOME || join16(homedir10(), ".rein"));
+    autonomyDirectory = () => join16(autonomyHome(), "autonomy");
     initialState = () => ({ version: 1, paused: true, controlRevision: 0, workspaces: [], intervalMinutes: 60, maxRunsPerDay: 6, maxTurns: 8, timeoutSeconds: 180, proposals: [], runs: [] });
     runsToday = (state, now = Date.now()) => state.runs.filter((run2) => run2.started >= now - 864e5).length;
     proposalId = (draft) => createHash5("sha256").update(`${draft.workspace}
@@ -5761,7 +5878,7 @@ ${draft.title.trim().toLowerCase()}`).digest("hex").slice(0, 16);
 // src/harness/autonomy/inspect.ts
 import { constants as constants5, lstatSync as lstatSync5 } from "node:fs";
 import { lstat, open as open2, opendir } from "node:fs/promises";
-import { isAbsolute as isAbsolute4, join as join16, relative as relative2, resolve as resolve11, sep as sep4 } from "node:path";
+import { isAbsolute as isAbsolute4, join as join17, relative as relative2, resolve as resolve11, sep as sep4 } from "node:path";
 function inspectionTools(cwd) {
   const root2 = canonicalWorkspace(cwd);
   const originalRoot = lstatSync5(root2);
@@ -5776,26 +5893,26 @@ function inspectionTools(cwd) {
     aborted(signal);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || rootStat.dev !== originalRoot.dev || rootStat.ino !== originalRoot.ino) throw new Error("The enrolled workspace directory changed. Restart inspection before continuing.");
     let current = root2;
-    let stat = rootStat;
+    let stat2 = rootStat;
     for (const part of rel.split(sep4).filter(Boolean)) {
       if (privateName(part)) throw new Error("Hidden and private configuration paths are excluded from background inspection.");
-      current = join16(current, part);
-      stat = await lstat(current);
+      current = join17(current, part);
+      stat2 = await lstat(current);
       aborted(signal);
-      if (stat.isSymbolicLink() || !stat.isDirectory() && (!stat.isFile() || stat.nlink !== 1)) throw new Error("Links and special files are excluded from background inspection.");
+      if (stat2.isSymbolicLink() || !stat2.isDirectory() && (!stat2.isFile() || stat2.nlink !== 1)) throw new Error("Links and special files are excluded from background inspection.");
     }
-    return { path: path2, stat };
+    return { path: path2, stat: stat2 };
   }
   async function readOrdinary(input, maximum, signal) {
-    const { path: path2, stat } = await scoped(input, signal);
+    const { path: path2, stat: stat2 } = await scoped(input, signal);
     aborted(signal);
-    if (!stat.isFile() || stat.size > maximum) throw new Error(`Read requires a regular file no larger than ${maximum} bytes.`);
+    if (!stat2.isFile() || stat2.size > maximum) throw new Error(`Read requires a regular file no larger than ${maximum} bytes.`);
     const handle = await open2(path2, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0) | (constants5.O_NONBLOCK ?? 0));
     try {
       aborted(signal);
       const opened = await handle.stat();
       aborted(signal);
-      if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== stat.dev || opened.ino !== stat.ino || opened.size > maximum) throw new Error("The inspected file changed or is not a bounded ordinary file.");
+      if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== stat2.dev || opened.ino !== stat2.ino || opened.size > maximum) throw new Error("The inspected file changed or is not a bounded ordinary file.");
       const buffer = Buffer.alloc(opened.size);
       let bytes = 0;
       while (bytes < buffer.length) {
@@ -5810,9 +5927,9 @@ function inspectionTools(cwd) {
     }
   }
   async function* entries(input, maximum, signal) {
-    const { path: path2, stat } = await scoped(input, signal);
+    const { path: path2, stat: stat2 } = await scoped(input, signal);
     aborted(signal);
-    if (!stat.isDirectory()) throw new Error("Inspection requires a directory.");
+    if (!stat2.isDirectory()) throw new Error("Inspection requires a directory.");
     const directory = await opendir(path2, { bufferSize: 32 });
     try {
       aborted(signal);
@@ -5820,7 +5937,7 @@ function inspectionTools(cwd) {
         const entry = await directory.read();
         aborted(signal);
         if (!entry) break;
-        yield { entry, path: join16(path2, entry.name) };
+        yield { entry, path: join17(path2, entry.name) };
       }
     } finally {
       await directory.close();
@@ -6219,17 +6336,17 @@ async function readExport(folder) {
     const counts = emptyCounts();
     let repeatState = initialDoomLoopState, turns = 0;
     try {
-      const stat = await handle.stat();
-      totalBytes += stat.size;
-      if (!stat.isFile() || stat.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
-      const bytes = Buffer.alloc(stat.size + 1);
+      const stat2 = await handle.stat();
+      totalBytes += stat2.size;
+      if (!stat2.isFile() || stat2.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
+      const bytes = Buffer.alloc(stat2.size + 1);
       let read = 0;
       while (read < bytes.length) {
         const chunk = await handle.read(bytes, read, bytes.length - read, read);
         if (!chunk.bytesRead) break;
         read += chunk.bytesRead;
       }
-      if (read > stat.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
+      if (read > stat2.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
       for (const line of bytes.subarray(0, read).toString("utf8").split("\n")) {
         if (!line.trim()) continue;
         if (Buffer.byteLength(line) > 8 * 1024 * 1024) {
@@ -6461,12 +6578,12 @@ __export(auth_exports, {
   checkCliAuth: () => checkCliAuth,
   loginCli: () => loginCli
 });
-import { spawn as spawn7, execFile as execFile7 } from "node:child_process";
+import { spawn as spawn8, execFile as execFile7 } from "node:child_process";
 import { mkdirSync as mkdirSync9 } from "node:fs";
 function openLoginPage(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
   const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
-  const child = spawn7(command, args, { stdio: "ignore", detached: true, shell: false });
+  const child = spawn8(command, args, { stdio: "ignore", detached: true, shell: false });
   child.on("error", () => {
   });
   child.unref();
@@ -6481,7 +6598,7 @@ async function loginCli(provider, options = {}) {
   const device = options.deviceAuth !== false;
   const args = ["login", ...device ? [provider === "codex" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
   return new Promise((resolve19) => {
-    const child = spawn7(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: "inherit", shell: false });
+    const child = spawn8(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: "inherit", shell: false });
     child.once("spawn", () => {
       if (device && options.openBrowser !== false) openLoginPage(CLI_PROVIDERS[provider].loginUrl);
     });
@@ -6546,7 +6663,7 @@ __export(doctor_exports, {
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { existsSync as existsSync13, lstatSync as lstatSync6, readFileSync as readFileSync14, readdirSync as readdirSync4, realpathSync as realpathSync6, statSync as statSync6 } from "node:fs";
 import { homedir as homedir11 } from "node:os";
-import { dirname as dirname8, join as join17 } from "node:path";
+import { dirname as dirname8, join as join18 } from "node:path";
 function checkNodeRuntime(version = process.versions.node) {
   const major = Number(version.split(".")[0]);
   const supported = Number.isSafeInteger(major) && major >= 18;
@@ -6597,7 +6714,7 @@ function sh2(cmd, opts = {}) {
 function gitRootOf(file, maxDepth = 4) {
   let dir = existsSync13(file) && statSync6(file).isFile() ? dirname8(file) : file;
   for (let i = 0; i < maxDepth; i++) {
-    if (existsSync13(join17(dir, ".git"))) return dir;
+    if (existsSync13(join18(dir, ".git"))) return dir;
     const up = dirname8(dir);
     if (up === dir) return void 0;
     dir = up;
@@ -6609,7 +6726,7 @@ function newestMtime(dir) {
   const walk = (d) => {
     for (const entry of readdirSync4(d, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name === ".git") continue;
-      const p = join17(d, entry.name);
+      const p = join18(d, entry.name);
       if (entry.isDirectory()) walk(p);
       else newest = Math.max(newest, statSync6(p).mtimeMs);
     }
@@ -6684,10 +6801,10 @@ async function runDoctor(opts = {}) {
       let installedPackage = false;
       try {
         const packageRoot = dirname8(dirname8(real));
-        installedPackage = JSON.parse(readFileSync14(join17(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join17(packageRoot, "dist", "rein.js");
+        installedPackage = JSON.parse(readFileSync14(join18(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join18(packageRoot, "dist", "rein.js");
       } catch {
       }
-      const distOk = installedPackage || repo && existsSync13(join17(repo, "dist", "rein.js"));
+      const distOk = installedPackage || repo && existsSync13(join18(repo, "dist", "rein.js"));
       checks.push({
         name: "bin",
         status: distOk ? "ok" : "fail",
@@ -6717,7 +6834,7 @@ async function runDoctor(opts = {}) {
     }
   }
   if (repo) {
-    const bundle = join17(repo, "dist", "rein.js");
+    const bundle = join18(repo, "dist", "rein.js");
     if (!existsSync13(bundle)) {
       checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => {
         const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
@@ -6726,7 +6843,7 @@ async function runDoctor(opts = {}) {
       } });
     } else {
       const bundleMtime = statSync6(bundle).mtimeMs;
-      const srcMtime = newestMtime(join17(repo, "src"));
+      const srcMtime = newestMtime(join18(repo, "src"));
       const fresh = bundleMtime >= srcMtime;
       checks.push({
         name: "bundle",
@@ -6774,7 +6891,7 @@ async function runDoctor(opts = {}) {
       checks.push({ name: "hardware", status: "warn", detail: "hardware profile failed (continuing)" });
     }
   }
-  const cfgPath = join17(process.env.REIN_HOME || join17(homedir11(), ".rein"), "config.json");
+  const cfgPath = join18(process.env.REIN_HOME || join18(homedir11(), ".rein"), "config.json");
   if (existsSync13(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
     const mode = lstatSync6(cfgPath).mode & 511;
     checks.push({
@@ -6845,7 +6962,7 @@ var init_doctor = __esm({
 import { execFileSync as execFileSync4 } from "node:child_process";
 import { createHash as createHash6 } from "node:crypto";
 import { closeSync as closeSync3, constants as constants6, fstatSync as fstatSync3, lstatSync as lstatSync7, openSync as openSync3, readSync as readSync2, readdirSync as readdirSync5, realpathSync as realpathSync7 } from "node:fs";
-import { join as join18 } from "node:path";
+import { join as join19 } from "node:path";
 function redact(value) {
   return value.replace(/-----BEGIN [^-]*(?:PRIVATE KEY|OPENSSH)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/g, "[credential omitted]").split("\n").map((line) => {
     if (/(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|passwd|authorization|token|secret)["']?(?:\s*[=:]\s*|\s+is\s+)\S/i.test(line) || /\bBearer\s+[\w./+~-]{8,}/i.test(line) || /\b(?:sk-[\w-]{12,}|gh[pousr]_[\w]{12,}|github_pat_[\w]{12,}|AKIA[A-Z0-9]{16})\b/.test(line) || /https?:\/\/[^\s/@]+:[^\s/@]+@/i.test(line) || /[?&](?:key|token|api_key|secret|password)=[^\s&#]+/i.test(line)) return "[credential omitted]";
@@ -6879,9 +6996,9 @@ function readBoundedSession(path2, allowed) {
     const before = lstatSync7(path2);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) return void 0;
     fd = openSync3(path2, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0));
-    const stat = fstatSync3(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.ino !== before.ino || stat.dev !== before.dev) return void 0;
-    const metadata = Buffer.alloc(Math.min(stat.size, 8192));
+    const stat2 = fstatSync3(fd);
+    if (!stat2.isFile() || stat2.nlink !== 1 || stat2.ino !== before.ino || stat2.dev !== before.dev) return void 0;
+    const metadata = Buffer.alloc(Math.min(stat2.size, 8192));
     const metadataText = metadata.subarray(0, readSync2(fd, metadata, 0, metadata.length, 0)).toString("utf8");
     const headerLine = metadataText.split("\n").find((line) => line.trim());
     if (!headerLine || headerLine.length > 8192) return void 0;
@@ -6889,12 +7006,12 @@ function readBoundedSession(path2, allowed) {
     if (!header || header.type !== "header" || header.purpose === "autonomy") return void 0;
     const workspace = canonicalDirectory(header.cwd);
     if (!workspace || !allowed.has(workspace)) return void 0;
-    const prefix = Buffer.alloc(Math.min(stat.size, PREFIX_BYTES));
+    const prefix = Buffer.alloc(Math.min(stat2.size, PREFIX_BYTES));
     const prefixText = prefix.subarray(0, readSync2(fd, prefix, 0, prefix.length, 0)).toString("utf8");
     const first = parsedLines(prefixText).filter((value) => value.type !== "header");
-    if (stat.size <= PREFIX_BYTES) return { header, workspace, entries: first };
-    const tailStart = Math.max(PREFIX_BYTES, stat.size - TAIL_BYTES);
-    const tail = Buffer.alloc(stat.size - tailStart);
+    if (stat2.size <= PREFIX_BYTES) return { header, workspace, entries: first };
+    const tailStart = Math.max(PREFIX_BYTES, stat2.size - TAIL_BYTES);
+    const tail = Buffer.alloc(stat2.size - tailStart);
     const tailText = tail.subarray(0, readSync2(fd, tail, 0, tail.length, tailStart)).toString("utf8");
     const firstBreak = tailText.indexOf("\n");
     return { header, workspace, entries: [...first.slice(0, 40), ...parsedLines(firstBreak < 0 ? "" : tailText.slice(firstBreak + 1)).slice(-80)] };
@@ -6934,7 +7051,7 @@ function collectAutonomyEvidence(workspaces, options = {}) {
   }
   const candidates = [];
   for (const file of files) {
-    const session = readBoundedSession(join18(sessionsDir(), file), allowed);
+    const session = readBoundedSession(join19(sessionsDir(), file), allowed);
     if (!session) continue;
     const workspace = session.workspace;
     const sessionId = file.slice(0, -6);
@@ -7275,7 +7392,7 @@ import { spawnSync } from "node:child_process";
 import { createHash as createHash7, randomUUID as randomUUID10 } from "node:crypto";
 import { closeSync as closeSync4, constants as constants7, fstatSync as fstatSync4, lstatSync as lstatSync8, mkdirSync as mkdirSync10, openSync as openSync4, readFileSync as readFileSync15, renameSync as renameSync4, unlinkSync as unlinkSync4, writeFileSync as writeFileSync10 } from "node:fs";
 import { homedir as homedir12 } from "node:os";
-import { basename, dirname as dirname9, isAbsolute as isAbsolute5, join as join19, relative as relative3, resolve as resolve14 } from "node:path";
+import { basename, dirname as dirname9, isAbsolute as isAbsolute5, join as join20, relative as relative3, resolve as resolve14 } from "node:path";
 function absolute(value, name) {
   if (!isAbsolute5(value) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${name} must be an absolute path without control characters.`);
   return resolve14(value);
@@ -7290,7 +7407,7 @@ function configuration(options) {
   if (platform === "darwin" && (!Number.isSafeInteger(uid) || uid < 0)) throw new Error("A user ID is required for a launchd user agent.");
   const scope = createHash7("sha256").update(home).digest("hex").slice(0, 24);
   const label = `dev.rein.autonomy.${scope}`;
-  const paths = [dirname9(nodePath), join19(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  const paths = [dirname9(nodePath), join20(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
   const path2 = [...new Set(paths.filter((p) => isAbsolute5(p) && !/[\x00-\x1f\x7f:]/.test(p)))].join(":");
   return { home, userHome, nodePath, cliPath, uid, platform, scope, label, path: path2 };
 }
@@ -7308,7 +7425,7 @@ ${body}`;
 function servicePlan(options) {
   const cfg = configuration(options);
   if (cfg.platform === "darwin") {
-    const path2 = join19(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
+    const path2 = join20(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
     const target = `gui/${cfg.uid}/${cfg.label}`;
     const body = `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -7328,7 +7445,7 @@ function servicePlan(options) {
   }
   if (cfg.platform === "linux") {
     const name = `${cfg.label}.service`;
-    const path2 = join19(cfg.userHome, ".config", "systemd", "user", name);
+    const path2 = join20(cfg.userHome, ".config", "systemd", "user", name);
     const body = `[Unit]
 Description=Rein autonomy supervisor
 StartLimitIntervalSec=300
@@ -7362,8 +7479,8 @@ function ownedContent(path2, options) {
   let directory = dirname9(path2);
   for (; ; ) {
     try {
-      const stat = lstatSync8(directory);
-      if (!stat.isDirectory() || stat.isSymbolicLink() || stat.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory}`);
+      const stat2 = lstatSync8(directory);
+      if (!stat2.isDirectory() || stat2.isSymbolicLink() || stat2.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory}`);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -7374,17 +7491,17 @@ function ownedContent(path2, options) {
   }
   let fd;
   try {
-    const stat = lstatSync8(path2);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
+    const stat2 = lstatSync8(path2);
+    if (!stat2.isFile() || stat2.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
     fd = openSync4(path2, constants7.O_RDONLY | (constants7.O_NOFOLLOW ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
   }
   try {
-    const stat = fstatSync4(fd);
+    const stat2 = fstatSync4(fd);
     const uid = options.uid ?? process.getuid?.();
-    if (!stat.isFile() || stat.size > 64 * 1024 || stat.mode & 18 || uid !== void 0 && stat.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
+    if (!stat2.isFile() || stat2.size > 64 * 1024 || stat2.mode & 18 || uid !== void 0 && stat2.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
     const text = readFileSync15(fd, "utf8");
     const boundary = text.indexOf("\n");
     const body = text.slice(boundary + 1);
@@ -7398,14 +7515,14 @@ function prepareDirectory(path2, userHome) {
   const components = relative3(userHome, path2).split("/");
   let current = userHome;
   for (const component of components) {
-    current = join19(current, component);
+    current = join20(current, component);
     try {
       mkdirSync10(current, { mode: 448 });
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
-    const stat = lstatSync8(current);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || stat.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
+    const stat2 = lstatSync8(current);
+    if (!stat2.isDirectory() || stat2.isSymbolicLink() || stat2.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
   }
 }
 function run(options, command, timeoutMs = 15e3) {
@@ -7753,7 +7870,7 @@ __export(loop_exports, {
 });
 import { execFileSync as execFileSync5 } from "node:child_process";
 import { existsSync as existsSync14, readFileSync as readFileSync16, appendFileSync as appendFileSync2, realpathSync as realpathSync9 } from "node:fs";
-import { join as join20, resolve as resolve16 } from "node:path";
+import { join as join21, resolve as resolve16 } from "node:path";
 import { randomUUID as randomUUID11 } from "node:crypto";
 function sh3(cmd, cwd) {
   return execFileSync5("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
@@ -7797,7 +7914,7 @@ function discardIteration(cwd, expectedHead) {
   execFileSync5("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
 }
 function recordLesson(cwd, text, commitMessage) {
-  appendFileSync2(join20(cwd, "LESSONS.md"), `
+  appendFileSync2(join21(cwd, "LESSONS.md"), `
 ${text}
 `);
   execFileSync5("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
@@ -7807,8 +7924,8 @@ async function runExperimentLoop(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join20(cwd, taskFile);
-  const metricPath = join20(cwd, metricFile);
+  const taskPath = join21(cwd, taskFile);
+  const metricPath = join21(cwd, metricFile);
   if (!existsSync14(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
@@ -7919,18 +8036,18 @@ __export(improve_exports, {
 });
 import { execFileSync as execFileSync6 } from "node:child_process";
 import { cpSync, existsSync as existsSync15, mkdtempSync as mkdtempSync2, readFileSync as readFileSync17, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
-import { tmpdir as tmpdir3 } from "node:os";
-import { join as join21, dirname as dirname10, resolve as resolve17 } from "node:path";
+import { tmpdir as tmpdir4 } from "node:os";
+import { join as join22, dirname as dirname10, resolve as resolve17 } from "node:path";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 import { randomUUID as randomUUID12 } from "node:crypto";
 function sh4(cmd, cwd) {
   return execFileSync6("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function runHarnessTests(repoDir) {
-  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join21(tmpdir3(), "rein-validation-")) : repoDir;
+  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join22(tmpdir4(), "rein-validation-")) : repoDir;
   try {
     if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
-      if (existsSync15(join21(repoDir, name))) cpSync(join21(repoDir, name), join21(dir, name), { recursive: true });
+      if (existsSync15(join22(repoDir, name))) cpSync(join22(repoDir, name), join22(dir, name), { recursive: true });
     }
     const output = execFileSync6(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
       cwd: dir,
@@ -7946,7 +8063,7 @@ function runHarnessTests(repoDir) {
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join21(repoDir, "LESSONS.md");
+  const path2 = join22(repoDir, "LESSONS.md");
   if (!existsSync15(path2)) return "";
   const text = readFileSync17(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
@@ -8010,7 +8127,7 @@ ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
         const test = runHarnessTests(repoDir);
         if (sh4("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
         if (test.pass) {
-          appendFileSync3(join21(repoDir, "LESSONS.md"), `
+          appendFileSync3(join22(repoDir, "LESSONS.md"), `
 - [improve ${tag}] fixed: ${firstLine(report)}
 `);
           if (useGit) sh4(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
@@ -8052,7 +8169,7 @@ var init_improve = __esm({
     init_runner();
     init_system_prompt();
     here4 = dirname10(fileURLToPath5(import.meta.url));
-    REIN_REPO = [here4, resolve17(here4, ".."), resolve17(here4, "..", "..")].find((dir) => existsSync15(join21(dir, "test", "smoke.ts"))) ?? resolve17(here4, "..", "..");
+    REIN_REPO = [here4, resolve17(here4, ".."), resolve17(here4, "..", "..")].find((dir) => existsSync15(join22(dir, "test", "smoke.ts"))) ?? resolve17(here4, "..", "..");
   }
 });
 
@@ -8065,7 +8182,7 @@ __export(heartbeat_exports, {
 });
 import { appendFileSync as appendFileSync4, existsSync as existsSync16, mkdirSync as mkdirSync11, readFileSync as readFileSync18, writeFileSync as writeFileSync11 } from "node:fs";
 import { homedir as homedir13 } from "node:os";
-import { isAbsolute as isAbsolute6, join as join22, resolve as resolve18 } from "node:path";
+import { isAbsolute as isAbsolute6, join as join23, resolve as resolve18 } from "node:path";
 function parseHeartbeat(text) {
   const tasks = [];
   let improveGoal;
@@ -8085,12 +8202,12 @@ function resolveHeartbeatFile(explicit) {
   if (explicit) return isAbsolute6(explicit) ? explicit : resolve18(explicit);
   const local = resolve18(process.cwd(), "HEARTBEAT.md");
   if (existsSync16(local)) return local;
-  return join22(process.env.REIN_HOME || join22(homedir13(), ".rein"), "HEARTBEAT.md");
+  return join23(process.env.REIN_HOME || join23(homedir13(), ".rein"), "HEARTBEAT.md");
 }
 function logBeat(result) {
-  const dir = process.env.REIN_HOME || join22(homedir13(), ".rein");
+  const dir = process.env.REIN_HOME || join23(homedir13(), ".rein");
   mkdirSync11(dir, { recursive: true });
-  const path2 = join22(dir, "heartbeat.log");
+  const path2 = join23(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     file: result.file,
@@ -8129,7 +8246,7 @@ ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync16(join22(process.env.REIN_HOME || join22(homedir13(), ".rein"), "config.json"))) {
+  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync16(join23(process.env.REIN_HOME || join23(homedir13(), ".rein"), "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -8213,7 +8330,7 @@ __export(setup_exports, {
 });
 import { mkdirSync as mkdirSync12, renameSync as renameSync5, unlinkSync as unlinkSync5, writeFileSync as writeFileSync12 } from "node:fs";
 import { homedir as homedir14 } from "node:os";
-import { dirname as dirname11, join as join23 } from "node:path";
+import { dirname as dirname11, join as join24 } from "node:path";
 import { randomUUID as randomUUID13 } from "node:crypto";
 import { execFile as execFile8 } from "node:child_process";
 import { promisify as promisify7 } from "node:util";
@@ -8551,7 +8668,7 @@ var init_setup = __esm({
       huggingface: "https://huggingface.co/settings/tokens",
       gemini: "https://aistudio.google.com/apikey"
     };
-    configPath = () => join23(process.env.REIN_HOME || join23(homedir14(), ".rein"), "config.json");
+    configPath = () => join24(process.env.REIN_HOME || join24(homedir14(), ".rein"), "config.json");
   }
 });
 
@@ -9009,6 +9126,7 @@ Usage:
   rein web install|status       install or inspect the native Obscura browser
   rein web search <query>        search DuckDuckGo through Obscura (--json optional)
   rein web fetch <url>           render a page to markdown (--max-chars 20000)
+  rein update                   curl the latest installer and update the installed build
   rein --visual                 split the terminal into chat and live activity (tmux)
   rein watch <activity-id>       inspect activity; press c for the node canvas
   rein canvas <activity-id>      open the local interactive node canvas
@@ -9122,6 +9240,12 @@ async function main(argv = process.argv.slice(2)) {
     return;
   }
   if (flags.silent !== void 0 && !["doctor", "heartbeat", "hb"].includes(_[0])) throw new Error("--silent controls compatibility flags for doctor and heartbeat.");
+  if (_[0] === "update") {
+    if (_.length !== 1 || Object.keys(flags).length) throw new Error("Usage: rein update");
+    const { runUpdate: runUpdate2 } = await Promise.resolve().then(() => (init_update(), update_exports));
+    process.exitCode = await runUpdate2();
+    return;
+  }
   if (flags.tools !== void 0 && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
   const maxIterations = numberFlag(flags, "max-iterations", 1);
   const common = {

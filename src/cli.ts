@@ -68,6 +68,7 @@ Usage:
   rein web install|status       install or inspect the native Obscura browser
   rein web search <query>        search DuckDuckGo through Obscura (--json optional)
   rein web fetch <url>           render a page to markdown (--max-chars 20000)
+  rein update                   curl the latest installer and update the installed build
   rein --visual                 split the terminal into chat and live activity (tmux)
   rein watch <activity-id>       inspect activity; press c for the node canvas
   rein canvas <activity-id>      open the local interactive node canvas
@@ -194,6 +195,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 	if (flags.silent !== undefined && !["doctor", "heartbeat", "hb"].includes(_[0])) throw new Error("--silent controls compatibility flags for doctor and heartbeat.");
+	if (_[0] === "update") {
+		if (_.length !== 1 || Object.keys(flags).length) throw new Error("Usage: rein update");
+		const { runUpdate } = await import("./harness/update.ts");
+		process.exitCode = await runUpdate();
+		return;
+	}
 
 	if (flags.tools !== undefined && !["auto", "native", "text"].includes(String(flags.tools))) throw new Error("--tools must be auto, native, or text");
 	const maxIterations = numberFlag(flags, "max-iterations", 1);

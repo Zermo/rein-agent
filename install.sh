@@ -8,7 +8,7 @@
 # onboarding wizard: detect local AI servers → pick model → test → save config.
 #
 # Options (after `bash -s --`):
-#   --skip-setup    install only; skip the wizard
+#   --skip-setup    install only; skip the wizard and connection checks
 #   --yes           non-interactive wizard (first local server / existing config)
 #   --branch NAME   clone a different branch (default: main)
 #
@@ -29,7 +29,9 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --skip-setup) RUN_SETUP=false ;;
         --yes) ASSUME_YES=true ;;
-        --branch) shift; BRANCH="${1:-main}" ;;
+        --branch)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "--branch requires a name" >&2; exit 2; }
+            shift; BRANCH="$1" ;;
         -h|--help)
             sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
@@ -58,6 +60,7 @@ echo ""
 command -v git >/dev/null 2>&1 || fail "git is required (brew install git / apt install git)"
 command -v node >/dev/null 2>&1 || fail "Node.js 18+ is required (brew install node / nvm install 24 / npx n)"
 command -v npm  >/dev/null 2>&1 || fail "npm is required (ships with Node.js)"
+git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || fail "invalid branch name: $BRANCH"
 
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 if [ "$NODE_MAJOR" -lt 18 ]; then
@@ -66,24 +69,29 @@ fi
 ok "node $(node --version), npm $(npm --version), git $(git --version | awk '{print $3}')"
 
 # ---- install ----------------------------------------------------------------
-if [ -d "$REPO_DIR/.git" ]; then
+if [ -e "$REPO_DIR/.git" ]; then
     step "updating existing checkout at $REPO_DIR"
-    git -C "$REPO_DIR" fetch --depth 1 origin "$BRANCH" && git -C "$REPO_DIR" checkout -q FETCH_HEAD
+    CHECKOUT_STATUS=$(git -C "$REPO_DIR" status --porcelain) || fail "could not inspect the existing checkout"
+    [ -z "$CHECKOUT_STATUS" ] || fail "local changes exist in $REPO_DIR; commit or move them before updating"
+    git -C "$REPO_DIR" fetch --depth 1 origin "$BRANCH" || fail "could not fetch $BRANCH; the existing build was not replaced"
+    git -C "$REPO_DIR" checkout --detach -q FETCH_HEAD || fail "could not switch to the downloaded build"
 elif [ -e "$REPO_DIR" ]; then
-    warn "$REPO_DIR exists but is not a git checkout — leaving it untouched"
+    fail "$REPO_DIR exists but is not a git checkout; move it before installing"
 else
     step "cloning $REPO_URL"
     mkdir -p "$REIN_HOME"
     git clone --quiet --depth 1 --branch "$BRANCH" "$REPO_URL" "$REPO_DIR"
 fi
 ok "source at $REPO_DIR"
+[ -f "$REPO_DIR/dist/rein.js" ] || fail "downloaded build is missing dist/rein.js"
+VERSION=$(node "$REPO_DIR/dist/rein.js" --version) || fail "downloaded build could not start"
 
 # devDependencies are optional (only needed to rebuild the bundle / run tests);
 # the CLI itself is prebuilt and has zero runtime dependencies.
-if (cd "$REPO_DIR" && npm install --no-audit --no-fund --loglevel=error) 2>/dev/null; then
+if (cd "$REPO_DIR" && npm ci --no-audit --no-fund --loglevel=error) 2>/dev/null; then
     ok "dev dependencies installed (tests + bundle rebuild available)"
 else
-    warn "dev dependencies skipped (npm install failed — the CLI still works)"
+    warn "dev dependencies skipped (npm ci failed — the CLI still works)"
 fi
 
 step "installing globally"
@@ -99,16 +107,17 @@ if ! command -v rein >/dev/null 2>&1; then
     fi
 fi
 
-VERSION=$(node "$REPO_DIR/dist/rein.js" --version 2>/dev/null || node -p "require('$REPO_DIR/package.json').version")
-ok "rein $VERSION"
+ok "$VERSION"
 echo ""
 
 # ---- onboarding -------------------------------------------------------------
 CONFIG="$REIN_HOME/config.json"
-if [ -f "$CONFIG" ]; then
+if [ "$RUN_SETUP" = false ]; then
+    step "setup skipped (--skip-setup)"
+elif [ -f "$CONFIG" ]; then
     step "existing config found — verifying"
     rein setup --status
-elif [ "$RUN_SETUP" = true ]; then
+else
     echo ""
     if [ -t 0 ] && [ "$ASSUME_YES" = false ]; then
         rein setup
@@ -120,10 +129,6 @@ elif [ "$RUN_SETUP" = true ]; then
             echo "        rein setup"
         fi
     fi
-else
-    echo ""
-    warn "skipped setup (--skip-setup). Configure your model with:"
-    echo "    rein setup"
 fi
 
 echo ""

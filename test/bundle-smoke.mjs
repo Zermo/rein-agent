@@ -71,6 +71,15 @@ try {
   assert.equal(report.flags.length, compatibilityRuntime ? 1 : 0);
   if (compatibilityRuntime) assert.equal(report.flags[0].silent, true);
   assert.ok(report.failures >= 1);
+  if (process.platform !== "win32") {
+    const updateBin = join(dir, "update-bin"); mkdirSync(updateBin);
+    const updateScript = '#!/bin/bash\ntest "$1" = --skip-setup || exit 9\nprintf updated > "$REIN_HOME/update-marker"\n';
+    writeFileSync(join(updateBin, "curl"), `#!${process.execPath}\nconst fs = require('node:fs'); const args = process.argv.slice(2); fs.writeFileSync(args[args.indexOf('--output') + 1], ${JSON.stringify(updateScript)});\n`, { mode: 0o700 });
+    const updated = await runCli(["update"], { PATH: `${updateBin}:/usr/bin:/bin` });
+    assert.equal(updated.code, 0, updated.stdout + updated.stderr);
+    assert.match(updated.stdout, /Rein update complete/);
+    assert.equal(readFileSync(join(dir, "update-marker"), "utf8"), "updated");
+  }
   for (const args of [["autonomy", "init", "--daily-budget", "2"], ["autonomy", "status", "--json"], ["autonomy", "tui"], ["skills"], ["skills", "diagnosing-bugs"], ["skills", "tdd", "tests.md"], ["debug", join(dir, "sessions"), "--json"]]) {
     const result = await runCli(args);
     assert.equal(result.code, 0, result.stderr);

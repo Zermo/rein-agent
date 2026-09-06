@@ -1,5 +1,22 @@
 # Posthorse and harness review
 
+## 0.9.2 Installer updates
+
+`rein update` downloads the official installer with curl before invoking Bash
+with `--skip-setup`. HTTP errors, partial or empty downloads, missing tools,
+and installer failures return a failed command. Cancellation drains the owned
+process group and removes the temporary installer.
+
+The installer now honors `--skip-setup` even with an existing configuration.
+It preserves dirty checkouts, stops on fetch failures and non-repository
+directories, validates the downloaded bundle, and uses `npm ci` to avoid
+changing the installed lockfile. Configuration and session files are untouched.
+
+Regression coverage uses isolated fake downloads, real Bash, temporary Git
+repositories, an offline model configuration, npm failures, and descendants
+that ignore SIGTERM. The packaged smoke test exercises updates without a real
+network request or global installation on every supported Node test version.
+
 ## 0.9.1 Silent compatibility flags
 
 Expected Node versions in the CI matrix now carry `kind: "compatibility"` and

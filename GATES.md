@@ -1,17 +1,17 @@
-# Gates: silent compatibility diagnostics
+# Gates: installer updates
 
-Scope: silent Node compatibility flags in doctor results and heartbeat logs,
+Scope: curl-based CLI updates, installer failure handling and state preservation,
 with packaged runtime and existing native integration coverage.
 
 - [x] G1: source smoke and regression suites pass on Node 26.8.1
   CHECK: npm exec --yes --package=node@26.8.1 -- npm test
   EXPECT: smoke test OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=ac9da0288d0fb8733b19cfae4eaf285c1a57d630d4b7174a8205b248bec0d043; output-bytes=29956
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=2f24cf19b4e1a4f9c96359123bd31ef0ec54f356cb21800050b555902725127f; output-bytes=31058
 
 - [x] G2: built CLI and embedded assets work on Node 18
   CHECK: bash -c 'npm run bundle && npm exec --yes --package=node@18.20.8 -- node test/bundle-smoke.mjs'
   EXPECT: bundle smoke OK
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=f482f2af17569fc5d1f3a4f7b725de921720fb0b24d5107e32530077adf68e71; output-bytes=123
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=2eabe0a8516528733a1f4209bcd120e7dc8717bea74cfdfedd692402c44730b2; output-bytes=123
 
 - [x] G3: upstream source and release provenance remain intact
   CHECK: bash -c 'npm run check:posthorse && npm run check:natives'
@@ -25,5 +25,5 @@ with packaged runtime and existing native integration coverage.
 
 - [x] G5: release package includes native integration assets
   CHECK: npm pack --dry-run
-  EXPECT: rein-agent-0.9.1.tgz
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=30e83e92741b7f579ab5b12115da238f3ee5828d893747ac2abc99429c5836a0; output-bytes=11274
+  EXPECT: rein-agent-0.9.2.tgz
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/path/to/user/Documents/GitHub/rein-agent; path=923f685e6221/23 entries; EXPECT=matched; output-sha256=6ad49a7c4224dc4c8a00a66d21359f43fe04a85ca6f60f46d7543e91314e2320; output-bytes=11351

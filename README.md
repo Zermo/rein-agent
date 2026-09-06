@@ -73,6 +73,28 @@ The compatibility commands `rein-agent` and `rein` point to the same CLI.
 
 Developing from source: `npm install && npm test` (offline smoke and regression suites).
 
+To update an installed copy on macOS, Linux, or WSL:
+
+```sh
+rein update
+```
+
+This downloads the latest installer with curl, then runs it with Bash and
+`--skip-setup`. It installs the current prebuilt bundle from `main`, preserving
+your configuration, credentials, notes, and sessions under `$REIN_HOME`
+(default `~/.rein`). It skips onboarding and model connection checks, so your
+model server can be offline. Restart running Rein sessions after the update.
+Local changes in the installer checkout are preserved; commit or move them
+before updating.
+
+For an older Rein build that does not have the command yet, use:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash -s -- --skip-setup
+```
+
+Native Windows users can rerun the manual npm installation command above.
+
 ```sh
 # local (the default):
 ollama serve && ollama pull qwen2.5-coder:7b
@@ -95,6 +117,7 @@ rein-agent gates [file] --mode m  unlazy gates: lint | status | approve | reveri
 rein-agent models             what rein can see: local servers + provider presets
 rein skills [name]            bundled Matt Pocock workflows and references
 rein debug <folder> [--json]  offline exported-session diagnostics (counts only)
+rein update                   download and install the latest published build
 rein --visual                 split chat and live activity; press c in the activity pane for the canvas
 rein meat --working-tree      review tracked changes with the embedded Meat engine
 rein tmux start               start a persistent bash shell
