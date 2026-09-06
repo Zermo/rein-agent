@@ -226,15 +226,22 @@ test("rules use explicit user requests, recent cancellation and prior decisions"
 	const assistant = evidence(); assistant.sources[0].role = "assistant"; assert.equal(ruleProposals(assistant).length, 0);
 	const candidate = candidates()[0]; assert.equal(ruleProposals(evidence(), [{ ...candidate, status: "dismissed", created: 0, allowWrites: false }]).length, 0);
 });
-test("local transport refuses redirects and closes the rejected connection", async () => {
+test("local transport refuses redirects and closes the rejected connection", { timeout: 10_000 }, async () => {
 	const sockets = new Set<any>();
+	let connectionClosed!: () => void;
+	const closed = new Promise<void>(resolve => { connectionClosed = resolve; });
 	const server = createServer((_req, res) => { res.writeHead(302, { location: "https://cloud.invalid" }); res.flushHeaders(); });
-	server.on("connection", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
+	server.on("connection", socket => { sockets.add(socket); socket.on("close", () => { sockets.delete(socket); connectionClosed(); }); });
 	await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
 	try {
 		const address = server.address() as { port: number };
-		await assert.rejects(localGuardianRequest(`http://127.0.0.1:${address.port}`, "/api/tags", { timeoutMs: 50 }), /HTTP 302/);
-		await new Promise(resolve => setTimeout(resolve, 70)); assert.equal(sockets.size, 0);
+		// Test redirect rejection, not a 50 ms scheduling deadline on a loaded CI
+		// worker. The response deliberately never ends, so close must be client-driven.
+		await assert.rejects(localGuardianRequest(`http://127.0.0.1:${address.port}`, "/api/tags", { timeoutMs: 5000 }), /HTTP 302/);
+		let closeTimer: ReturnType<typeof setTimeout> | undefined;
+		try { await Promise.race([closed, new Promise<never>((_resolve, reject) => { closeTimer = setTimeout(() => reject(new Error("Rejected redirect connection did not close.")), 2000); })]); }
+		finally { clearTimeout(closeTimer); }
+		assert.equal(sockets.size, 0);
 	} finally { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 test("installer cancellation escalates even when owned child ignores TERM", async t => {
