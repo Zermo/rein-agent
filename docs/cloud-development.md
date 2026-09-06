@@ -57,6 +57,9 @@ node test/bundle-smoke.mjs
 git diff --check
 ```
 
+Allow several minutes for the full integration suite in a small cloud container.
+Use `node --test test/<name>.test.ts` for focused checks while editing.
+
 Run source commands through `node bin/rein.js`. The installed commands use
 `dist/rein.js`. Source changes that affect the CLI must include regenerated
 `dist/rein.js` and `dist/meat-worker.js` in the same review. A second bundle

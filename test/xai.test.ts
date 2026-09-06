@@ -20,6 +20,7 @@ if(args[0]==='--version') { console.log('grok 1.0.13'); process.exit(0); }
 if(args[0]==='login') process.exit(0);
 const path = args[args.indexOf('--prompt-file')+1];
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({input:fs.readFileSync(path,'utf8')})+'\\n');
+if(process.env.FAKE_READY) fs.writeFileSync(process.env.FAKE_READY, 'ready');
 const emit = value => console.log(JSON.stringify(value));
 if(process.env.FAKE_MODE==='native') { emit({sessionUpdate:'tool_call',toolCallId:'one',title:'bad native tool'}); setInterval(()=>{},1000); }
 else if(process.env.FAKE_MODE==='bad') { console.log('<tool name="bash">{"command":"no"}</tool>'); }
@@ -88,17 +89,37 @@ test("Grok bridge refuses native tools, invalid events, failed output and though
 	} finally { f.cleanup(); }
 });
 
-test("Grok bridge timeout and cancellation clean their private prompt files", async () => {
-	const f = fixture();
-	try {
-		const timeout = await streamCli(model, context, { ...f.options, env: { ...f.options.env, FAKE_MODE: "hang" }, timeoutMs: 80 }).result();
-		assert.match(timeout.errorMessage!, /timed out/);
-		const abort = new AbortController();
-		const pending = streamCli(model, context, { ...f.options, env: { ...f.options.env, FAKE_MODE: "hang" }, signal: abort.signal }).result();
-		setTimeout(() => abort.abort(), 80);
-		assert.equal((await pending).stopReason, "aborted");
-		for (const row of f.rows().filter(row => row.cwd)) assert.equal(existsSync(row.cwd), false);
-	} finally { f.cleanup(); }
+test("Grok bridge timeout and cancellation clean their private prompt files", { timeout: 20_000 }, async () => {
+	for (const mode of ["timeout", "cancel"] as const) {
+		const f = fixture(), abort = new AbortController(), ready = join(f.root, "prompt-ready");
+		const pending = streamCli(model, context, {
+			...f.options, env: { ...f.options.env, FAKE_MODE: "hang", FAKE_READY: ready },
+			timeoutMs: mode === "timeout" ? 5000 : 10_000, signal: abort.signal,
+		}).result();
+		try {
+			if (mode === "cancel") {
+				const deadline = Date.now() + 5000;
+				while (!existsSync(ready) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+				assert.ok(existsSync(ready), "The fake Grok CLI must read its prompt before cancellation.");
+				const [run] = f.rows();
+				assert.ok(existsSync(run.cwd));
+				assert.ok(existsSync(run.args[run.args.indexOf("--prompt-file") + 1]));
+				abort.abort();
+			}
+			const result = await pending;
+			if (mode === "timeout") { assert.equal(result.stopReason, "error"); assert.match(result.errorMessage!, /timed out/); }
+			else assert.equal(result.stopReason, "aborted");
+			assert.ok(existsSync(ready), `The fake Grok CLI did not read its prompt before ${mode}.`);
+			const rows = f.rows();
+			assert.equal(rows.length, 2, "Each case must start one CLI and read its actual private prompt.");
+			const [run, input] = rows;
+			assert.match(input.input, /Rein system/);
+			const promptIndex = run.args.indexOf("--prompt-file");
+			assert.ok(promptIndex >= 0); assert.equal(typeof run.cwd, "string");
+			assert.equal(existsSync(run.args[promptIndex + 1]), false);
+			assert.equal(existsSync(run.cwd), false);
+		} finally { abort.abort(); await pending; f.cleanup(); }
+	}
 });
 
 test("Grok login delegates official device/browser auth; status never starts authentication", async () => {
