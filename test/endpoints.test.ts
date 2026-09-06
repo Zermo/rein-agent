@@ -57,11 +57,11 @@ test("discovery probes bounded path variants on the supplied origin with provide
 	const requests: { url: string; auth: string | undefined; redirect: unknown }[] = [];
 	t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
 		requests.push({ url, auth: (init.headers as any)?.Authorization, redirect: init.redirect });
-		return url === "http://100.64.1.2:8123/proxy/v1/models" ? Response.json({ data: [{ id: "Qwen-model-host" }] }) : Response.json({}, { status: 404 });
+		return url === "http://100.64.1.2:8123/proxy/v1/models" ? Response.json({ data: [{ id: "fixture-model" }] }) : Response.json({}, { status: 404 });
 	});
 	const result = await detectEndpoint("100.64.1.2:8123/proxy", { apiKey: "fixture-key" });
 	assert.equal(result.baseUrl, "http://100.64.1.2:8123/proxy/v1");
-	assert.deepEqual(result.models, ["Qwen-model-host"]);
+	assert.deepEqual(result.models, ["fixture-model"]);
 	assert.deepEqual(requests.map(r => r.url), ["http://100.64.1.2:8123/proxy/models", "http://100.64.1.2:8123/proxy/v1/models"]);
 	assert.ok(requests.every(r => r.auth === "Bearer fixture-key" && r.redirect === "manual"));
 });
@@ -209,8 +209,8 @@ test("protected local discovery uses scoped credentials and ignores malformed mo
 }));
 
 test("custom llama-server metadata selects the llama.cpp adapter", async (t) => isolated(async () => {
-	t.mock.method(globalThis, "fetch", async () => Response.json({ data: [{ id: "Qwen-model-host", owned_by: "llamacpp" }] }));
+	t.mock.method(globalThis, "fetch", async () => Response.json({ data: [{ id: "fixture-model", owned_by: "llamacpp" }] }));
 	const detected = await detectEndpoint("10.1.2.30:8123", { provider: "custom" });
 	assert.equal(detected.provider, "llamacpp");
-	assert.deepEqual(detected.models, ["Qwen-model-host"]);
+	assert.deepEqual(detected.models, ["fixture-model"]);
 }));

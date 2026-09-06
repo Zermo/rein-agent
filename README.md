@@ -49,7 +49,7 @@ readable over clever, with explicit limits on context and tool output.
 
 For a visual walkthrough with copyable commands, open the
 [retro installation field guide](https://zermo.github.io/rein-agent/). It covers
-NodeTerm, a model-host over SSH, local models, and supported cloud connections. The
+NodeTerm, your own model server over SSH, local models, and supported cloud connections. The
 [public wiki](https://github.com/Zermo/rein-agent/wiki) has setup and deployment
 instructions. For offline use, open `docs/install.html` from a local checkout.
 
@@ -150,9 +150,9 @@ Queued input is discarded; send a new request when ready to continue.
 ### Explicit Chat Completions connections
 
 ```sh
-rein setup --api chat-completions --base-url http://model-host.internal:8123
-# When the model-host API listens only on its own loopback interface:
-rein setup --api chat-completions --ssh model-host --base-url 127.0.0.1:8123
+rein setup --api chat-completions --base-url http://model-host:1234
+# When the remote API listens only on its own loopback interface:
+rein setup --api chat-completions --ssh model-host --base-url 127.0.0.1:1234
 ```
 
 The wizard records `"api": "chat-completions"` and shows the final POST endpoint.
@@ -161,7 +161,7 @@ an invocation. Existing HTTP configurations default to this protocol. Custom
 proxy prefixes stay intact; JSON/SSE replies, text-part arrays, refusals, and
 usage replies without `total_tokens` work through the same adapter used by setup.
 Official subscription CLIs keep their own transport and login; HTTP protocol
-flags are rejected when a CLI provider is selected. `model-host` must be a configured
+flags are rejected when a CLI provider is selected. `model-host` must be your configured
 SSH alias; Rein does not create a public listener on the remote machine.
 
 ### Persistent bash and a live node canvas
@@ -258,33 +258,78 @@ records above 8 MB. See the [September export diagnosis](docs/debug-2026-09-05.m
 for findings, fixes, and limitations. Both upstreams are pinned under `vendor/`;
 `npm run check:natives` verifies their source and license hashes.
 
-### Remote servers, API keys, and subscription login
+### Host models on your own hardware
 
-For a server reachable over LAN or NetBird, enter its hostname or IP and port.
-Rein detects common API prefixes, accepts pasted `/models` or `/chat/completions`
-URLs, and preserves custom proxy paths. It probes only the host and port you supply.
+Rein connects to an OpenAI-compatible Chat Completions server on this computer,
+on another machine in your LAN, or through a mesh VPN such as NetBird or Tailscale.
+Choose a model that fits the serving machine's memory and supports tool use for
+coding tasks. The server handles inference; Rein runs in your project directory.
+
+| Server | Start serving | Default local API base |
+| --- | --- | --- |
+| [LM Studio](https://lmstudio.ai/docs/developer/core/server) | Install the app, download and load a model, then start the server in the Developer tab | `http://localhost:1234/v1` |
+| [Ollama](https://docs.ollama.com/quickstart) | Install Ollama, start the app or `ollama serve`, then download a model with `ollama pull MODEL_ID` | `http://localhost:11434/v1` |
+| llama.cpp | Start its OpenAI-compatible `llama-server` with your model | `http://localhost:8080/v1` |
+| vLLM | Start its OpenAI-compatible server with your model | `http://localhost:8000/v1` |
+
+Use the actual URL shown by your server if its port or API prefix differs.
+`MODEL_ID` is a placeholder for a model you choose from the server's catalog.
 
 ```sh
-rein setup --base-url model-host.internal:8123
-# Unattended setup discovers the model; set REIN_API_KEY in the environment if required:
-rein setup --yes --base-url model-host.internal:8123
+rein setup
+# Or choose a known local server explicitly:
+rein setup --provider lmstudio --api chat-completions
+rein setup --provider ollama --api chat-completions
 ```
 
-A server bound to `127.0.0.1` on the model-host is reachable only from that model-host.
-Use an existing SSH alias to reach it without changing the server listener:
+Local discovery checks only the four localhost addresses above. It lists servers
+that return available models; an empty model list or missing credentials can keep
+a server out of that list. To connect to another machine, enter its reachable host
+and port. Rein normalizes API paths, accepts pasted `/models` or
+`/chat/completions` URLs, and discovers model IDs on that same origin. It does not
+scan your LAN, mesh peers, or arbitrary ports.
+
+### Connect through a LAN, mesh VPN, or SSH
+
+For direct access, the model server must listen on an interface reachable from
+the computer running Rein. In LM Studio enable **Serve on Local Network**, or run
+`lms server start --port 1234 --bind 0.0.0.0`. Enable the server's authentication
+when sharing it. See [LM Studio network setup](https://lmstudio.ai/docs/developer/core/server/serve-on-network).
+For Ollama, configure `OLLAMA_HOST` and restart its app or service as described in
+the [Ollama network configuration](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network).
+Restrict access with your firewall or mesh access rules.
+
+Replace `model-host` below with your server's LAN or mesh hostname or IP, and use
+its listening port. Both devices need the appropriate network route and access.
+`0.0.0.0` is a listener setting, not the address to enter in Rein.
 
 ```sh
-ssh model-host                            # verify your existing SSH key/config
-rein setup --yes --ssh model-host --base-url 127.0.0.1:8123
-rein -p "hello"                    # reconnects through SSH automatically
+rein setup --api chat-completions --base-url http://model-host:1234
+# Unattended setup chooses a discovered model; set REIN_API_KEY if required:
+rein setup --yes --api chat-completions --base-url http://model-host:1234
+```
+
+A loopback-only API is reachable from its own machine. Use your existing SSH
+alias to reach it without changing the server listener:
+
+```sh
+ssh model-host                    # verify your SSH configuration and host key
+ssh -o BatchMode=yes model-host true
+rein setup --ssh model-host --base-url 127.0.0.1:1234 --api chat-completions
+rein -p "hello"                   # reconnects through SSH automatically
 rein setup --status
 ```
 
-The tunnel listens on an ephemeral local loopback port and closes after each
-request. SSH forwarding supports HTTP APIs, requires noninteractive SSH key
-authentication, and uses the remote host's view of the target URL. Direct HTTPS
-APIs use their reachable URL. Connection errors distinguish DNS, refusal, timeout,
-authentication, missing API paths, and responses from a web UI.
+With `--ssh`, the target URL is interpreted from the remote machine. Without it,
+`127.0.0.1` means the computer running Rein. The tunnel uses an ephemeral local
+loopback port and closes after each request. SSH forwarding supports HTTP APIs
+and requires noninteractive SSH authentication. Direct HTTPS APIs use their
+reachable URL.
+
+The [self-hosted model walkthrough](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models)
+covers installation, remote access, connection checks, and troubleshooting.
+
+### API keys and subscription login
 
 For cloud APIs, setup opens the provider's key page when a key is needed, then
 queries the authenticated model list. Standard environment variables such as
@@ -613,7 +658,7 @@ until startup is confirmed. Save the intended settings with `rein setup`, or use
 `rein autonomy daemon` from the configured shell. API keys are never copied into
 service definitions. To save an API key through interactive setup, unset its
 shell variable for that command, then enter the key and choose to save it.
-For an SSH tunnel to a model-host, the service also needs noninteractive SSH access;
+For an SSH tunnel to a model server, the service also needs noninteractive SSH access;
 an agent available only through the terminal's `SSH_AUTH_SOCK` may be unavailable.
 
 Dashboard approvals enable read-only inspection with bounded `read`, `ls`, and

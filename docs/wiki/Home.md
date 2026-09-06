@@ -1,6 +1,6 @@
 # Boot up. Take rein.
 
-Rein is a terminal agent for local models, a model-host over SSH, and supported cloud connections. Install the CLI, connect a model, then run it in your project directory.
+Rein is a terminal agent for local models, your own server over SSH, and supported cloud connections. Install the CLI, connect a model, then run it in your project directory.
 
 [![Rein installation field guide](https://zermo.github.io/rein-agent/assets/rein-field-guide-card.png)](https://zermo.github.io/rein-agent/)
 
@@ -9,7 +9,7 @@ Open the [retro field guide](https://zermo.github.io/rein-agent/) for copyable c
 | Task | Page |
 | --- | --- |
 | Install Rein, make a first request, or update | [Install](https://github.com/Zermo/rein-agent/wiki/Install) |
-| Connect to a model on a model-host through SSH | [model-host connection](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models) |
+| Host a model locally or connect over LAN, mesh, or SSH | [Self-hosted models](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models) |
 | Use Codex, Copilot, or a cloud API key | [Cloud connections](https://github.com/Zermo/rein-agent/wiki/Cloud-connections) |
 | Publish the field guide or update this wiki | [Deploy the field guide](https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide) |
 

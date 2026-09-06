@@ -23,7 +23,7 @@ test("connection probe budgets a short reasoning pass before the visible answer"
 		request.on("data", chunk => { body += chunk; });
 		request.on("end", () => {
 			received = { url: request.url, authorization: request.headers.authorization, body: JSON.parse(body) };
-			// The reproduced model-host response needed 26 tokens to reach its two-letter answer.
+			// This reasoning fixture needs a larger budget to reach its two-letter answer.
 			const content = received.body.max_tokens >= 26 ? "ok" : "";
 			response.writeHead(200, { "content-type": "application/json" });
 			response.end(JSON.stringify(completion({ role: "assistant", content, reasoning_content: "fixture reasoning" })));

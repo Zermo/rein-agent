@@ -34,9 +34,9 @@ For a model on this computer, start the server, load a model, and run:
 rein setup
 ```
 
-Rein discovers common local servers, including Ollama, LM Studio, llama.cpp, and vLLM. If discovery misses yours, choose the custom API option and enter the URL shown by your model server.
+Rein checks localhost ports 11434, 1234, 8080, and 8000 for Ollama, LM Studio, llama.cpp, and vLLM. If discovery misses yours, choose the custom API option and enter the URL shown by your model server. For another machine, supply its reachable hostname or IP and port; Rein does not scan LAN or mesh peers.
 
-For other routes, use [model-host connection](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models) or [Cloud connections](https://github.com/Zermo/rein-agent/wiki/Cloud-connections).
+For other routes, use [Self-hosted models](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models) or [Cloud connections](https://github.com/Zermo/rein-agent/wiki/Cloud-connections).
 
 ## Make a first request
 

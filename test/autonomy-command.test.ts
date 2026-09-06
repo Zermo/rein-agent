@@ -15,7 +15,7 @@ function fixture(t: { after: (fn: () => void) => void; mock: { method: (...args:
 	for (const name of names) delete process.env[name];
 	process.env.REIN_HOME = join(dir, "home"); mkdirSync(process.env.REIN_HOME);
 	const workspace = join(dir, "workspace"); mkdirSync(workspace);
-	writeFileSync(join(process.env.REIN_HOME, "config.json"), JSON.stringify({ provider: "custom", baseUrl: "http://127.0.0.1:8123/v1", model: "local-model" }));
+	writeFileSync(join(process.env.REIN_HOME, "config.json"), JSON.stringify({ provider: "custom", baseUrl: "http://127.0.0.1:1234/v1", model: "local-model" }));
 	const messages: string[] = [];
 	t.mock.method(console, "log", (...args: unknown[]) => messages.push(args.map(String).join(" ")));
 	t.after(() => { for (const [name, value] of previous) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } rmSync(dir, { recursive: true, force: true }); });

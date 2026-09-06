@@ -26,13 +26,13 @@ boundaries were treated as screenshot cutoffs rather than page defects.
 
 ## Final visual coverage
 
-- Desktop, 1135 x 931: cover, installation, model-host setup, cloud login, first run,
+- Desktop, 1135 x 931: cover, installation, remote server setup, cloud login, first run,
   and updates.
-- Mobile, 390 x 844: cover, installation, model-host setup and its command, cloud API
+- Mobile, 390 x 844: cover, installation, remote server setup and its command, cloud API
   setup, first run, and updates.
 - Narrow, 320 x 780: cover, installation, and the full wrapped install command.
-- Four 2x crops: desktop cover, desktop model-host, mobile model-host command, and narrow
-  install command.
+- Four 2x crops: desktop cover, desktop remote server, mobile remote server
+  command, and narrow install command.
 
 The checked cover is retained as [install-guide-preview.png](assets/install-guide-preview.png).
 Screenshots cannot prove clipboard contents, shell execution, or print output.
@@ -50,5 +50,5 @@ not part of the screenshot review.
 All eleven shell snippets passed `bash -n` without execution. The SSH config
 example was excluded from that shell check. The inline JavaScript passed
 `node --check`. An independent code review confirmed that installation, SSH,
-status, and update commands match the harness implementation. A live model-host setup
+status, and update commands match the harness implementation. A live remote server setup
 probe passed through the existing SSH configuration.

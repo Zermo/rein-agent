@@ -8455,7 +8455,7 @@ async function testConnection(baseUrl, model, apiKey, options = {}) {
     if (!usable) return { ok: true, detail: `valid chat completion in ${Date.now() - started}ms; the probe returned reasoning rather than a final answer` };
     return { ok: true, detail: `valid chat completion in ${Date.now() - started}ms` };
   } catch (error) {
-    return { ok: false, detail: `${redactKey(error instanceof Error ? error.message : String(error), apiKey)}. For direct remote access, check the server's listening address, port, and NetBird/firewall reachability. For a loopback-only server, use --ssh <host>.` };
+    return { ok: false, detail: `${redactKey(error instanceof Error ? error.message : String(error), apiKey)}. For direct remote access, check the server's listening address and port, network routing, and firewall rules. For a loopback-only server, use --ssh <host>.` };
   }
 }
 async function choose(prompt, log, label, choices, defaultIndex = 0) {
@@ -8534,7 +8534,7 @@ API key: ${config.apiKey ? "saved (hidden)" : "not saved"}`);
       log("rein setup \u2014 local server, remote host, cloud API, or CLI account");
       const locals = await (dependencies.discover ?? discoverLocalServers)();
       const choices = locals.map((server) => ({ ...server, label: `${server.provider} \u2014 ${server.baseUrl}` }));
-      choices.push({ label: "Custom Chat Completions API / remote host (model-host, NetBird, LAN)", provider: "custom" });
+      choices.push({ label: "Custom Chat Completions API / remote host (LAN, VPN, mesh)", provider: "custom" });
       choices.push(...["codex", "copilot"].map((provider2) => ({ label: CLI_PROVIDERS[provider2].label, cli: provider2 })));
       for (const [provider2, preset] of Object.entries(PROVIDER_PRESETS)) if (!LOCAL.has(provider2) && provider2 !== "github") choices.push({ label: `${provider2} \u2014 cloud API key`, provider: provider2, baseUrl: preset.baseUrl });
       selection = { ...choices[await choose(getPrompt(), log, "Choose connection", choices.map((c) => c.label))], model: selection.model };
@@ -8584,8 +8584,8 @@ Install with: ${info.installCommand}`);
       }
     }
     if (!selection.baseUrl) {
-      if (opts.yes) throw new Error("No endpoint configured. Pass --base-url <NetBird-host-or-IP>:<port> or --provider <name>; add --model if discovery is unavailable.");
-      log("Enter the server host and listening port. For remote LM Studio, use its NetBird/LAN address and port (often 1234); localhost means this machine.");
+      if (opts.yes) throw new Error("No endpoint configured. Pass --base-url <host-or-IP>:<port> or --provider <name>; add --model if discovery is unavailable.");
+      log("Enter the server host and listening port. For remote LM Studio, use its LAN or mesh address and port (often 1234); localhost means this machine.");
       selection.baseUrl = await getPrompt().ask("Server URL or host:port: ");
     }
     let baseUrl = normalizeBaseUrl(selection.baseUrl);
@@ -8599,7 +8599,7 @@ Install with: ${info.installCommand}`);
     let sshHost = opts.sshHost ?? (sameEndpoint ? config.sshHost : void 0);
     if (!opts.yes && !sshHost && provider === "custom") {
       log("If the remote API listens only on 127.0.0.1, Rein can reach it through an SSH host from your SSH config (for example, model-host).");
-      sshHost = await getPrompt().ask("SSH host (optional; Enter for direct NetBird/LAN access): ") || void 0;
+      sshHost = await getPrompt().ask("SSH host (optional; Enter for direct LAN or mesh access): ") || void 0;
     }
     const sameConnection = sameEndpoint && (config.sshHost ?? void 0) === sshHost;
     let model = selection.model ?? (sameConnection ? config.model : void 0);
@@ -8633,7 +8633,7 @@ Install with: ${info.installCommand}`);
       else model = endpoint.models[await choose(getPrompt(), log, "Choose model", endpoint.models, Math.max(0, endpoint.models.indexOf(preferred ?? "")))];
     }
     if (!model && !opts.yes) model = await getPrompt().ask("Model ID (if the server does not list models): ");
-    if (!model) throw new Error("No model available. Load a model on the remote server or pass --model <id>. Check the listening port, 0.0.0.0 binding and NetBird reachability if discovery failed.");
+    if (!model) throw new Error("No model available. Load a model on the remote server or pass --model <id>. For direct access, check the listening address, port, network routing and firewall rules if discovery failed; loopback-only servers need --ssh <host>.");
     const result = await connection(baseUrl, model, key, { sshHost });
     if (!result.ok) throw new Error(`Connection test failed: ${result.detail}
 Configuration was not saved. Correct the endpoint, credentials or model and rerun setup.`);
@@ -9158,7 +9158,7 @@ Usage:
   rein setup --status           show config, detected servers, test the connection
   rein login codex|copilot      open official subscription device sign-in
   rein setup --provider codex   use a ChatGPT subscription through the official CLI
-  rein setup --ssh model-host --base-url 127.0.0.1:8123
+  rein setup --ssh model-host --base-url 127.0.0.1:1234
                                 reach a remote loopback API through SSH
 
 Model selection (highest wins):

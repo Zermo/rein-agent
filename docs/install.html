@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="A hands-on Rein installation guide for NodeTerm, local models, model-host over SSH, and cloud accounts.">
+<meta name="description" content="A hands-on Rein installation guide for NodeTerm, local models, self-hosted models over SSH, and cloud accounts.">
 <title>Rein field guide · Install, connect, run</title>
 <link rel="canonical" href="https://zermo.github.io/rein-agent/">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%22240%20200%20780%20780%22%20color%3D%22%23b54229%22%3E%3Crect%20x%3D%22240%22%20y%3D%22200%22%20width%3D%22780%22%20height%3D%22780%22%20rx%3D%2280%22%20fill%3D%22%23f5eddc%22%2F%3E%3Cpath%20fill%3D%22currentColor%22%20fill-rule%3D%22evenodd%22%20d%3D%22M466%20278H707C814%20278%20886%20354%20886%20456V509C886%20610%20833%20666%20762%20690L885%20902Q888%20907%20882%20907H666Q661%20907%20659%20902L541%20708H507V903Q507%20907%20503%20907H377Q372%20907%20372%20903V375C372%20321%20416%20278%20466%20278Z%20M616%20408H735L818%20586L794%20616H726L683%20582H543Q540%20581%20541%20577L615%20410Q615%20408%20616%20408Z%22%2F%3E%3Crect%20x%3D%22682%22%20y%3D%22446%22%20width%3D%2242%22%20height%3D%2238%22%20rx%3D%222%22%20fill%3D%22currentColor%22%2F%3E%3C%2Fsvg%3E">
 <meta name="theme-color" content="#f5eddc">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Boot up. Take Rein. | Installation field guide">
-<meta property="og:description" content="Install Rein, connect your local or cloud model, and run your first session. A field guide for NodeTerm, model-host over SSH, and cloud accounts.">
+<meta property="og:description" content="Install Rein, connect your local or cloud model, and run your first session. A field guide for NodeTerm, self-hosted models over SSH, and cloud accounts.">
 <meta property="og:url" content="https://zermo.github.io/rein-agent/">
 <meta property="og:image" content="https://zermo.github.io/rein-agent/assets/rein-field-guide-card.jpg">
 <meta property="og:image:width" content="1280">
@@ -87,26 +87,31 @@ curl --version</code></pre></div>
 
 <section class="step" id="connect" aria-labelledby="connect-title">
   <aside><div class="step-number">02</div><div class="step-title">Choose a model</div><p>Same Rein. Pick the connection that matches where your model runs.</p></aside>
-  <div><h2 id="connect-title">Make the connection.</h2><p>You can use a local server, your model-host, a supported subscription CLI, or a cloud API key. Choose your route below.</p>
-    <div class="tabs js-only" role="tablist" aria-label="Model connection"><button class="tab" type="button" id="tab-model-host" role="tab" aria-controls="panel-model-host" aria-selected="true">model-host / SSH</button><button class="tab" type="button" id="tab-local" role="tab" aria-controls="panel-local" aria-selected="false" tabindex="-1">Local server</button><button class="tab" type="button" id="tab-login" role="tab" aria-controls="panel-login" aria-selected="false" tabindex="-1">Cloud login</button><button class="tab" type="button" id="tab-key" role="tab" aria-controls="panel-key" aria-selected="false" tabindex="-1">Cloud API key</button></div>
+  <div><h2 id="connect-title">Make the connection.</h2><p>You can use a local server, your own remote hardware, a supported subscription CLI, or a cloud API key. Choose your route below.</p>
+    <div class="tabs js-only" role="tablist" aria-label="Model connection"><button class="tab" type="button" id="tab-local" role="tab" aria-controls="panel-local" aria-selected="true">Local server</button><button class="tab" type="button" id="tab-remote" role="tab" aria-controls="panel-remote" aria-selected="false" tabindex="-1">Network / SSH</button><button class="tab" type="button" id="tab-login" role="tab" aria-controls="panel-login" aria-selected="false" tabindex="-1">Cloud login</button><button class="tab" type="button" id="tab-key" role="tab" aria-controls="panel-key" aria-selected="false" tabindex="-1">Cloud API key</button></div>
     <noscript><p>Connection routes are all shown below. Pick the one that matches your setup.</p></noscript>
-    <div class="panel" id="panel-model-host" role="tabpanel" aria-labelledby="tab-model-host">
-      <h3>Your model-host, over SSH.</h3><p>Keep the model server running on the model-host. Make sure NetBird is connected and your <code>model-host</code> SSH alias works.</p>
-      <div class="network" role="img" aria-label="Rein on your Mac connects through SSH over NetBird to the model server at 127.0.0.1 port 8123 on the model-host"><div class="network-node">MAC / NODETERM<small>Rein opens the tunnel</small></div><div class="arrow" aria-hidden="true">→</div><div class="network-node">model-host / MODEL SERVER<small>127.0.0.1:8123 on the model-host</small></div></div>
-      <p class="network-note"><strong>Localhost belongs to the model-host here.</strong> With <code>--ssh model-host</code>, Rein forwards to the remote machine's loopback address. You can keep the server bound to <code>127.0.0.1</code>.</p>
-      <div class="command"><div class="command-header"><span>CHECK SSH, THEN CONFIGURE REIN</span><button class="copy js-only" type="button" data-copy="model-host-command" aria-label="Copy model-host setup commands">Copy</button></div><pre><code id="model-host-command">ssh -o BatchMode=yes model-host true &amp;&amp;
-rein setup --ssh model-host --base-url 127.0.0.1:8123 \
-  --api chat-completions</code></pre></div>
-      <p>Choose a loaded model when asked. If the local server does not require a key, leave the API-key prompt blank. <code>API key: not saved</code> is expected for a server that accepts unauthenticated requests.</p>
-      <details><summary>Why not use the model-host's NetBird IP as the base URL?</summary><p>A server bound only to <code>127.0.0.1</code> is reachable from that server itself. Its NetBird IP identifies the machine, but does not make the loopback-only API listen on the network. The SSH tunnel connects those two pieces.</p><p>If your API already listens on its NetBird interface, a direct HTTP connection is also possible. Use that actual listening address and port in setup.</p></details>
-      <details><summary>The SSH check fails or says "Could not resolve hostname model-host".</summary><p>The <code>model-host</code> name must be a working SSH alias or a resolvable host. Add an entry to <code>~/.ssh/config</code> using your actual NetBird address and model-host username:</p><pre><code>Host model-host
-    HostName YOUR_NETBIRD_IP
-    User YOUR_model-host_USER</code></pre><p>Replace both placeholders. First connect with <code>ssh model-host</code> to verify the host and set up your normal key-based login. Rein opens tunnels non-interactively, so the <code>BatchMode=yes</code> check must pass.</p></details>
-    </div>
     <div class="panel" id="panel-local" role="tabpanel" aria-labelledby="tab-local">
-      <h3>A model on this computer.</h3><p>Start your model server and load a model. Then open the setup wizard. Rein can discover common local servers such as Ollama, LM Studio, llama.cpp, and vLLM.</p>
+      <h3>Your hardware. Your model.</h3><p>Install a model server on a computer with enough memory for your chosen model. Rein connects to its OpenAI-compatible Chat Completions API.</p>
+      <p><strong>LM Studio:</strong> <a href="https://lmstudio.ai/download">install LM Studio</a>, download and load a model, then start the server from its Developer tab. Its usual local address is <code>http://localhost:1234/v1</code>. See the <a href="https://lmstudio.ai/docs/developer/core/server">server guide</a>.</p>
+      <p><strong>Ollama:</strong> <a href="https://ollama.com/download">install Ollama</a> and start its app, or run <code>ollama serve</code>. In another terminal run <code>ollama pull qwen2.5-coder:7b</code>, or pull another model that fits your hardware. Its Chat Completions base URL is <code>http://localhost:11434/v1</code>.</p>
       <div class="command"><div class="command-header"><span>AUTO-DETECT A LOCAL SERVER</span><button class="copy js-only" type="button" data-copy="local-command" aria-label="Copy local setup command">Copy</button></div><pre><code id="local-command">rein setup</code></pre></div>
-      <p>If discovery misses it, choose the custom API option and paste the server URL shown in your model app. On this route, <code>127.0.0.1</code> means the computer running Rein.</p>
+      <p>Rein checks localhost ports <code>11434</code>, <code>1234</code>, <code>8080</code>, and <code>8000</code> for Ollama, LM Studio, llama.cpp, and vLLM. It lists available models and tests the selected connection.</p>
+      <p>If discovery misses it, choose the custom API option and paste the URL shown in your model app. <code>127.0.0.1</code> means the computer running Rein. Find more hosting options in the <a href="https://github.com/Zermo/rein-agent/wiki/Self-hosted-models">self-hosted models wiki</a>.</p>
+    </div>
+    <div class="panel" id="panel-remote" role="tabpanel" aria-labelledby="tab-remote">
+      <h3>A model elsewhere on your network.</h3><p>Run the server on your own hardware and connect over your LAN, VPN, or mesh network. Supply the reachable hostname or IP and the port shown by your model server. Rein checks API paths on that address; it does not scan your network for machines.</p>
+      <div class="network" role="img" aria-label="Rein connects over your LAN, mesh, or SSH to a model server on your own hardware"><div class="network-node">YOUR TERMINAL<small>Rein checks the API</small></div><div class="arrow" aria-hidden="true">→</div><div class="network-node">YOUR MODEL SERVER<small>LAN · mesh · SSH</small></div></div>
+      <p>For a direct connection, enable LM Studio's <strong>Serve on Local Network</strong> setting, or configure Ollama's <code>OLLAMA_HOST</code> to bind to a reachable interface. Allow the server port through your firewall only for intended clients. A mesh connection still needs a listener on a reachable interface.</p>
+      <div class="command"><div class="command-header"><span>DIRECT CONNECTION / REPLACE THE HOST</span><button class="copy js-only" type="button" data-copy="remote-command" aria-label="Copy remote setup command">Copy</button></div><pre><code id="remote-command">rein setup --provider custom \
+  --base-url http://model-host.local:1234/v1 \
+  --api chat-completions</code></pre></div>
+      <p>Replace <code>model-host.local:1234</code> with your server's actual LAN or mesh address and port. Rein normalizes the API prefix, asks the server for models, then checks Chat Completions. Enter a key if your server requires one.</p>
+      <details><summary>Keep the server on loopback and connect over SSH.</summary><p>Create a working SSH alias such as <code>model-host</code> using your normal SSH configuration and key-based login. Connect once with <code>ssh model-host true</code> to verify its identity. Rein's non-interactive check must pass:</p>
+      <div class="command"><div class="command-header"><span>CHECK SSH, THEN CONFIGURE REIN</span><button class="copy js-only" type="button" data-copy="ssh-command" aria-label="Copy SSH setup commands">Copy</button></div><pre><code id="ssh-command">ssh -o BatchMode=yes model-host true &amp;&amp;
+rein setup --ssh model-host --base-url 127.0.0.1:1234 \
+  --api chat-completions</code></pre></div>
+      <p>Replace the alias and port with your own. With <code>--ssh</code>, the loopback address belongs to the remote server. Rein opens the tunnel, so your model app can stay bound to <code>127.0.0.1</code>.</p></details>
+      <p class="small">See <a href="https://github.com/Zermo/rein-agent/wiki/Self-hosted-models">server binding, mesh setup, and connection checks</a> for the complete walkthrough.</p>
     </div>
     <div class="panel" id="panel-login" role="tabpanel" aria-labelledby="tab-login">
       <h3>Sign in with a supported account.</h3><p>Rein delegates subscription authentication to the official Codex or Copilot CLI. Install the one you use, then run its Rein setup command.</p>
@@ -150,7 +155,7 @@ rein --no-tools -p "Reply with the single word: ok"</code></pre></div>
 
 <section class="trouble" aria-labelledby="trouble-title"><h2 id="trouble-title">If a light<br>stays red</h2><div>
   <details><summary>"No valid chat completion" with Qwen or another reasoning model</summary><p><strong>Update Rein first.</strong> Older setup probes allowed only eight output tokens. A reasoning model could use that budget before returning visible text, even though the server answered correctly. v0.9.3 gives the probe more room and recognizes supported reasoning responses.</p><p>Then rerun <code>rein setup --status</code>. A response that still lacks a completion needs investigation; an HTTP 200 status alone is not enough.</p></details>
-  <details><summary>"SSH connection failed", a timeout, or connection refused</summary><p>Check that NetBird is connected, the model-host is awake, and its model app is serving on the configured port. Run the SSH check in <a href="#connect">step 02</a>. With an SSH route, the model app can remain bound to loopback.</p></details>
+  <details><summary>"SSH connection failed", a timeout, or connection refused</summary><p>Check that your network or mesh is connected, the model host is awake, and its model app is serving on the configured port. Run the SSH check in <a href="#connect">step 02</a>. With an SSH route, the model app can remain bound to loopback.</p></details>
   <details><summary>HTTP 401, HTTP 403, or an unknown model</summary><p>Check the selected provider, account or API key, and model ID. Run <code>rein setup</code> to choose from the server's model list. A missing saved key is only a problem if that server requires one.</p></details>
   <details><summary>I want to use native Windows without WSL.</summary><p>Use npm to install the prebuilt CLI, then start setup:</p><pre><code>npm install --global git+https://github.com/Zermo/rein-agent.git
 rein setup</code></pre><p>Rerun the npm installation command to update. The curl/Bash updater and tmux route in this guide use macOS, Linux, or WSL.</p></details>

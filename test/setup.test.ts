@@ -96,15 +96,15 @@ test("CLI setup keeps official credentials out of Rein config and --yes never lo
 }));
 
 test("SSH setup persists the logical endpoint and scopes saved credentials to the SSH host", async () => isolated(async (_home, path) => {
-	writeFileSync(path, JSON.stringify({ provider: "custom", sshHost: "old-host", baseUrl: "http://127.0.0.1:8123/v1", apiKey: "old-host-secret", model: "old" }));
+	writeFileSync(path, JSON.stringify({ provider: "custom", sshHost: "old-host", baseUrl: "http://127.0.0.1:1234/v1", apiKey: "old-host-secret", model: "old" }));
 	const logs: string[] = [];
-	assert.equal(await runSetup({ yes: true, sshHost: "model-host", baseUrl: "127.0.0.1:8123" }, {
+	assert.equal(await runSetup({ yes: true, sshHost: "model-host", baseUrl: "127.0.0.1:1234" }, {
 		...deps(logs), keyFor: (_provider, _url, sshHost) => { assert.equal(sshHost, "model-host"); return undefined; },
-		detect: async (baseUrl, options) => { assert.equal(options?.sshHost, "model-host"); assert.equal(options?.apiKey, undefined); return { baseUrl, provider: "custom", models: ["model-host-model"] }; },
-		connection: async (baseUrl, model, key, options) => { assert.equal(baseUrl, "http://127.0.0.1:8123/v1"); assert.equal(options?.sshHost, "model-host"); return { ok: true, detail: "mock SSH passed" }; },
+		detect: async (baseUrl, options) => { assert.equal(options?.sshHost, "model-host"); assert.equal(options?.apiKey, undefined); return { baseUrl, provider: "custom", models: ["remote-model"] }; },
+		connection: async (baseUrl, model, key, options) => { assert.equal(baseUrl, "http://127.0.0.1:1234/v1"); assert.equal(options?.sshHost, "model-host"); return { ok: true, detail: "mock SSH passed" }; },
 	}), 0, logs.join("\n"));
 	const config = JSON.parse(readFileSync(path, "utf8"));
-	assert.equal(config.baseUrl, "http://127.0.0.1:8123/v1"); assert.equal(config.sshHost, "model-host"); assert.equal(config.apiKey, undefined); assert.equal(config.model, "model-host-model");
+	assert.equal(config.baseUrl, "http://127.0.0.1:1234/v1"); assert.equal(config.sshHost, "model-host"); assert.equal(config.apiKey, undefined); assert.equal(config.model, "remote-model");
 }));
 
 test("setup prompt preserves queued answers and releases stdin listeners on EOF", async () => {

@@ -7,8 +7,8 @@ import { stream } from "../src/ai/openai-completions.ts";
 import { checkConfiguredProvider, usesLocalHardware } from "../src/harness/doctor.ts";
 
 test("SSH forwarding arguments are loopback-only and cannot contain shell options", () => {
-	const args = sshArguments("user@model-host", "http://127.0.0.1:8123/v1", 32345);
-	assert.ok(args.includes("127.0.0.1:32345:127.0.0.1:8123"));
+	const args = sshArguments("user@model-host", "http://127.0.0.1:1234/v1", 32345);
+	assert.ok(args.includes("127.0.0.1:32345:127.0.0.1:1234"));
 	assert.deepEqual(args.slice(-2), ["--", "user@model-host"]);
 	assert.ok(args.includes("BatchMode=yes"));
 	for (const invalid of ["-oProxyCommand=evil", "model-host;echo bad", "model-host\nproxy", "model-host other"]) assert.throws(() => sshArguments(invalid, "http://localhost:1", 32345));
@@ -41,12 +41,12 @@ test("managed tunnel forwards requests, preserves path, and closes after success
 });
 
 test("missing SSH executable and canceled startup fail promptly", { timeout: 5000 }, async () => {
-	await assert.rejects(withSshTunnel("http://127.0.0.1:8123/v1", "model-host", async () => assert.fail("must not run"), {
+	await assert.rejects(withSshTunnel("http://127.0.0.1:1234/v1", "model-host", async () => assert.fail("must not run"), {
 		spawnSsh: () => spawn("/does-not-exist/rein-test-ssh", [], { stdio: "pipe" }),
 	}), /Cannot open SSH tunnel/);
 	const controller = new AbortController();
 	let child: ReturnType<typeof spawn> | undefined;
-	const result = withSshTunnel("http://127.0.0.1:8123/v1", "model-host", async () => assert.fail("must not run"), {
+	const result = withSshTunnel("http://127.0.0.1:1234/v1", "model-host", async () => assert.fail("must not run"), {
 		signal: controller.signal,
 		spawnSsh: () => { child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { stdio: "pipe" }); controller.abort(); return child; },
 	});
@@ -55,14 +55,14 @@ test("missing SSH executable and canceled startup fail promptly", { timeout: 500
 });
 
 test("SSH setup failure is encoded as a terminal provider stream error", async () => {
-	const result = await stream({ id: "fixture", provider: "custom", baseUrl: "http://127.0.0.1:8123/v1", sshHost: "-invalid", contextWindow: 32768, maxTokens: 32 }, { messages: [] }).result();
+	const result = await stream({ id: "fixture", provider: "custom", baseUrl: "http://127.0.0.1:1234/v1", sshHost: "-invalid", contextWindow: 32768, maxTokens: 32 }, { messages: [] }).result();
 	assert.equal(result.stopReason, "error");
 	assert.match(result.errorMessage!, /SSH host/);
 });
 
 test("doctor only compares hardware on the machine actually serving the model", async () => {
-	for (const baseUrl of ["http://10.1.2.30:8123/v1", "http://192.168.1.2:1234/v1", "http://100.64.1.2:8000/v1", "https://localhost.example/v1", "cli://codex"]) assert.equal(usesLocalHardware({ baseUrl }), false);
-	assert.equal(usesLocalHardware({ baseUrl: "http://127.0.0.1:8123/v1", sshHost: "model-host" }), false);
+	for (const baseUrl of ["http://10.1.2.30:1234/v1", "http://192.168.1.2:1234/v1", "http://100.64.1.2:8000/v1", "https://localhost.example/v1", "cli://codex"]) assert.equal(usesLocalHardware({ baseUrl }), false);
+	assert.equal(usesLocalHardware({ baseUrl: "http://127.0.0.1:1234/v1", sshHost: "model-host" }), false);
 	assert.equal(usesLocalHardware({ baseUrl: "http://localhost:1234/v1" }), true);
 	assert.equal(usesLocalHardware({ baseUrl: "http://[::1]:1234/v1" }), true);
 	const server = createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "model-other" }] })); });

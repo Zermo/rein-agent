@@ -90,7 +90,7 @@ Usage:
   rein setup --status           show config, detected servers, test the connection
   rein login codex|copilot      open official subscription device sign-in
   rein setup --provider codex   use a ChatGPT subscription through the official CLI
-  rein setup --ssh model-host --base-url 127.0.0.1:8123
+  rein setup --ssh model-host --base-url 127.0.0.1:1234
                                 reach a remote loopback API through SSH
 
 Model selection (highest wins):

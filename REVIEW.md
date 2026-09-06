@@ -1,5 +1,18 @@
 # Posthorse and harness review
 
+## Public self-hosted setup
+
+Public examples now use synthetic hosts and ports. The guide and wiki cover
+LM Studio and Ollama installation, local discovery, direct LAN or mesh access,
+and SSH forwarding to a remote loopback listener. Discovery claims match the
+bounded probes in the implementation. User configuration stays outside the repo.
+
+The source suite passes all 304 tests. The Node 18 bundle smoke passes. A separate
+review checked documentation against the implementation and official server
+docs, parsed HTML/JavaScript and shell examples, and found an interactive SSH
+example that could leave subsequent commands on the remote machine. It now
+uses a one-command SSH connection that returns to the local terminal.
+
 ## Field guide branding and public publishing
 
 The guide now has matching repo cards, a PNG/SVG harness logo, a public setup
@@ -11,7 +24,7 @@ script syntax, and guide/wiki command syntax passed. See the
 
 ## 0.9.3 Reasoning-model setup and install guide
 
-The reported model-host connection was valid: an eight-token setup probe returned
+A reported self-hosted connection was valid: an eight-token setup probe returned
 reasoning with no visible answer. A live probe with 128 tokens reached `ok` in
 26 completion tokens through the existing SSH route. Setup now uses that
 bounded budget and recognizes the same reasoning aliases as normal inference.
@@ -27,7 +40,7 @@ Node 18 bundle smoke, native provenance, real browser smoke, and package gates
 all pass.
 
 The [installation field guide](docs/install.html) covers fresh installation,
-existing configurations, model-host loopback access through SSH, local discovery,
+existing configurations, remote loopback access through SSH, local discovery,
 cloud accounts, API keys, first use, and updates. It runs offline and copies
 commands without executing them. The guide follows dzhng's `write-docs` and
 `screenshot-critique` skills. The [visual review record](docs/install-guide-review.md)
@@ -300,7 +313,7 @@ and official CLI transports, then reviewed each other's changes. The review fixe
 Validation includes fake CLI processes, mocked authenticated APIs, CLI-to-config
 integration, and subprocess forwarding/cleanup tests. Actual current Codex and
 Copilot parsers accepted the generated flags with `--help`; no cloud account login
-or paid cloud inference was performed. A live model-host loopback server was reached over
+or paid cloud inference was performed. A live self-hosted loopback server was reached over
 SSH: model discovery, saved setup, chat, and a read-only fixture tool round trip
 all passed. The server listener was left unchanged.
 

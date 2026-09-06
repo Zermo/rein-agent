@@ -20,3 +20,12 @@ One or two sentences. What it does, who it's for.
 
 ## Gotchas
 - (record them as you find them — this file is the agent's second brain)
+
+## Public examples and private installations
+
+Keep personal model-server addresses, SSH aliases, model selections, credentials,
+and local filesystem paths in the user's Rein configuration or private notes.
+Use synthetic hosts and model IDs in tests and documentation. Do not copy a
+user's connection details or raw session exports into public examples, review
+evidence, screenshots, or generated bundles. Describe self-hosted setup in terms
+of the server's listening address, API protocol, and network route.
