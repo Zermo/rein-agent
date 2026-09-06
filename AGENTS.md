@@ -1,25 +1,34 @@
-# AGENTS.md — example project instructions
+# Rein development
 
-rein loads this file (or CLAUDE.md) from the working directory into its
-system prompt. Keep it short — small models tax on long prompts.
+Rein is a terminal-first, local-first agent harness: provider adapters, an
+agentic loop, tools, durable context, and an optional headless autonomy helper.
+Keep changes small and preserve compatibility with self-hosted model APIs.
 
-Copy this file into a project and fill it in:
+## Setup and commands
 
-## What this project is
-One or two sentences. What it does, who it's for.
-
-## Commands
-- Build: `npm run build`
-- Test: `npm test`
-- Run: `node src/index.ts`
+- Source development: Node 24 or newer, npm, Git, Bash, tmux, Python 3, zstd.
+  The installed JavaScript bundle still supports Node 18.
+- Cloud setup: `bash scripts/setup-cloud.sh`; see `docs/cloud-development.md`.
+- Dependencies: `npm ci --include=dev`.
+- Tests: `npm test`. Fixtures run locally; no model server or API key is needed.
+- Provenance: `npm run check:posthorse` and `npm run check:natives`.
+- Build: `npm run bundle`. Commit updated `dist/rein.js` and
+  `dist/meat-worker.js` whenever their source changes.
+- Bundle smoke test: `node test/bundle-smoke.mjs`.
+- Source CLI: `node bin/rein.js --help`.
+- Only when changing the Meat WASM: use Go 1.26.5 for
+  `npm run test:meat-upstream` and `npm run check:meat`.
 
 ## Conventions
-- TypeScript, ESM, no dependencies without a reason
-- Errors are returned to the model, not thrown at the user
-- Keep tool output small: pipe to head, grep before read
 
-## Gotchas
-- (record them as you find them — this file is the agent's second brain)
+- TypeScript and ESM; runtime dependencies need a concrete justification.
+- Run focused tests while editing, then the suite for runtime changes. Check
+  that rebuilding leaves committed bundles unchanged before publishing.
+- Keep tool output small. Search before reading large files.
+- Preserve user configuration and sessions. Onboarding and background services
+  are user features; development setup should not start them.
+- Work style preferences are an operator profile, not a clinical assessment.
+- Use existing approval and budget controls for autonomous actions.
 
 ## Public examples and private installations
 

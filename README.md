@@ -110,7 +110,9 @@ build step and no devDependencies. To rebuild the bundle after changing
 source: `npm install && npm run bundle` (esbuild, dev-only).
 The compatibility commands `rein-agent` and `rein` point to the same CLI.
 
-Developing from source: `npm install && npm test` (offline smoke and regression suites).
+Developing from source: `npm ci --include=dev && npm test` (offline smoke and regression suites).
+For a repository-based workspace in ChatGPT, follow the
+[Codex cloud development setup](docs/cloud-development.md).
 
 To update an installed copy on macOS, Linux, or WSL:
 
