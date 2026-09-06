@@ -18,7 +18,7 @@ import { Posthorse, POSTHORSE_GUIDANCE } from "./posthorse.ts";
 import { contextTools } from "./tools/context.ts";
 import { createSkillRuntime } from "./skills.ts";
 import { createMeatTool } from "./meat/tool.ts";
-import { ActivityJournal } from "./activity/store.ts";
+import { ActivityJournal, activityFile } from "./activity/store.ts";
 
 export interface RunnerOptions {
 	cwd: string;
@@ -62,6 +62,8 @@ export interface Runner {
 	askFallback?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
 	context: AgentContext;
 	readonly sessionId?: string;
+	/** Present only when the optional private activity view initialized. */
+	readonly activityId?: string;
 	setSession(id: string): void;
 	contextStatus(): string;
 	newContext(handoff?: string): void;
@@ -72,6 +74,8 @@ export interface Runner {
 }
 
 export async function createRunner(opts: RunnerOptions): Promise<Runner> {
+	// Bad identifiers are input errors, not optional storage failures.
+	const requestedActivityFile = opts.activityId !== undefined ? activityFile(opts.activityId) : undefined;
 	const model = await resolveModel({
 		model: opts.modelOverride,
 		baseUrl: opts.baseUrlOverride,
@@ -107,7 +111,16 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
 	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillRuntime!.tool, createMeatTool(opts.cwd, () => ({ model: { ...model }, apiKey, toolsMode: runner.toolsMode, forcedMode, temperature: opts.temperature ?? config.temperature })));
 	const context: AgentContext = { systemPrompt, messages: posthorse.messages, tools };
-	const activity = opts.activityId ? new ActivityJournal(opts.activityId, opts.cwd, model.id) : undefined;
+	let activity: ActivityJournal | undefined;
+	if (opts.activityId) {
+		try { activity = new ActivityJournal(opts.activityId, opts.cwd, model.id); }
+		catch (error) {
+			const code = (error as NodeJS.ErrnoException)?.code;
+			// A reused ID belongs to another writer. Never silently share its view.
+			if (!code || code === "EEXIST" && (error as NodeJS.ErrnoException).path === requestedActivityFile) throw error;
+			console.error("[activity] Recording is unavailable. Chat and tool output remain in this terminal.");
+		}
+	}
 	let running = false;
 	const askTools = [...(opts.askTools ?? [])];
 
@@ -119,6 +132,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 
 	const runner: Runner = {
 		model,
+		activityId: activity?.snapshot.id,
 		apiKey,
 		toolsMode: decision.mode,
 		toolsModeSource: decision.source,

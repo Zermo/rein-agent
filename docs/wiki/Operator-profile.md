@@ -1,56 +1,60 @@
 # Your operator profile
 
-Rein's setup asks four questions so its instructions fit the work you want to
-do. It recommends a skill pack, previews the result, and lets you change or skip
-the pack. You can revise the profile without a model connection.
+Rein asks six practical questions so its instructions fit the tasks you want
+help with and the way you prefer to work. Review the result, change or skip the
+suggested workflow pack, and save when it looks right. No model connection is
+needed for this step.
 
 ```sh
-rein setup                 # full first-run walkthrough
-rein setup profile         # only the work-style wizard
-rein profile setup         # same profile-only wizard
+rein setup                 # complete first-run walkthrough
+rein setup profile         # preferences only
+rein profile setup         # same preferences wizard
 rein profile               # view the saved result
 rein profile --json        # structured output
 ```
 
-## Four choices about work
+## Six choices you can revise
 
-| Question | Choices | Saved axis |
-| --- | --- | --- |
-| When the agent talks, I want... | Bullets, then stop; short paragraphs; step-by-step with why | `density`: terse, normal, walkthrough |
-| Most days I will use this for... | Shipping code; keeping machines/services alive; reading/writing/research; images/video/design | `focus`: coding, ops, research, creative |
-| When a change is risky, the agent should... | Ask first; show a plan, then do it; do it, tell me after | `autonomy`: ask, plan, yolo |
-| I will mostly talk to it from... | Terminal; Slack/chat; voice/phone | `surface`: cli, chat, voice |
+| Question | Available choices |
+| --- | --- |
+| How should Rein explain an answer? | Concise bullets; conversational paragraphs; walkthrough with why; one next action first; answer first with supporting explanation |
+| What would you like help with most often? | Code; machines/services; learning/writing/research; creative work; everyday plans/tasks/routines; one small life improvement at a time |
+| Within a task already authorized, how should Rein work? | Ask before consequential changes; explain the plan and why, then do it; do routine reversible work and report back |
+| What pacing helps on a multi-step task? | Adapt to the task; one small next step; short work blocks with checkpoints; visible checklist |
+| What helps unfamiliar information make sense? | Direct explanation; example or analogy; why this option fits and alternatives; a small example to try |
+| How should Rein check that it understood? | Respond directly; reflect the goal before substantial work; recap decisions and the next step; ask one focused question if unclear |
 
-Answer for the way you want to work today. There is no clinical test, personality
-ranking, or attention-span measurement. The profile stores preferences you
-choose; it does not infer them from transcripts.
+These are explicit support preferences, not a personality test, health
+assessment, attention score, or fixed learning type. For example, choosing small
+steps asks Rein to make the next action manageable; it does not assign a reason
+why you want that support. Your current request can override a saved preference.
 
-Each answer adds a fixed weight to its axis. Rein takes the highest score on
-each axis and checks the pack rules in the order shown below. A tie or no matching
-rule suggests `ops`. You can override that recommendation. The preferred
-conversation interface does not affect which pack is suggested.
+Enter a letter or number. Type `back` to revisit a question, or `skip` to keep
+your current setup. The current conversation surface is the terminal; the
+wizard does not offer unimplemented chat or voice channels.
+
+The scorer is deterministic and local. Task focus, response detail, and
+initiative use fixed axis weights. Pacing, understanding, and listening are
+saved preferences, without ability scores. Task focus selects the suggested
+pack; a different explanation style does not switch you into an unrelated pack.
 
 ## Choose a pack, or skip it
 
-| Pack | Matching profile | Skills |
+| Pack | Helps with | Exact workflows |
 | --- | --- | --- |
-| `ship` | coding + terse + yolo | `github-pr-workflow`, `tdd`, `caveman` |
-| `ops` | ops + terse + plan | `hermes-agent`, `fleet-command-ops`, `execution-discipline` |
-| `study` | research + walkthrough + ask | `grounded-citations`, `plan` |
-| `studio` | creative + normal + ask | `claude-design`, `comfyui` |
+| `everyday` | A manageable next step, a simple routine, or practical choices | `task-breakdown`, `routine-planning`, `decision-support` |
+| `ship` | Focused code changes and verification | `code-change`, `tdd`, `execution-discipline` |
+| `ops` | Service diagnosis, recoverable changes, and useful notes | `service-care`, `durable-notes`, `execution-discipline` |
+| `study` | Grounded research and a learning goal | `grounded-research`, `learning-plan` |
+| `studio` | A creative brief and review of a visual result | `creative-brief`, `visual-review` |
 
-The pack adds workflow instructions Rein can load when useful. These workflows
-ship with Rein. Names such as `hermes-agent`, `claude-design`, and `comfyui` do
-not install or authenticate those applications. The `tdd` workflow comes from
-Rein's existing pinned Matt Pocock skills; the other pack workflows are written
-for Rein.
-
-Enter a letter or number at each question. Type `back` to revisit a question
-or `skip` to keep your current setup. At the preview, change your answers, accept
-the suggested pack, choose a different one, or continue with no pack. You can
-read the full file preview before saving. To change only the enabled pack later:
+These are workflow instructions Rein can load when useful. The `tdd` workflow
+comes from Rein's existing pinned Matt Pocock skills; the others are written
+for Rein. Selecting a pack does not install an application, model, or connector.
+You can choose any pack or none and inspect its exact skills before saving.
 
 ```sh
+rein profile pack everyday
 rein profile pack ship
 rein profile pack ops
 rein profile pack study
@@ -58,57 +62,58 @@ rein profile pack studio
 rein profile pack none
 ```
 
-Selecting `none` keeps your work preferences and disables the profile pack.
-It does not remove Rein's standard tools or existing bundled workflows.
+Selecting `none` keeps your preferences and disables the optional pack. Rein's
+standard tools and existing built-in workflows remain available. A routine plan
+is only a plan until you explicitly enable a supported reminder or service.
 
-## What the profile changes
+## Initiative and approval
 
-Rein uses the saved instructions in future sessions to choose response detail,
-explain plans, and work with your stated preferences. `ask`, `plan`, and `yolo`
-describe the operating brief. They do not change `--ask`, host permissions,
-tool availability, or approvals for background tasks.
+With `plan`, Rein explains a short plan and why it fits, compares meaningful
+alternatives when useful, then continues already authorized work. It does not
+ask again at every ordinary step. `ask` requests approval before consequential
+changes; `yolo` describes initiative for routine reversible work within scope.
 
-Choosing `chat` or `voice` records the interface you prefer. It does not install
-a Slack connection, phone service, or speech engine. Start with NodeTerm or the
-terminal using the model connection you configured during setup.
+New scope and required approval gates still need approval. If you decline a
+proposal, Rein should offer the next useful option or alternatives, not carry
+out the rejected plan. These preferences do not change `--ask`, host
+permissions, tool availability, or background task approvals.
 
-Proactive suggestions are a separate setup choice. Choose manual scans for a
-folder, enroll it and start a background service, or skip proactive work. Rein presents suggested
-tasks for approval, with scope and budgets, before they run. Use
-`rein autonomy tui` to review them and `rein autonomy pause` to pause work.
+[Background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
+is a separate optional setup choice. Default history checks use deterministic
+rules without a model. An optional local helper filters candidates. For richer
+follow-ups that use your preferences and history, explicitly choose
+`rein autonomy planner main`; this uses the main model and its normal account
+allowance. Approved tasks use the main model separately.
 
-## Your files stay in your Rein home
+## Private files and older profiles
 
-The wizard writes these files under `~/.rein`, or your custom `REIN_HOME`:
+The wizard writes four files under `~/.rein`, or your custom `REIN_HOME`:
 
 | File | Contents |
 | --- | --- |
-| `SOUL.md` | Agent voice and response style |
-| `USER.md` | How you prefer to work |
-| `AGENTS.md` | Operating brief derived from your choices |
-| `profile.yaml` | Machine-readable `operator_profile`, scores, and enabled pack |
+| `SOUL.md` | Agent voice and explanation preferences |
+| `USER.md` | Explicit support and task preferences |
+| `AGENTS.md` | Operating brief and approval boundaries |
+| `profile.yaml` | Versioned `operator_profile`, support preferences, answers, and enabled pack |
 
-These files are private local configuration. Setup updates only Rein's marked
-sections in the Markdown files and preserves text outside those sections.
-Changed originals are backed up under `.operator-profile-backups` in your Rein
-home. Project `AGENTS.md` files and the model connection in `config.json` stay
-in place. API keys do not belong in any of these four profile files.
+Setup updates only Rein's marked sections in the Markdown files and preserves
+unmanaged notes. Changed originals are backed up under
+`.operator-profile-backups`. It checks that files have not changed since your
+preview before saving. Project instructions and the model connection in
+`config.json` remain separate. Keep credentials out of these profile files.
 
-Use the profile commands to change the scored answers or enabled pack. Rein
-validates `profile.yaml` against the fixed scoring rules before loading it.
+Version 1 profiles are validated against their original contract before being
+adapted in memory to the current native workflows. Reading an old profile never
+rewrites it. An old chat or voice preference remains reference information;
+terminal is the current supported surface. The next explicit save writes
+version 2 and backs up changed originals.
 
-The quiz and scoring run locally without a model or poll service. Rein does not
-upload your answers as telemetry. In a model session, the saved work-style
-instructions become part of the prompt sent to the provider you selected.
+Use the profile commands to change scored answers or enabled skills. Rein
+validates `profile.yaml` before loading it. No model or poll service scores the
+operator. During normal sessions, the saved instructions become part of the
+prompt sent to your selected model provider.
 
-## Unattended installs and future polls
-
-`rein setup --yes` runs the unattended connection setup. It does not fill out
-work-style answers or enable a pack on your behalf. Run `rein setup profile`
-in an interactive terminal when you are ready. To change only a model
-connection, run `rein setup --connection-only`.
-
-Question IDs, axes, and weights are fixed. There is no crowd-poll ingestion in
-this release. Any later wording update must preserve those IDs and weights;
-poll results may replace choice text, not add assessment items or rewrite the
-scoring rules.
+`rein setup --yes` only runs unattended connection setup. It does not invent
+preferences or enable a pack for you. There is no crowd-poll ingestion; future
+wording updates must preserve question IDs and weights rather than introducing
+assessment items.

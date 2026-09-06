@@ -19,11 +19,11 @@ async function isolated(fn: (home: string) => void | Promise<void>): Promise<voi
 
 test("optional skills require a saved enabled pack; skipping preserves the three built-ins", () => isolated(home => {
 	assert.deepEqual(enabledSkills().map(skill => skill.name), baseNames);
-	assert.throws(() => readSkill("github-pr-workflow"), /disabled/);
+	assert.throws(() => readSkill("code-change"), /disabled/);
 	saveOperatorProfile(createOperatorProfile(answers, null), { home });
 	assert.deepEqual(enabledSkills().map(skill => skill.name), baseNames);
 	assert.match(readSkill("tdd", "tests.md"), /test/i);
-	assert.doesNotMatch(skillRoster(), /github-pr-workflow|comfyui/);
+	assert.doesNotMatch(skillRoster(), /code-change|visual-review/);
 }));
 
 test("each pack exposes exactly its local workflows alongside built-ins", () => isolated(async home => {
@@ -45,10 +45,10 @@ test("each pack exposes exactly its local workflows alongside built-ins", () => 
 
 test("native guidance cannot read outside its reviewed body, and disabled references stay unavailable", () => isolated(async home => {
 	saveOperatorProfile(createOperatorProfile(answers, "studio"), { home });
-	for (const file of ["../profile.yaml", "/etc/passwd", "SKILL.md\0", "..\\USER.md"]) assert.throws(() => readSkill("comfyui", file), /inside/);
-	assert.throws(() => readSkill("comfyui", "unreviewed.md"), /only has SKILL.md/);
+	for (const file of ["../profile.yaml", "/etc/passwd", "SKILL.md\0", "..\\USER.md"]) assert.throws(() => readSkill("visual-review", file), /inside/);
+	assert.throws(() => readSkill("visual-review", "unreviewed.md"), /only has SKILL.md/);
 	assert.throws(() => readSkill("tdd", "../diagnosing-bugs/SKILL.md"), /inside/);
-	assert.throws(() => readSkill("fleet-command-ops"), /disabled/);
+	assert.throws(() => readSkill("service-care"), /disabled/);
 	assert.equal((await createSkillRuntime().tool.execute("fixture", { name: "hermes-agent" })).isError, true);
 }));
 
@@ -58,19 +58,19 @@ test("new runners reload the profile while an active runner keeps its prompt and
 	const first = await createRunner(options);
 	const firstSkill = first.tools.find(tool => tool.name === "skill")!;
 	const firstPrompt = first.systemPrompt;
-	assert.match(firstPrompt, /github-pr-workflow/);
+	assert.match(firstPrompt, /code-change/);
 	assert.match(firstPrompt, /Working autonomy: yolo/);
 	assert.deepEqual(first.askTools, ["bash", "write"]);
 	saveOperatorProfile(createOperatorProfile({ q1: "c", q2: "c", q3: "a", q4: "c" }, "study"), { home });
 	const next = await createRunner(options);
-	assert.match(next.systemPrompt, /grounded-citations/);
+	assert.match(next.systemPrompt, /grounded-research/);
 	assert.match(next.systemPrompt, /Response density: walkthrough/);
-	assert.doesNotMatch(next.systemPrompt, /github-pr-workflow/);
+	assert.doesNotMatch(next.systemPrompt, /code-change/);
 	assert.deepEqual(next.askTools, ["bash", "write"]);
 	assert.equal(first.systemPrompt, firstPrompt);
-	assert.ok(!(await firstSkill.execute("fixture", { name: "github-pr-workflow" })).isError);
-	assert.equal((await next.tools.find(tool => tool.name === "skill")!.execute("fixture", { name: "github-pr-workflow" })).isError, true);
-	assert.doesNotMatch(skillRoster(), /github-pr-workflow/);
+	assert.ok(!(await firstSkill.execute("fixture", { name: "code-change" })).isError);
+	assert.equal((await next.tools.find(tool => tool.name === "skill")!.execute("fixture", { name: "code-change" })).isError, true);
+	assert.doesNotMatch(skillRoster(), /code-change/);
 	saveOperatorProfile(createOperatorProfile(answers, null), { home });
 	const skipped = await createRunner(options);
 	assert.deepEqual((skipped.tools.find(tool => tool.name === "skill")!.parameters as any).properties.name.enum, baseNames);
@@ -84,7 +84,7 @@ test("private guidance is bounded, subordinate to current work, and requires a v
 	assert.match(baseline, /PRIVATE_GUIDANCE_SENTINEL/);
 	assert.match(baseline, /latest user request, project constraints, and configured tool approvals take precedence/);
 	assert.match(baseline, /yolo means initiative within authorized scope; it never bypasses approvals/);
-	assert.match(baseline, /preferred chat or voice surface does not mean a connector is installed/);
+	assert.match(baseline, /supported conversation surface is the current terminal/);
 	// The project has its own brief; use a separate cwd so a large private AGENTS.md cannot enter as project instructions.
 	const cwd = mkdtempSync(join(tmpdir(), "rein-pack-project-"));
 	try {

@@ -10,8 +10,9 @@
 # Options (after `bash -s --`):
 #   --skip-setup    install only; skip the wizard and connection checks
 #   --yes           non-interactive wizard (first local server / existing config)
-#   --terminal-only skip the native app; keep Rein in your current terminal
-#   --no-launch     install/configure the desktop app without opening it
+#   --terminal-only keep Rein in your current terminal (the default)
+#   --nodeterm      also install the optional native NodeTerm app
+#   --no-launch     finish setup without starting the interactive session
 #   --branch NAME   clone a different branch (default: main)
 #
 # Env:
@@ -26,15 +27,19 @@ REPO_DIR="$REIN_HOME/repo"
 BRANCH="main"
 RUN_SETUP=true
 ASSUME_YES=false
-RUN_DESKTOP=true
-LAUNCH_DESKTOP=true
+RUN_DESKTOP=false
+PREFER_TERMINAL=false
+LAUNCH_SESSION=true
+SETUP_READY=false
+SETUP_TTY=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --skip-setup) RUN_SETUP=false ;;
         --yes) ASSUME_YES=true ;;
-        --terminal-only) RUN_DESKTOP=false ;;
-        --no-launch) LAUNCH_DESKTOP=false ;;
+        --terminal-only) RUN_DESKTOP=false; PREFER_TERMINAL=true ;;
+        --nodeterm) RUN_DESKTOP=true; PREFER_TERMINAL=false ;;
+        --no-launch) LAUNCH_SESSION=false ;;
         --branch)
             [ $# -ge 2 ] && [ -n "$2" ] || { echo "--branch requires a name" >&2; exit 2; }
             shift; BRANCH="$1" ;;
@@ -46,8 +51,9 @@ Rein installer
 Options after bash -s --:
   --skip-setup     Install only; keep saved settings and skip checks
   --yes            Unattended model setup; never invent an operator profile
-  --terminal-only  Skip NodeTerm and prefer the current terminal
-  --no-launch      Install the desktop app without opening it
+  --terminal-only  Stay in the current terminal (the default)
+  --nodeterm       Also install the optional native NodeTerm app
+  --no-launch      Finish setup without starting a chat session
   --branch NAME    Install a branch, default main
 
 Run rein setup later for the guided walkthrough.
@@ -128,12 +134,12 @@ fi
 ok "$VERSION"
 echo ""
 
-# The separate official app is optional on servers/CI and preserved when installed.
+# NodeTerm is an explicit extra. Ordinary installs stay in their current terminal.
 # Use the just-installed bundle, not a potentially stale global executable.
 if [ "$RUN_DESKTOP" = true ]; then
-    node "$REPO_DIR/dist/rein.js" desktop install --if-supported --no-launch ||
-        fail "Rein CLI installed, but NodeTerm setup failed. Retry: rein desktop install; or choose --terminal-only."
-else
+    node "$REPO_DIR/dist/rein.js" desktop install --no-launch ||
+        fail "Rein CLI installed, but optional NodeTerm setup failed. Retry: rein desktop install --no-launch."
+elif [ "$PREFER_TERMINAL" = true ]; then
     node "$REPO_DIR/dist/rein.js" desktop use terminal
 fi
 
@@ -144,12 +150,16 @@ elif [ "$ASSUME_YES" = true ]; then
     node "$REPO_DIR/dist/rein.js" setup --yes ||
         warn "Connection setup needs attention. Run rein setup for the guided walkthrough."
 elif [ -t 0 ] && [ -t 1 ]; then
-    node "$REPO_DIR/dist/rein.js" setup ||
+    SETUP_TTY=stdin
+    if node "$REPO_DIR/dist/rein.js" setup; then SETUP_READY=true; else
         warn "Setup is unfinished. Run rein setup to continue; saved settings are kept."
+    fi
 # curl owns stdin. Read answers from the controlling terminal instead of the script.
 elif [ -t 1 ] && [ -z "${CI:-}" ] && ( : < /dev/tty ) 2>/dev/null; then
-    node "$REPO_DIR/dist/rein.js" setup < /dev/tty ||
+    SETUP_TTY=controlling
+    if node "$REPO_DIR/dist/rein.js" setup < /dev/tty; then SETUP_READY=true; else
         warn "Setup is unfinished. Run rein setup to continue; saved settings are kept."
+    fi
 else
     step "No interactive terminal. Run rein setup when ready, or use --yes for unattended model setup."
 fi
@@ -160,7 +170,13 @@ echo "    rein -p \"hello, what model are you?\"   # one-shot"
 echo "    rein                                     # interactive session"
 echo "    rein models                              # what rein can see"
 echo "    rein setup --status                      # re-check config + connection"
-if [ "$RUN_DESKTOP" = true ] && [ "$LAUNCH_DESKTOP" = true ] && [ "$RUN_SETUP" = true ] &&
-   [ -t 1 ] && [ "$(uname -s)" = "Darwin" ] && [ -z "${CI:-}${SSH_CONNECTION:-}${SSH_TTY:-}" ]; then
-    node "$REPO_DIR/dist/rein.js" desktop open
+if [ "$SETUP_READY" = true ] && [ "$LAUNCH_SESSION" = true ] && [ -z "${CI:-}" ]; then
+    step "Starting Rein in this terminal. Type /help for commands or /quit to exit."
+    # Replace the installer so Ctrl-C, EOF and terminal resize go straight to Rein.
+    # Keep the caller's directory; installing the repo must not change the workspace.
+    if [ "$SETUP_TTY" = controlling ]; then
+        exec node "$REPO_DIR/dist/rein.js" --terminal < /dev/tty
+    else
+        exec node "$REPO_DIR/dist/rein.js" --terminal
+    fi
 fi

@@ -1,26 +1,56 @@
-# NodeTerm desktop and reply identities
+# Terminal activity and optional NodeTerm
 
-Rein 0.10.0 separates operator turns, agent replies, and tools in the terminal.
-Operator prompts are cyan and numbered. Each REIN reply advances a quarter-circle
-marker and accent color, with a reply number that also works without color.
-Steering input gets its own operator prompt. Display updates wait while you edit
-that input; the agent keeps running. After Enter, output resumes under the same
-reply identity. Only a thinking status is displayed, not the reasoning trace.
+Rein runs in the terminal where you invoke it: Ghostty, Terminal, a NodeTerm
+terminal node, or another compatible terminal. Bare `rein` keeps the current
+working directory. The standard curl installer guides setup and starts
+interactive Rein in that same terminal when the connection is ready.
 
-## Native installation
+Operator prompts are cyan and numbered. Each REIN reply advances a marker and
+accent color; its number also distinguishes it without color. Messages,
+thinking status, tool actions, and tool results have separate labels. Steering
+input has its own operator prompt. Display updates wait while you edit that
+input; the agent keeps running. Only a thinking status is displayed, not a
+private reasoning trace.
 
-The standard curl installer adds the separate official NodeTerm app on a local
-macOS desktop. It supports Apple Silicon and Intel, checks the pinned release's
-SHA256, verifies its signature and Gatekeeper assessment, and installs into
-`~/Applications` without sudo. An existing app is preserved. Rein does not bundle
-or modify NodeTerm, remove quarantine, or change the operating system's terminal
-association.
+## Inspect activity in the terminal
 
-The pinned release is NodeTerm 0.3.4, matching the verified
-[official Homebrew cask](https://github.com/nodeterm/homebrew-tap/blob/main/Casks/nodeterm.rb).
-NodeTerm manages its own later updates. On Linux or Windows, install the native
-app separately from [NodeTerm's releases](https://nodeterm.dev/releases).
-Remote shells and CI do not install or launch the desktop app automatically.
+```text
+/legend
+/activity
+/activity 3
+```
+
+The timeline numbers visible replies and tool activity. Select a numbered step
+to inspect its details without opening another window. Thinking appears as a
+status; provider-reported reasoning-token counts are displayed only when
+available. These controls need no additional app or tmux installation.
+
+For an explicit split view, install tmux and run `rein --visual`. Chat appears
+beside a terminal activity tree. Arrow keys select steps, `f` follows new work,
+and `q` closes the activity pane. `rein watch <activity-id>` reopens a terminal
+view. `rein canvas <activity-id>` serves an optional canvas and prints its local
+URL; only `--browser` requests a browser launch. There is no automatic browser
+fallback from terminal or NodeTerm sessions.
+
+## Review proactive suggestions here too
+
+Use `/autonomy` for status and `/autonomy show <id>` to read a full proposal in
+the current chat terminal. `/autonomy approve <id>` enables read-only checks;
+add `--allow-writes` only to authorize ordinary tools, commands, and file writes
+for that proposal. `/autonomy dismiss <id>` dismisses or disables it.
+`/autonomy pause` and `/autonomy resume` control the background supervisor.
+These commands do not open another window or enter a nested dashboard.
+
+## Optional NodeTerm installation
+
+If you want NodeTerm's separate native app, opt in:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh \
+  | bash -s -- --nodeterm
+```
+
+Or install and register it after Rein is set up:
 
 ```sh
 rein desktop install --no-launch
@@ -28,58 +58,38 @@ rein desktop status
 rein desktop open
 ```
 
-Registration adds a dedicated Rein custom agent and selects it as NodeTerm's
-default, preserving other agents and settings. It does this only while NodeTerm
-is closed, because NodeTerm caches its settings and does not watch external edits.
-If the app is running, close it when convenient and rerun the install command
-above. Running sessions are never killed to register an agent. You can use
-`rein --terminal` in a NodeTerm terminal node before registration is complete.
+The macOS installer supports Apple Silicon and Intel, verifies the selected
+release's checksum, signature, and Gatekeeper assessment, and installs into
+`~/Applications`. It preserves an existing copy. Rein does not bundle or modify
+NodeTerm, change the operating system's terminal association, or remove
+quarantine. The `--nodeterm` installer option leaves the app closed; open it
+explicitly when wanted. On other supported desktops, use
+[NodeTerm's official releases](https://nodeterm.dev/releases).
 
-## What opening Rein does
+Registration adds a Rein custom agent while preserving other agents and
+settings. It writes settings only while NodeTerm is closed. If the app is
+running, close it when convenient and rerun `rein desktop install --no-launch`.
+Existing sessions are not killed to register Rein. You can run `rein` inside
+an ordinary NodeTerm terminal node before registration.
 
-Bare `rein` in an interactive local macOS shell opens an installed NodeTerm.
-Choose a project, then add an agent node; Rein is the default after registration.
-NodeTerm 0.3.4 has no supported external API for launching a chosen project and
-command, so that final step is manual. The launcher does not simulate a successful
-session launch or silently discard command-line options.
-
-`rein --resume ID`, model options, explicit activity options, scripts, one-shot
-requests, and piped input stay in the terminal where you invoked them. Use:
+NodeTerm's separate canvas still uses its own project and node controls. Those
+steps are optional and are not part of Rein's normal terminal startup. Legacy
+saved desktop preferences remain visible in `rein desktop status`, but bare
+`rein` stays in the terminal. Use `rein desktop open` to open the native app.
 
 ```sh
-rein --terminal                  # this session stays in this terminal
-rein desktop use terminal        # future bare invocations stay here too
-rein desktop install             # select the NodeTerm preference again
+rein --terminal                  # explicitly stay in this terminal
+rein desktop use terminal        # save that preference
 ```
 
-The preference is stored separately in `~/.rein/desktop.json`, or under your
-`REIN_HOME`. Your model credentials, saved endpoint, and session history stay
-intact. Updates preserve an explicitly selected terminal preference. The curl
-installer also accepts `--terminal-only` and `--no-launch`.
+The preference lives in `~/.rein/desktop.json`, or your `REIN_HOME`. It is
+separate from model credentials, endpoints, and session history. Installer
+`--no-launch` suppresses the final interactive session; `--skip-setup` and
+`--yes` also do not launch chat automatically.
 
-## Default activity view
+## Upstream references
 
-Inside a local NodeTerm session, interactive Rein records its visible activity
-and opens the detailed node view automatically. When NodeTerm supplies the
-current session with canvas-control capability, Rein uses its official shim to
-open the view as a native web node. It never fabricates another agent identity
-or borrows another node's token.
-
-Baseless custom agents do not have that capability in NodeTerm 0.3.4, so their
-detailed activity view opens in the default browser. Their chat remains a native
-NodeTerm canvas node. If an authorized native embedding attempt is refused, Rein
-prints the view URL without retrying through another app. `--no-browser` or
-`--visual=false` skips automatic opening. A remote session does not automatically
-send a remote loopback URL to the desktop.
-
-The activity server listens only on loopback, requires its per-session capability
-token for activity data, and closes when the interactive session ends. The token
-is in the URL fragment. The view contains visible responses and tool activity,
-not private thinking text. `--visual` remains the explicit tmux split view.
-
-## Upstream contracts
-
-- [Native entry point](https://github.com/eneskirca/nodeterm/blob/v0.3.4/src/main/index.ts)
+- [NodeTerm releases](https://nodeterm.dev/releases)
 - [Settings store](https://github.com/eneskirca/nodeterm/blob/v0.3.4/src/core/settings-store.ts)
 - [Agent capability definitions](https://github.com/eneskirca/nodeterm/blob/v0.3.4/src/shared/agents/config.ts)
 - [NodeTerm license](https://github.com/eneskirca/nodeterm/blob/v0.3.4/LICENSE)

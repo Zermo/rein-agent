@@ -8,6 +8,7 @@ import { runCycle, runDaemon } from "../src/harness/autonomy/engine.ts";
 import { collectAutonomyEvidence } from "../src/harness/autonomy/history.ts";
 import { createSession, appendMessage, branchSession, loadSession } from "../src/agent/session.ts";
 import { runAutonomyCommand } from "../src/harness/autonomy/command.ts";
+import { createOperatorProfile, saveOperatorProfile } from "../src/harness/operator-profile.ts";
 
 async function isolated(fn: (workspace: string) => Promise<void>) {
 	const dir = mkdtempSync(join(tmpdir(), "rein-autonomy-engine-")); const prev = process.env.REIN_HOME;
@@ -33,6 +34,55 @@ test("changed history gets two independent tool-free passes, persists reviewable
 	assert.equal(state.runs.length, 1);
 	assert.match(await runCycle("scan", undefined, { manual: true }, deps), /unchanged/);
 	assert.equal(calls, 2); assert.equal(readState().runs.length, 1);
+}));
+
+test("production default scans create pending follow-ups without any provider calls", t => isolated(async workspace => {
+	seed(workspace); await updateState(s => { s.workspaces = [workspace]; });
+	t.mock.method(globalThis, "fetch", async () => { throw new Error("Rules must never call a provider"); });
+	assert.match(await runCycle("scan", undefined, { manual: true }), /1 new proposal.*no model calls/);
+	assert.equal(readState().proposals[0].status, "pending"); assert.equal(readState().proposals[0].allowWrites, false);
+	assert.match(await runCycle("scan", undefined, { manual: true }), /unchanged/);
+	assert.equal(readState().runs.length, 1);
+}));
+test("rewording a dismissed main-planner proposal cannot evade its evidence decision", () => isolated(async workspace => {
+	seed(workspace); const evidence = collectAutonomyEvidence([workspace]), draft = draftFor(workspace, [evidence.sources[0].id]);
+	await updateState(state => { state.workspaces = [workspace]; state.planner = "main"; state.proposals.push({ ...draft, id: proposalId(draft), status: "dismissed", allowWrites: false, created: 0 }); });
+	let calls = 0;
+	const result = await runCycle("scan", undefined, { manual: true }, { generate: async (_system, input) => {
+		calls++; assert.match(input, /previousDecisions.*evidenceIds/);
+		return JSON.stringify({ proposals: [{ ...draft, title: "Review importer from another angle" }] });
+	} });
+	assert.match(result, /No new actionable/); assert.equal(calls, 1); assert.equal(readState().proposals.length, 1);
+}));
+test("main planning notices validated preference edits without repeatedly scanning unchanged inputs", () => isolated(async workspace => {
+	seed(workspace); await updateState(state => { state.workspaces = [workspace]; state.planner = "main"; });
+	const answers = { q1: "a", q2: "a", q3: "a", q4: "a" };
+	saveOperatorProfile(createOperatorProfile(answers, null));
+	let calls = 0; const deps = { generate: async () => { calls++; return '{"proposals":[]}'; } };
+	await runCycle("scan", undefined, { manual: true }, deps); assert.equal(calls, 1);
+	assert.match(await runCycle("scan", undefined, { manual: true }, deps), /unchanged/); assert.equal(calls, 1);
+	saveOperatorProfile(createOperatorProfile({ ...answers, q1: "c" }, null));
+	await runCycle("scan", undefined, { manual: true }, deps); assert.equal(calls, 2);
+	assert.match(await runCycle("scan", undefined, { manual: true }, deps), /unchanged/); assert.equal(calls, 2);
+}));
+
+test("explicit main planner uses actual adapter with bounded output despite saved large maxTokens", t => isolated(async workspace => {
+	seed(workspace); await updateState(s => { s.workspaces = [workspace]; s.planner = "main"; });
+	writeFileSync(join(process.env.REIN_HOME!, "config.json"), JSON.stringify({ provider: "custom", baseUrl: "http://planner-fixture.invalid/v1", model: "offline", maxTokens: 8192, contextWindow: 32768 }));
+	const evidence = collectAutonomyEvidence([workspace]), draft = draftFor(workspace, [evidence.sources[0].id]); let calls = 0;
+	t.mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+		const body = JSON.parse(init.body as string); calls++;
+		assert.ok(!body.tools || body.tools.length === 0); assert.ok(body.max_tokens <= 2200);
+		assert.match(body.messages[0].content, /no tools/i);
+		if (calls === 1) {
+			assert.match(body.messages[0].content, /expected benefit.*risks.*alternative/i);
+			assert.match(body.messages[1].content, /operatorPreferences/);
+		}
+		return Response.json({ choices: [{ message: { content: JSON.stringify(calls === 1 ? { proposals: [draft] } : { keep: [proposalId(draft)] }) }, finish_reason: "stop" }] });
+	});
+	assert.match(await runCycle("scan", undefined, { manual: true }), /1 new proposal.*Opt-in main planner/);
+	assert.equal(calls, 2); assert.equal(readState().proposals[0].status, "pending");
+	assert.match(await runCycle("scan", undefined, { manual: true }), /unchanged/); assert.equal(calls, 2);
 }));
 
 test("proposal execution requires current approval and obeys pause, daily budget, and one-shot projects", () => isolated(async workspace => {

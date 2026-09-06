@@ -186,7 +186,7 @@ if (process.argv.includes('--global') && process.env.REIN_UPDATE_NPM_FAIL === '1
 		npmCalls: () => readFileSync(join(f.root, "npm.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)) };
 }
 
-test("curl-piped installer opens guided setup on the controlling terminal", posix, async t => {
+for (const scenario of ["success", "no-launch", "setup-failed", "setup-eof", "setup-cancel"] as const) test(`curl-piped installer keeps setup and chat in its controlling terminal (${scenario})`, posix, async t => {
 	if (spawnSync("python3", ["--version"]).error) { t.skip("python3 is needed only to create a real test PTY"); return; }
 	const f = installFixture();
 	let child: ReturnType<typeof spawn> | undefined;
@@ -200,16 +200,24 @@ if (args[0] === 'setup') {
   if (args.length !== 1 || !process.stdin.isTTY) { console.error('GUIDED_SETUP_HAS_NO_TTY'); process.exit(8); }
   console.log('OPERATOR_PROFILE_READY');
   const rl = require('node:readline').createInterface({ input: process.stdin });
-  rl.once('line', line => { console.log('OPERATOR_ANSWER=' + line); rl.close(); process.exit(0); });
+  let answered = false;
+  rl.once('line', line => { answered = true; console.log('OPERATOR_ANSWER=' + line); rl.close(); process.exit(process.env.REIN_TEST_SCENARIO === 'setup-failed' ? 1 : 0); });
+  rl.once('close', () => { if (!answered) process.exit(1); });
+} else if (args[0] === '--terminal') {
+  if (!process.stdin.isTTY || fs.realpathSync(process.cwd()) !== fs.realpathSync(process.env.REIN_UPDATE_FIXTURE)) { console.error('CHAT_WRONG_TTY_OR_CWD'); process.exit(9); }
+  console.log('INTERACTIVE_SESSION_READY');
+  const rl = require('node:readline').createInterface({ input: process.stdin });
+  rl.once('line', line => { console.log('CHAT_ANSWER=' + line); rl.close(); process.exit(line === '/quit' ? 0 : 10); });
 } else console.log('rein fixture');
 `);
 		f.gitAt(f.remote, "add", "dist/rein.js"); f.gitAt(f.remote, "commit", "-m", "Interactive installer fixture");
 		const python = `import os, pty, select, signal, sys, time
 pid, fd = pty.fork()
 if pid == 0:
-    os.execl('/bin/bash', 'bash', '-c', 'cat "$REIN_INSTALL_SCRIPT" | /bin/bash -s -- --terminal-only --no-launch')
+    os.execl('/bin/bash', 'bash', '-c', 'cat "$REIN_INSTALL_SCRIPT" | /bin/bash -s -- ' + ('--no-launch' if os.environ['REIN_TEST_SCENARIO'] == 'no-launch' else ''))
 seen = b''
 answered = False
+quit_sent = False
 deadline = time.monotonic() + 15
 try:
     while time.monotonic() < deadline:
@@ -222,8 +230,11 @@ try:
         sys.stdout.buffer.flush()
         seen += data
         if not answered and b'OPERATOR_PROFILE_READY' in seen:
-            os.write(fd, b'work-style-answer\\n')
+            os.write(fd, b'\\x03' if os.environ['REIN_TEST_SCENARIO'] == 'setup-cancel' else b'\\x04' if os.environ['REIN_TEST_SCENARIO'] == 'setup-eof' else b'work-style-answer\\n')
             answered = True
+        if not quit_sent and b'INTERACTIVE_SESSION_READY' in seen:
+            os.write(fd, b'/quit\\n')
+            quit_sent = True
     else: raise RuntimeError('installer PTY timed out')
     _, status = os.waitpid(pid, 0)
     sys.exit(os.waitstatus_to_exitcode(status))
@@ -232,7 +243,7 @@ finally:
     try: os.killpg(pid, signal.SIGKILL)
     except ProcessLookupError: pass
 `;
-		child = spawn("python3", ["-c", python], { cwd: f.root, env: { ...f.installEnv, REIN_INSTALL_SCRIPT: installer, CI: "", TERM: "xterm" } });
+		child = spawn("python3", ["-c", python], { cwd: f.root, env: { ...f.installEnv, REIN_INSTALL_SCRIPT: installer, REIN_TEST_SCENARIO: scenario, CI: "", TERM: "xterm" } });
 		let output = "";
 		timer = setTimeout(() => child?.kill("SIGKILL"), 17000);
 		const code = await new Promise<number | null>((resolve, reject) => {
@@ -240,8 +251,17 @@ finally:
 			child!.stdout!.on("data", chunk => output += chunk);
 			child!.stderr!.on("data", chunk => output += chunk);
 		});
-		assert.equal(code, 0, output); assert.match(output, /OPERATOR_ANSWER=work-style-answer/);
-		assert.doesNotMatch(output, /GUIDED_SETUP_HAS_NO_TTY|Setup is unfinished/);
+		if (scenario === "setup-cancel") assert.ok(code === 130 || code === 254, output);
+		else assert.equal(code, 0, output);
+		if (scenario !== "setup-eof" && scenario !== "setup-cancel") assert.match(output, /OPERATOR_ANSWER=work-style-answer/);
+		assert.doesNotMatch(output, /GUIDED_SETUP_HAS_NO_TTY|CHAT_WRONG_TTY_OR_CWD/);
+		if (scenario === "success") assert.match(output, /CHAT_ANSWER=\/quit/);
+		else assert.doesNotMatch(output, /INTERACTIVE_SESSION_READY/);
+		if (scenario === "setup-failed" || scenario === "setup-eof") assert.match(output, /Setup is unfinished/);
+		else if (scenario === "setup-cancel") assert.doesNotMatch(output, /Starting Rein in this terminal/);
+		else assert.doesNotMatch(output, /Setup is unfinished/);
+		const calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+		assert.equal(calls.some(args => args[0] === "desktop"), false, "Default installs must not install or launch NodeTerm.");
 		f.unchanged();
 	} finally { clearTimeout(timer); child?.kill(); f.close(); }
 });
@@ -259,7 +279,7 @@ test("published installer clones and updates the latest build without probing th
 		assert.equal(f.npmCalls().filter(args => args[0] === "ci").length, 2);
 		assert.equal(f.npmCalls().filter(args => args.includes("--global")).length, 2);
 		const calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
-		assert.equal(calls.filter(args => args.join(" ") === "desktop install --if-supported --no-launch").length, 2);
+		assert.equal(calls.some(args => args[0] === "desktop" || args[0] === "--terminal"), false);
 		f.unchanged();
 	} finally { f.close(); }
 });
@@ -272,6 +292,23 @@ test("terminal-only installer saves its opt-out instead of installing a native a
 		const calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
 		assert.ok(calls.some(args => args.join(" ") === "desktop use terminal"));
 		assert.equal(calls.some(args => args[0] === "desktop" && args[1] === "install"), false);
+		f.unchanged();
+	} finally { f.close(); }
+});
+
+test("unattended setup never opens a chat and NodeTerm installation requires its explicit flag", posix, async () => {
+	const f = installFixture();
+	try {
+		let result = await f.install(["--yes"]);
+		assert.equal(result.code, 0, result.stdout + result.stderr);
+		let calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+		assert.ok(calls.some(args => args.join(" ") === "setup --yes"));
+		assert.equal(calls.some(args => args[0] === "desktop" || args[0] === "--terminal"), false);
+		result = await f.install(["--skip-setup", "--nodeterm"]);
+		assert.equal(result.code, 0, result.stdout + result.stderr);
+		calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+		assert.ok(calls.some(args => args.join(" ") === "desktop install --no-launch"));
+		assert.equal(calls.some(args => args.join(" ") === "desktop open" || args[0] === "--terminal"), false);
 		f.unchanged();
 	} finally { f.close(); }
 });

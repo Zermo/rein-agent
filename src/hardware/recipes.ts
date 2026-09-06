@@ -5,7 +5,7 @@ import { CATALOG, type CatalogModel } from "./catalog.ts";
 import { assessFit, bestAssessment, planContext, type FitAssessment } from "./fit.ts";
 import type { HardwareProfile } from "./profile.ts";
 
-export type WorkFocus = "coding" | "ops" | "research" | "creative";
+export type WorkFocus = "everyday" | "coding" | "ops" | "research" | "creative";
 export interface ModelRecommendation { model: CatalogModel; assessment: FitAssessment; reason: string }
 export interface ServingRecipe {
 	engine: "ollama" | "lmstudio" | "llama.cpp" | "vllm";

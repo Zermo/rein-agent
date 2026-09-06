@@ -78,7 +78,7 @@ function proposalDetails(proposal: DashboardProposal): string[] {
 	];
 }
 
-function render(snapshot: DashboardSnapshot, state?: DashboardViewState): string {
+function render(snapshot: DashboardSnapshot, state?: DashboardViewState, controls = true): string {
 	const selected = Math.min(Math.max(0, state?.selected ?? 0), Math.max(0, snapshot.proposals.length - 1));
 	const pending = snapshot.proposals.filter(proposal => proposal.status === "pending").length;
 	const lines = [
@@ -91,10 +91,10 @@ function render(snapshot: DashboardSnapshot, state?: DashboardViewState): string
 		"",
 		`Proposals (${pending} pending):`,
 		...(snapshot.proposals.length ? snapshot.proposals.map((proposal, index) =>
-			`${index === selected ? ">" : " "} ${terminalText(proposal.id)} [${terminalText(proposal.status)}] ${terminalText(proposal.title)} (${terminalText(proposal.kind)}, ${proposal.kind === "routine" ? `every ${terminalText(proposal.intervalMinutes)}m` : "once"})`,
+			`${controls && index === selected ? ">" : " "} ${terminalText(proposal.id)} [${terminalText(proposal.status)}] ${terminalText(proposal.title)} (${terminalText(proposal.kind)}, ${proposal.kind === "routine" ? `every ${terminalText(proposal.intervalMinutes)}m` : "once"})`,
 		) : ["  No proposals yet."]),
 	];
-	if (state?.confirmation) {
+	if (controls && state?.confirmation) {
 		lines.push("", ...proposalDetails(state.confirmation), "",
 			`Enable this exact task as ${state.confirmation.kind === "routine" ? "a recurring read-only inspection" : "one bounded read-only inspection"} of the workspace above?`,
 			"This approval does not allow workspace writes. Review the full prompt and evidence above.",
@@ -104,7 +104,7 @@ function render(snapshot: DashboardSnapshot, state?: DashboardViewState): string
 		lines.push("", "Recent runs:", ...(snapshot.recentRuns.length ? snapshot.recentRuns.slice(0, 5).map(run =>
 			`  ${terminalText(run.id)} [${terminalText(run.status)}] ${terminalText(run.detail)}`,
 		) : ["  (none)"]));
-		lines.push("", buttons.map((label, index) => index === (state?.button ?? 0) ? `[> ${label} <]` : `[${label}]`).join(" "),
+		if (controls) lines.push("", buttons.map((label, index) => index === (state?.button ?? 0) ? `[> ${label} <]` : `[${label}]`).join(" "),
 			"Up/down or j/k: select task | Left/right/Tab: select button | Enter: activate",
 			"a: review approval | d: dismiss | r: run enabled task | p: pause/resume | f: refresh | q: quit");
 	}
@@ -112,8 +112,8 @@ function render(snapshot: DashboardSnapshot, state?: DashboardViewState): string
 	return lines.join("\n");
 }
 
-export function renderDashboard(snapshot: DashboardSnapshot, state?: DashboardViewState): string {
-	return render(snapshot, state);
+export function renderDashboard(snapshot: DashboardSnapshot, state?: DashboardViewState, options: { controls?: boolean } = {}): string {
+	return render(snapshot, state, options.controls !== false);
 }
 
 /** Pure key handling keeps approval separate from rendering or model-generated text. */

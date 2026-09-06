@@ -67,10 +67,10 @@ try {
   assert.match(help.stdout, /--discover-network/);
   const invalidPort = await runCli(["models", "--discover-ports", "70000"]);
   assert.equal(invalidPort.code, 1); assert.match(invalidPort.stderr, /1 to 65535/);
-  const hardware = await runCli(["hardware", "--json"]);
+  const hardware = await runCli(["hardware", "--focus", "everyday", "--json"]);
   assert.equal(hardware.code, 0, hardware.stderr);
   const hardwarePlan = JSON.parse(hardware.stdout);
-  assert.equal(hardwarePlan.scope, "current-machine");
+  assert.equal(hardwarePlan.scope, "current-machine"); assert.equal(hardwarePlan.focus, "everyday");
   assert.ok(Array.isArray(hardwarePlan.recipes));
   const invalidApi = await runCli(["--api", "responses", "--base-url", endpoint, "--model", "bundle-mock", "-p", "must not send"]);
   assert.notEqual(invalidApi.code, 0); assert.match(invalidApi.stderr, /Supported HTTP API/);
@@ -99,6 +99,14 @@ try {
     if (args[0] === "skills") assert.match(result.stdout, args[1] === "tdd" ? /test/i : /diagnos/i);
     if (args[0] === "debug") { const report = JSON.parse(result.stdout); assert.equal(report.sessions, 1); assert.equal(report.totals.toolResults, 1); }
   }
+  const guardian = await runCli(["autonomy", "guardian", "status", "--json"]);
+  assert.equal(guardian.code, 0, guardian.stdout + guardian.stderr);
+  const guardianState = JSON.parse(guardian.stdout);
+  assert.equal(guardianState.mode, "rules"); assert.equal(guardianState.cloudFallback, false);
+  const rulesScan = await runCli(["autonomy", "scan"]); assert.equal(rulesScan.code, 0, rulesScan.stderr);
+  const planner = await runCli(["autonomy", "planner", "main"]); assert.equal(planner.code, 0, planner.stderr);
+  assert.equal(JSON.parse((await runCli(["autonomy", "status", "--json"])).stdout).planner, "main");
+  assert.equal((await runCli(["autonomy", "planner", "rules"])).code, 0);
   assert.equal(requests, 2, "autonomy controls do not start inference");
   const git = (...args) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args], { cwd: dir, stdio: "pipe" });
   git("init"); git("config", "user.name", "Bundle Fixture"); git("config", "user.email", "fixture@example.invalid");
@@ -120,16 +128,16 @@ try {
   assert.equal(web.code, 0, web.stderr); assert.equal(webRequests, 2); assert.match(web.stdout, /native web bundle OK/);
   const invalidWeb = await runCli(["web", "search", "fixture", "--language", "fr"], { OBSCURA_BIN: browser });
   assert.notEqual(invalidWeb.code, 0); assert.match(invalidWeb.stderr, /does not support --language/);
-  const profileSetup = await runCli(["setup", "profile"], {}, "a\na\nc\na\n3\n1\n");
+  const profileSetup = await runCli(["setup", "profile"], {}, "a\na\nc\na\na\na\n3\n1\n");
   assert.equal(profileSetup.code, 0, profileSetup.stdout + profileSetup.stderr);
   const profile = JSON.parse((await runCli(["profile", "--json"])).stdout);
   assert.equal(profile.recommended_pack, "ship"); assert.equal(profile.enabled_pack, null);
   for (const name of ["SOUL.md", "USER.md", "AGENTS.md", "profile.yaml"]) assert.ok(existsSync(join(dir, name)));
   const enablePack = await runCli(["profile", "pack", "ship"]); assert.equal(enablePack.code, 0, enablePack.stderr);
-  const nativeSkill = await runCli(["skills", "caveman"]); assert.equal(nativeSkill.code, 0, nativeSkill.stderr);
+  const nativeSkill = await runCli(["skills", "code-change"]); assert.equal(nativeSkill.code, 0, nativeSkill.stderr);
   assert.match(nativeSkill.stdout, /Original Rein-native workflow/);
   const disablePack = await runCli(["profile", "pack", "none"]); assert.equal(disablePack.code, 0, disablePack.stderr);
-  assert.equal((await runCli(["skills", "caveman"])).code, 1);
+  assert.equal((await runCli(["skills", "code-change"])).code, 1);
   console.log(`bundle smoke OK (${process.version})`);
 } finally {
   await new Promise(resolve => server.close(resolve));

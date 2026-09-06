@@ -48,19 +48,19 @@ Usage:
   rein models                   show detected local servers and provider presets
   rein skills [name]            list bundled workflows, or read one without running it
   rein profile [--json]         view your operator profile and enabled skill pack
-  rein profile pack <name>      enable ship|ops|study|studio, or none to skip a pack
+  rein profile pack <name>      enable everyday|ship|ops|study|studio, or none
   rein debug <folder> [--json]  inspect exported JSONL sessions offline (counts only)
   rein web install|status       install or inspect the native Obscura browser
   rein web search <query>        search DuckDuckGo through Obscura (--json optional)
   rein web fetch <url>           render a page to markdown (--max-chars 20000)
   rein update                   curl the latest installer and update the installed build
-  rein desktop install          install NodeTerm and register Rein as its default agent
-  rein desktop open|status      open or inspect the native desktop surface
+  rein desktop install          optional NodeTerm installation and registration
+  rein desktop open|status      explicitly open or inspect NodeTerm
   rein desktop use terminal     keep future bare rein sessions in the current terminal
   rein --terminal               stay in this terminal for this session
   rein --visual                 split the terminal into chat and live activity (tmux)
-  rein watch <activity-id>       inspect activity; press c for the node canvas
-  rein canvas <activity-id>      open the local interactive node canvas
+  rein watch <activity-id>       inspect activity inside this terminal
+  rein canvas <activity-id>      serve an optional node canvas; --browser opens it
   rein meat [ref [ref]]          review a commit or range with the embedded Meat engine
                                 --staged or --working-tree selects uncommitted changes
   rein tmux start [command]      start a persistent bash shell; returns its session ID
@@ -69,16 +69,16 @@ Usage:
   rein tmux send <id> <text>     send literal input and Enter to a persistent shell
   rein hardware [--json]        model fit and serving recipes for this machine
     --context <tokens>          plan the recipe's context memory
-    --focus coding|ops|research|creative   choose task-oriented recommendations
+    --focus everyday|coding|ops|research|creative   choose task-oriented recommendations
   rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
   rein setup                    work style → model → follow-ups → first task
-  rein setup profile            four questions and an optional skill pack, offline
+  rein setup profile            communication preferences and optional workflows, offline
   rein setup --connection-only  provider → login/key → model → connection test
                                 saves $REIN_HOME/config.json (default ~/.rein)
   rein setup --yes              non-interactive (first local server / existing config)
-  rein autonomy                 task-history proposals and background service controls
+  rein autonomy                 free background triggers, local helper, and approved tasks
   rein autonomy help            enrollment, budgets, approvals, pause, and removal
   rein setup --status           show config, detected servers, test the connection
   rein login codex|copilot|grok open official subscription device sign-in
@@ -129,7 +129,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only", "discover-network"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only", "discover-network", "browser", "install-runtime", "start-runtime"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -247,7 +247,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		if (_[0] === "watch") { const { watchActivity } = await import("./harness/activity/terminal.ts"); await watchActivity(_[1]); return; }
 		const { startCanvas, openCanvas } = await import("./harness/activity/server.ts");
 		const canvas = await startCanvas(_[1]); console.log(canvas.url);
-		if (flags["no-browser"] !== true) openCanvas(canvas.url);
+		if (flags.browser === true && flags["no-browser"] !== true) openCanvas(canvas.url);
 		await new Promise<void>(resolve => {
 			const stop = () => { process.off("SIGINT", stop); process.off("SIGTERM", stop); void canvas.close().finally(resolve); };
 			process.on("SIGINT", stop); process.on("SIGTERM", stop);
@@ -333,8 +333,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		const { printHardwareReport } = await import("./hardware/report.ts");
 		const { readOperatorProfile } = await import("./harness/operator-profile.ts");
 		const focus = stringFlag(flags, "focus") ?? readOperatorProfile().profile?.operator_profile.focus;
-		if (focus !== undefined && !["coding", "ops", "research", "creative"].includes(focus)) throw new Error("--focus must be coding, ops, research, or creative.");
-		return printHardwareReport({ json: flags.json === true, contextTokens: numberFlag(flags, "context", 1), focus: focus as "coding" | "ops" | "research" | "creative" | undefined });
+		if (focus !== undefined && !["everyday", "coding", "ops", "research", "creative"].includes(focus)) throw new Error("--focus must be everyday, coding, ops, research, or creative.");
+		return printHardwareReport({ json: flags.json === true, contextTokens: numberFlag(flags, "context", 1), focus: focus as "everyday" | "coding" | "ops" | "research" | "creative" | undefined });
 	}
 
 	if (_[0] === "doctor") {
@@ -448,30 +448,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		const code = await runOnboarding({ noBrowser: flags["no-browser"] === true });
 		if (code !== 0) { process.exitCode = code; return; }
 	}
-	const { desktopAvailable, nativeApp, openNodeTerm, preferredSurface, shouldOpenDesktop, remoteDesktopSession } = await import("./harness/desktop/surface.ts");
-	if (shouldOpenDesktop({ interactive: !!(process.stdin.isTTY && process.stdout.isTTY), insideNodeTerm: !!process.env.NODETERM_NODE_ID,
-		terminal: flags.terminal === true, visual: typeof flags.visual === "boolean" ? flags.visual : undefined, activity: common.activityId,
-		hasSessionOptions: argv.length > 0, available: desktopAvailable() && !!nativeApp(), preference: preferredSurface() })) {
-		try {
-			await openNodeTerm();
-			console.log(`NodeTerm is open. Choose a project and add a Rein agent node.\nTo use this directory (${common.cwd}) in an existing NodeTerm terminal, run rein --terminal there.\nUse rein --terminal here to stay in this terminal.`);
-			return;
-		} catch (error) { console.error(`Could not open NodeTerm: ${(error as Error).message}. Continuing in this terminal.`); }
+	// The current terminal is the interactive surface, including inside NodeTerm.
+	// Activity is local structured data; recording it opens no listener or app.
+	if (!common.activityId) {
+		const { newActivityId } = await import("./harness/activity/store.ts");
+		common.activityId = newActivityId();
 	}
-	const desktopActivity = !!(process.env.NODETERM_NODE_ID && process.stdin.isTTY && process.stdout.isTTY &&
-		!remoteDesktopSession() && !process.env.CI && flags["no-browser"] !== true && flags.visual !== false && !common.activityId);
-	if (desktopActivity) { const { newActivityId } = await import("./harness/activity/store.ts"); common.activityId = newActivityId(); }
 	const { createRunner } = await import("./harness/runner.ts");
 	const { startRepl } = await import("./harness/repl.ts");
 	const runner = await createRunner({ ...common, tools: flags["no-tools"] === true ? [] : undefined, askTools: common.askTools });
-	let canvas: { close(): Promise<void> } | undefined;
-	try {
-		if (desktopActivity) {
-			try { const { openDesktopActivity } = await import("./harness/desktop/activity.ts"); canvas = await openDesktopActivity(common.activityId!); }
-			catch (error) { console.error(`Activity view unavailable: ${(error as Error).message}. Chat remains available.`); }
-		}
-		await startRepl({ runner, resumeSessionId: typeof flags.resume === "string" ? flags.resume : undefined });
-	} finally { await canvas?.close(); }
+	await startRepl({ runner, activityId: runner.activityId, resumeSessionId: typeof flags.resume === "string" ? flags.resume : undefined });
 }
 
 // (main is invoked by bin/rein.js; the export keeps it testable)

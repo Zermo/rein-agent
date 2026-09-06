@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 export interface ServiceOptions {
+	kind?: "supervisor" | "guardian";
 	home: string;
 	cliPath: string;
 	nodePath?: string;
@@ -46,10 +47,11 @@ function configuration(options: ServiceOptions) {
 	const platform = options.platform ?? process.platform;
 	if (platform === "darwin" && (!Number.isSafeInteger(uid) || uid! < 0)) throw new Error("A user ID is required for a launchd user agent.");
 	const scope = createHash("sha256").update(home).digest("hex").slice(0, 24);
-	const label = `dev.rein.autonomy.${scope}`;
+	const label = `dev.rein.${options.kind === "guardian" ? "guardian" : "autonomy"}.${scope}`;
 	const paths = [dirname(nodePath), join(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 	const path = [...new Set(paths.filter(p => isAbsolute(p) && !/[\x00-\x1f\x7f:]/.test(p)))].join(":");
-	return { home, userHome, nodePath, cliPath, uid, platform, scope, label, path };
+	const arguments_ = options.kind === "guardian" ? ["autonomy", "guardian", "serve"] : ["autonomy", "daemon"];
+	return { home, userHome, nodePath, cliPath, uid, platform, scope, label, path, arguments_ };
 }
 
 function xml(value: string): string {
@@ -75,7 +77,7 @@ export function servicePlan(options: ServiceOptions): ServicePlan {
 		const body = `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>${cfg.label}</string>
-<key>ProgramArguments</key><array>${[cfg.nodePath, cfg.cliPath, "autonomy", "daemon"].map(value => `<string>${xml(value)}</string>`).join("")}</array>
+<key>ProgramArguments</key><array>${[cfg.nodePath, cfg.cliPath, ...cfg.arguments_].map(value => `<string>${xml(value)}</string>`).join("")}</array>
 <key>WorkingDirectory</key><string>${xml(cfg.home)}</string>
 <key>EnvironmentVariables</key><dict><key>REIN_HOME</key><string>${xml(cfg.home)}</string><key>PATH</key><string>${xml(cfg.path)}</string></dict>
 <key>RunAtLoad</key><true/>
@@ -102,7 +104,7 @@ WorkingDirectory=${unit(cfg.home)}
 Environment=${unit(`REIN_HOME=${cfg.home}`)}
 Environment=${unit(`PATH=${cfg.path}`)}
 # The ':' executable prefix disables dollar expansion in every argument.
-ExecStart=${unit(`:${cfg.nodePath}`)} ${unit(cfg.cliPath)} autonomy daemon
+ExecStart=${unit(`:${cfg.nodePath}`)} ${unit(cfg.cliPath)} ${cfg.arguments_.join(" ")}
 Restart=on-failure
 RestartSec=30
 TimeoutStopSec=30

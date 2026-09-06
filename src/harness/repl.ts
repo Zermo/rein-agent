@@ -18,10 +18,14 @@ import * as nodeterm from "./nodeterm.ts";
 import { readState as autonomyState } from "./autonomy/state.ts";
 import { skillRequest, skillRoster } from "./skills.ts";
 import { createReplyPresentation, toolActionType } from "./reply-presentation.ts";
+import { readActivity } from "./activity/store.ts";
+import { renderActivity } from "./activity/terminal.ts";
+import { terminalText } from "./autonomy/tui.ts";
 
 interface ReplOptions {
 	runner: Runner;
 	resumeSessionId?: string;
+	activityId?: string;
 }
 
 export async function startRepl(opts: ReplOptions): Promise<void> {
@@ -36,19 +40,20 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
 	console.log(
 		gray(
-			`rein · ${runner.model.provider}/${runner.model.id} · tools: ${runner.toolsMode} (${runner.toolsModeSource}) · session ${sessionId.slice(-8)}\n`,
+			`rein · ${runner.model.provider}/${runner.model.id} · tools: ${runner.toolsMode} (${runner.toolsModeSource}) · session ${sessionId.slice(-8)}\nWorkspace: ${terminalText(process.cwd())}\n`,
 		),
 	);
 	if (nodeterm.active()) {
 		console.log(gray("nodeterm node detected — status badges on; approvals can be answered from the canvas or the phone."));
 	}
+	console.log(gray("Replies, tools, approvals and activity stay here. /activity shows recent steps; /help lists commands."));
 
 	let lastProposalAlert = "";
 	const proposalAlert = () => {
 		try {
 			const pending = autonomyState().proposals.filter(p => p.status === "pending");
 			const ids = pending.map(p => p.id).join(",");
-			if (ids && ids !== lastProposalAlert) console.log(gray(`${pending.length} proactive proposal(s) ready. Review with rein autonomy tui in another terminal, or /autonomy for status.`));
+			if (ids && ids !== lastProposalAlert) console.log(gray(`${pending.length} proactive proposal(s) ready. Use /autonomy to list them, then /autonomy show <id> to review here.`));
 			lastProposalAlert = ids;
 		} catch { /* Autonomy state must not prevent normal interactive work. */ }
 	};
@@ -89,6 +94,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 					[
 						"  /help            this list",
 						"  /legend          reply types, tool labels, and reasoning metadata",
+						"  /activity [step] recent work and tool results in this terminal",
 						"  /new             start a fresh session",
 						"  /model           show the active model + tool mode",
 						"  /tools <list>    show available tools",
@@ -101,6 +107,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 						"  /skill <name> <task>  apply a bundled workflow to a request",
 						"  /stop            cancel the active turn and its shell processes",
 						"  /autonomy        show proactive proposals and service status",
+						"  /autonomy show <id>     review the full proposed task here",
+						"  /autonomy approve <id>  enable read-only checks; --allow-writes enables normal tools",
+						"  /autonomy dismiss <id>  dismiss or disable the proposal",
+						"  /autonomy pause|resume  control background work",
 						"  /new-context [handoff]  start a fresh window in this session",
 						"  /quit            exit",
 					].join("\n"),
@@ -124,6 +134,13 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 					),
 				);
 				return true;
+			case "activity": {
+				if (!opts.activityId) { console.log(gray("Activity recording is unavailable for this session. Tool calls and replies are visible above.")); return true; }
+				const snapshot = readActivity(opts.activityId);
+				if (arg && !snapshot?.nodes.some(node => node.id === arg)) { console.log(yellow("Unknown activity step. Use /activity to see available step numbers.")); return true; }
+				console.log(renderActivity(snapshot, arg || undefined, process.stdout.columns || 90, Math.min(process.stdout.rows || 28, 40), "/activity <step> for detail · /help for commands"));
+				return true;
+			}
 			case "tools":
 				for (const t of runner.tools as AgentTool[]) {
 					console.log(`  ${bold(t.name)} ${dim(t.description.split(".")[0])}`);
@@ -189,9 +206,19 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 				console.log(gray("Stopped. Send a new request when ready."));
 				return true;
 			case "autonomy": {
-				const { autonomySnapshot } = await import("./autonomy/command.ts");
-				const { renderDashboard } = await import("./autonomy/tui.ts");
-				console.log(renderDashboard(autonomySnapshot()));
+				const values = arg.trim().split(/\s+/).filter(Boolean);
+				const { autonomySnapshot, runAutonomyCommand } = await import("./autonomy/command.ts");
+				if (!values.length || values.length === 1 && values[0] === "status") {
+					const { renderDashboard } = await import("./autonomy/tui.ts");
+					console.log(renderDashboard(autonomySnapshot(), undefined, { controls: false }));
+					console.log("/autonomy show <id> · /autonomy approve <id> [--allow-writes]\n/autonomy dismiss <id> · /autonomy pause · /autonomy resume"); return true;
+				}
+				const [action, id, permission] = values;
+				const controls = ["pause", "resume"].includes(action) && values.length === 1;
+				const proposal = ["show", "approve", "dismiss"].includes(action) && !!id && !id.startsWith("-") &&
+					(values.length === 2 || action === "approve" && values.length === 3 && permission === "--allow-writes");
+				if (!controls && !proposal) throw new Error("Usage: /autonomy [status | show <id> | approve <id> [--allow-writes] | dismiss <id> | pause | resume]");
+				await runAutonomyCommand(controls ? [action] : [action, id], permission === "--allow-writes" ? { "allow-writes": true } : {});
 				return true;
 			}
 			case "new-context":
@@ -214,6 +241,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 	let resolveLine: ((input: InputLine) => void) | null = null;
 	let promptVisible = false;
 	let inputClosed = false;
+	let backgroundControl = Promise.resolve();
 	const lineQueue: InputLine[] = [];
 	// Readline must move to an operator prompt before echoing a steering key.
 	// While the operator types, hold rendering until Enter so token output cannot
@@ -232,6 +260,18 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 		if (terminating) return;
 		const input = { line, echoed: promptVisible };
 		promptVisible = false;
+		if (busy && line.trim() === "/autonomy pause") {
+			// This global stop control must not wait for the foreground model,
+			// become steering text, or consume a pending tool-approval answer.
+			backgroundControl = backgroundControl.then(async () => {
+				presentation.pauseForInput();
+				try { await handleCommand("/autonomy pause"); }
+				catch (error) { if (!terminating) console.log(red((error as Error).message)); }
+				if (!terminating && approvalAnswer) process.stdout.write("[APPROVAL] Tool approval still waiting [y/N] ");
+			});
+			releaseTyping();
+			return;
+		}
 		if (/^\/(stop|quit|exit)\s*$/.test(line.trim()) && busy) {
 			controller?.abort();
 			approvalAnswer?.("");
@@ -400,6 +440,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 			presentation.flush();
 		}
 	} } finally {
+		await backgroundControl;
 		process.stdin.off("keypress", onKeypress);
 		for (const [signal, handler] of signals) process.off(signal, handler);
 		if (!rl.closed) rl.close();

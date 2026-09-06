@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROVIDER_PRESETS } from "../src/ai/models.ts";
 import { runAutonomyCommand, serviceConfigurationIssue, type AutonomyCommandDependencies } from "../src/harness/autonomy/command.ts";
-import { readState } from "../src/harness/autonomy/state.ts";
+import { readState, updateState } from "../src/harness/autonomy/state.ts";
 import type { ServiceResult } from "../src/harness/autonomy/service.ts";
 
 function fixture(t: { after: (fn: () => void) => void; mock: { method: (...args: any[]) => any } }) {
@@ -42,11 +42,41 @@ test("service configuration rejects terminal-only overrides without exposing cre
 test("incompatible service credentials pause before installation and are never copied", async t => {
 	const { workspace, dependencies } = fixture(t);
 	process.env.REIN_API_KEY = "fixture_terminal_key";
+	await updateState(state => { state.planner = "main"; });
 	let installs = 0;
 	await assert.rejects(runAutonomyCommand(["enable"], { workspace }, { ...dependencies, install: () => { installs++; return dependencies.install!({ home: "/mock", cliPath: "/mock/rein.js" }); } }), /terminal-only API credential/);
 	assert.equal(installs, 0); assert.equal(readState().paused, true);
 	assert.ok((readState().controlRevision ?? 0) >= 1);
 	assert.ok(!JSON.stringify(readState()).includes("fixture_terminal_key"));
+});
+
+test("rules-only service starts without a main provider or terminal credentials", async t => {
+	const { workspace, dependencies } = fixture(t);
+	process.env.REIN_API_KEY = "fixture_not_copied";
+	process.env.REIN_BASE_URL = "https://unused.invalid/v1";
+	await runAutonomyCommand(["enable"], { workspace }, dependencies);
+	assert.equal(readState().paused, false); assert.equal(readState().planner, "rules");
+	assert.ok(!JSON.stringify(readState()).includes("fixture_not_copied"));
+});
+
+test("planner selection is explicit, invalidates changed-evidence checkpoint, and keeps decisions", async t => {
+	const { messages } = fixture(t);
+	await updateState(state => { state.lastDigest = "old"; state.nextScan = Date.now() + 60000; });
+	await runAutonomyCommand(["planner", "main"]);
+	assert.equal(readState().planner, "main"); assert.equal(readState().lastDigest, undefined); assert.equal(readState().nextScan, undefined);
+	assert.match(messages.at(-1)!, /credits or subscription/);
+	await runAutonomyCommand(["planner", "rules"]); assert.equal(readState().planner, "rules");
+	await assert.rejects(runAutonomyCommand(["planner", "cloud"]), /rules\|main/);
+});
+test("a running rules service cannot switch to another terminal-only model/account implicitly", async t => {
+	const { dependencies, result } = fixture(t);
+	process.env.REIN_API_KEY = "fixture_not_saved";
+	const service = { ...dependencies, status: () => result };
+	await assert.rejects(runAutonomyCommand(["planner", "main"], {}, service), /not enabled.*terminal-only/);
+	assert.equal(readState().planner, "rules");
+	await updateState(state => { state.proposals.push({ id: "check", workspace: "/synthetic/work", title: "Check", kind: "project", prompt: "Review current status", reason: "Requested", evidenceIds: [], intervalMinutes: 1440, status: "pending", created: 0, allowWrites: false }); });
+	await assert.rejects(runAutonomyCommand(["approve", "check"], {}, service), /not enabled.*terminal-only/);
+	assert.equal(readState().proposals[0].status, "pending");
 });
 
 test("enable requires verified active status and leaves stopped or unknown services paused", async t => {

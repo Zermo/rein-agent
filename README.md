@@ -49,7 +49,7 @@ readable over clever, with explicit limits on context and tool output.
 
 For a visual walkthrough with copyable commands, open the
 [retro installation field guide](https://zermo.github.io/rein-agent/). It covers
-NodeTerm, your own model server over SSH, local models, and supported cloud connections. The
+your current terminal, your own model server over SSH, local models, and supported cloud connections. The
 [public wiki](https://github.com/Zermo/rein-agent/wiki) has setup and deployment
 instructions. For offline use, open `docs/install.html` from a local checkout.
 
@@ -63,42 +63,34 @@ Install on macOS, Linux, or WSL and start the guided setup:
 curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
 ```
 
-On a local macOS desktop, the installer also downloads the separate official
-NodeTerm app, verifies its checksum and signature, and installs it in
-`~/Applications` if it is missing. Existing copies stay in place. Rein becomes
-NodeTerm's default agent when the app is closed during registration. If NodeTerm
-is already running, its settings stay untouched; close it later and run
-`rein desktop install --no-launch` to finish registration.
+Rein runs in the terminal you already use: Ghostty, Terminal, a NodeTerm terminal
+node, or another compatible shell. The installer takes you through setup and,
+when the connection is ready, starts interactive Rein in that same terminal.
+No separate project window or browser activity page is required.
 
-Bare `rein` in an interactive local macOS shell opens NodeTerm when installed.
-Choose a project and add an agent node to start Rein. NodeTerm currently has no
-external session-launch API, so this is one manual step; Rein does not silently
-drop a supplied prompt, resume ID, model option, or working directory into a
-different session. Commands with options continue in their original terminal.
+Answer six practical questions about your tasks and communication preferences,
+review a suggested workflow pack, then connect a model. You can change answers
+before saving, choose another pack, or skip skills. The final step offers
+optional follow-ups for a folder you choose and a first task to try.
 
-The installer opens the wizard in your terminal even when installed through the
-curl pipe. Answer four work-style questions, review your profile and suggested
-skill pack, then connect a model. You can change answers before saving, choose
-another pack, or skip skills. The last step offers optional proactive suggestions
-for a folder you choose and gives you a first task to try.
-
-Flags after `bash -s --`: `--skip-setup` skips onboarding, model checks, and app launch,
-`--yes` runs unattended connection setup without inventing a profile,
-`--no-launch` leaves the app closed, and
-`--terminal-only` skips NodeTerm and saves a terminal preference.
-Linux, WSL, remote shells, and CI keep the CLI path. Install NodeTerm separately
-from its [official releases](https://nodeterm.dev/releases) on other supported desktops.
+Flags after `bash -s --`: `--skip-setup` skips onboarding, model checks, and launch;
+`--yes` runs unattended connection setup without inventing a profile;
+`--no-launch` finishes setup without starting interactive Rein.
+`--terminal-only` explicitly keeps the terminal default. NodeTerm is optional:
+use `--nodeterm` only when you want its separate native macOS app installed and
+registered. Open it explicitly with `rein desktop open`.
 
 ```sh
-rein --terminal                 # stay in this terminal for this session
-rein desktop use terminal       # save that preference for future sessions
-rein desktop install            # install/register NodeTerm and prefer it again
+rein                            # start in this terminal and directory
+rein --terminal                 # explicitly keep the terminal surface
+rein desktop use terminal       # save that preference
+rein desktop install --no-launch # install/register optional NodeTerm
 rein desktop status
 ```
 
-The NodeTerm app is downloaded from the verified upstream release, not bundled
-inside Rein. See [desktop integration](docs/nodeterm-desktop.md) for supported
-platforms, setup details, and the current native-app limits.
+The optional NodeTerm installer downloads a verified upstream release on a local
+macOS desktop. See [terminal and desktop integration](docs/nodeterm-desktop.md)
+for supported platforms and native-app limits.
 The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM),
 accepts remote hosts, and offers cloud API keys or supported subscription logins.
 It tests API connections and saves `~/.rein/config.json` (or `$REIN_HOME/config.json`).
@@ -155,45 +147,55 @@ REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein-agent -
 
 ### Tell Rein how you work
 
-The operator-profile wizard asks what you work on, how much detail helps you,
-how you want changes handled, and where you prefer to talk to your agent.
-Answers use fixed weights to recommend one of four packs. The profile is a
-revisable work preference, with no personality ranking or health assessment.
+The operator-profile wizard asks six practical questions: how to explain an
+answer, what you want help with, how much initiative to take, useful pacing,
+what makes unfamiliar information clearer, and how to check understanding.
+Options include everyday organization and making one small thing easier, as
+well as coding, services, research, and creative work. Preferences such as small
+steps, examples, checkpoints, or recaps are editable choices, not diagnoses or
+measurements of attention or ability. The supported conversation surface is the
+terminal.
 
-| Pack | Matching preferences | Bundled workflows |
+| Pack | Suggested for | Bundled workflows |
 | --- | --- | --- |
-| `ship` | Coding, terse, yolo | `github-pr-workflow`, `tdd`, `caveman` |
-| `ops` | Ops, terse, plan | `hermes-agent`, `fleet-command-ops`, `execution-discipline` |
-| `study` | Research, walkthrough, ask | `grounded-citations`, `plan` |
-| `studio` | Creative, normal, ask | `claude-design`, `comfyui` |
+| `everyday` | Life organization and small improvements | `task-breakdown`, `routine-planning`, `decision-support` |
+| `ship` | Code and projects | `code-change`, `tdd`, `execution-discipline` |
+| `ops` | Machines and services | `service-care`, `durable-notes`, `execution-discipline` |
+| `study` | Research and learning | `grounded-research`, `learning-plan` |
+| `studio` | Creative work | `creative-brief`, `visual-review` |
 
-`ops` is the fallback when no rule matches or scoring is tied. You can select
-any pack or none. These are bundled workflow instructions; selecting a pack
-does not install Hermes, Claude, or ComfyUI. Choosing chat or voice records a
-preference; NodeTerm and the terminal remain the available chat interfaces.
+Your task focus determines the suggested pack; communication preferences do not
+push an unrelated task into an ops pack. Choose any pack or none. Except for the
+existing pinned `tdd` workflow, these are original Rein instructions. They do
+not install another agent, application, or connector.
 
 Setup saves `SOUL.md` for agent voice, `USER.md` for your work preferences,
 `AGENTS.md` for the operating brief, and `profile.yaml` for the machine-readable
-`operator_profile` and enabled pack. They live in your private `~/.rein`, or
-`$REIN_HOME`, and leave project instructions and model credentials in place.
-The profile informs Rein's instructions in future sessions.
+`operator_profile`, support preferences, and enabled pack. They live in your
+private `~/.rein`, or `$REIN_HOME`. Existing version 1 profiles are validated and
+adapted in memory; their files remain unchanged until you explicitly save a new
+preview. Old chat/voice preferences remain reference information, not connected
+channels. Explicit saves preserve unmanaged Markdown and back up changed files.
 
 ```sh
-rein profile                   # view your saved profile and enabled pack
+rein profile                   # view your saved preferences and pack
 rein profile --json            # inspect the structured profile
 rein setup profile             # revise it without connecting to a model
-rein profile pack study        # choose a different pack
+rein profile pack everyday     # choose everyday workflows
 rein profile pack none         # disable profile-pack skills
 ```
 
-`rein profile setup` also opens the profile wizard. An autonomy preference
-changes the operating brief; it does not change `--ask`, host permissions, or
-background task approvals. Proactive suggestions are optional. Setup lets you
-choose manual scans for a folder, enroll it and start a background service, or
-skip proactive work.
-Proposed tasks stay pending until you approve them and run within fixed budgets.
-See the [operator-profile walkthrough](https://github.com/Zermo/rein-agent/wiki/Operator-profile)
-for the questions, saved files, and controls.
+With the plan preference, Rein explains the plan and why it fits, then continues
+already authorized work. New scope and required approval gates still need
+approval. If you decline a proposal, it offers another useful option rather
+than carrying out the rejected plan. The profile does not change `--ask`, host
+permissions, or background task approvals.
+
+Proactive suggestions are a separate optional setup choice. Default history
+checks use deterministic rules without model calls. A small local helper can
+be installed explicitly; approved tasks use the main model with their own
+budgets. See [background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
+and the [operator-profile walkthrough](https://github.com/Zermo/rein-agent/wiki/Operator-profile).
 
 ## Usage
 
@@ -265,7 +267,7 @@ reports reasoning-token usage, Rein shows that count at the end of the reply.
 This adapter does not report reasoning effort, and token count or elapsed time
 does not measure thinking strength. Use `/legend` for the full label key.
 
-### Persistent bash and a live node canvas
+### Terminal activity and persistent bash
 
 ```sh
 rein --visual
@@ -284,16 +286,15 @@ working directory and interactive programs persist across turns. Rein uses its
 own server and scopes sessions by workspace. `/stop` cancels foreground work;
 intentionally persistent tmux sessions remain until explicitly stopped.
 
-Inside a local NodeTerm session, interactive Rein records and opens its activity
-view automatically. Eligible nodes embed it on the native canvas. Baseless custom
-agent nodes lack that capability, so the detailed view opens in a browser while
-chat stays in NodeTerm. Use `--no-browser` or `--visual=false` to skip automatic
-activity opening. Remote sessions do not auto-open a remote loopback URL.
+Interactive Rein keeps activity in the current terminal. Messages, thinking
+status, tool calls, and results have distinct labels. Use `/activity` for the
+session's numbered timeline and `/activity 3` to inspect a step's details.
+`/legend` explains the labels. This works without tmux, NodeTerm, or a browser.
+NodeTerm and browser canvases are explicit options; there is no automatic
+browser fallback.
 
 `--visual` opens chat beside a terminal activity tree. Press **Ctrl-b Right** to
-focus the activity pane, then **c** to open the interactive node canvas. Select
-nodes for inputs, results and file paths; drag nodes or the background, zoom,
-fit, or follow the latest work. Arrow keys select terminal steps, **f** follows,
+focus the activity pane. Arrow keys select terminal steps, **f** follows,
 and **q** closes the activity pane. Thinking appears as a status; only visible
 assistant text and actual tool activity are recorded.
 
@@ -302,8 +303,8 @@ use `rein tmux list --view`, `rein tmux attach <id> --view`, or
 `rein tmux stop <id> --view` to manage visual sessions. Their server is separate
 from the model's tool shells. Closing a view does not implicitly stop persistent
 tool shells. `rein watch <activity-id>` reopens its activity tree;
-`rein canvas <activity-id>` opens just the browser view (`--no-browser` prints
-the URL). Ctrl-C stops a standalone canvas server.
+`rein canvas <activity-id>` serves the optional canvas and prints its local URL;
+add `--browser` only to open it in a browser. Ctrl-C stops that server.
 
 Activity snapshots live in `$REIN_HOME/activity`, mode 0600, and retain up to 256
 recent steps within 3 MB. Long details are abbreviated. They contain local tool
@@ -760,15 +761,33 @@ rein autonomy tui
 
 The first command enrolls the directory and leaves the supervisor paused. The
 scan compares older and recent user/assistant excerpts with current Git status
-and change statistics. A tool-free adviser proposes work; a second tool-free
-reviewer checks it against the evidence. Unchanged history makes no model calls.
+and change statistics. Deterministic rules identify explicit follow-up requests in user history and
+prepare bounded proposals. Scanning uses no inference by default. An optional
+local helper can keep or drop those candidates, but cannot invent tasks.
+Unchanged history makes no model calls.
 Prior approval decisions and completed run reports inform later suggestions.
 
 The dashboard shows the exact task, workspace, cadence, reason, and cited history
 excerpts before approval. Use arrows or j/k to select, `a` to review approval,
 `d` to dismiss, `r` to queue an enabled task, `p` to pause/resume, and `q` to exit.
 New pending proposals produce dashboard alerts. The regular REPL also reports
-new proposals between turns; `/autonomy` shows their status.
+new proposals between turns. Review and control them in the same chat terminal:
+
+```text
+/autonomy
+/autonomy show <id>
+/autonomy approve <id>
+/autonomy dismiss <id>
+/autonomy pause
+/autonomy resume
+```
+
+`show` displays the full proposal and evidence. `approve` enables read-only
+checks; add `--allow-writes` only to explicitly permit normal Rein tools,
+including shell commands and file writes, for that proposal. `dismiss` also
+disables an already enabled proposal. These controls do not start a nested
+terminal dashboard or immediately run a scan/task. The standalone
+`rein autonomy tui` dashboard remains optional.
 
 Start the background service after reviewing its scope:
 
@@ -819,10 +838,13 @@ forks cannot become fresh evidence of user intent.
 
 Defaults are one history check per hour, six operations per rolling 24 hours,
 eight model turns per approved run, and a 180-second cancellation deadline.
-A scan uses at most two model generations and counts as one operation. Limits
+A scan uses no model in rules-only mode, at most one bounded local helper call
+when enabled, or up to two calls in the explicitly selected main planner. Each
+scan counts as one operation. Limits
 can be set with `init --interval 60 --daily-budget 6 --turn-budget 8 --timeout 180`.
-Scans and runs share a lock and budget; model failures are recorded and scans
-wait until their next interval before retrying.
+Scans and runs share a lock and budget. With the rules planner, a missing or failed local helper falls back to
+rules-only checks, never to a cloud model. Scans wait until their next
+interval before retrying.
 
 Enrollment is explicit and limited to 32 directories. Use
 `rein autonomy init --workspace /absolute/path` for additional workspaces. The
@@ -831,10 +853,68 @@ and disables its tasks. The
 collector reads only Rein JSONL histories matching those directories, at most
 200 sessions with bounded older/recent excerpts. It omits tool bodies, thinking,
 and recognizable credentials. Chat histories from other apps are not imported.
-The selected evidence and inspected file text are sent to your configured model.
+The default scan reads evidence locally without sending it to a model. If you
+enable the local helper, bounded candidates go to its loopback server. The
+explicit main planner sends selected history and preferences to your main model. Approved
+task runs send selected evidence and inspected file text to your main model.
 Learning here consists of persisted reports and review decisions, stored in
 `$REIN_HOME/autonomy/state.json`. State retains at most 100 proposals and 200 run
 reports; full run sessions remain in the normal Rein session archive.
+
+For more personalized follow-ups, explicitly select the main planner:
+
+```sh
+rein autonomy planner main
+rein autonomy scan
+rein autonomy planner rules             # return to deterministic candidates
+```
+
+The main planner uses validated operator preferences, changed history, and
+prior decisions/results to propose and review useful improvements or routines.
+It makes at most two tool-free calls per changed scan under the daily budget;
+unchanged evidence makes no calls. It skips the tiny helper and uses the main
+model's normal compute or account allowance. Suggestions stay pending for
+approval. Selecting this mode does not authorize their execution.
+
+### Optional headless helper for background checks
+
+A waiting service does not need a model to stay awake. Rein uses its user service
+and timers for that job. The default coordinator makes no inference calls and
+uses no cloud allowance. The optional guardian is a headless worker that accepts
+bounded triage requests from the harness and returns candidate selections. It
+has no user chat, persona, tools, task approval, or execution authority.
+
+```sh
+rein autonomy guardian status
+rein autonomy guardian plan             # inspect this machine's fit and downloads
+rein autonomy guardian setup            # verify an already running Rein-owned helper
+rein autonomy guardian install          # start the worker and download its model
+rein autonomy guardian install --install-runtime  # also fetch a missing standalone runtime
+rein autonomy guardian disable          # stop the worker and disable the helper
+```
+
+The worker uses a dedicated loopback endpoint and private model storage. It can
+reuse an installed Ollama executable, but runs its own named Rein user service;
+it does not connect to your main model server or share that server's settings.
+With `--install-runtime`, Rein downloads a pinned official standalone archive
+into its private home. No desktop app is installed or opened. The older
+`--start-runtime` flag remains accepted; `guardian install` starts the owned
+worker as part of setup.
+
+The pinned [Qwen3 0.6B Q4_K_M model](https://ollama.com/library/qwen3:0.6b)
+is about 523 MB to download. The pinned [Ollama v0.33.3 runtime](https://github.com/ollama/ollama/releases/tag/v0.33.3)
+adds about 159 MB on macOS, 1.43 GB on Linux x64, or 1.55 GB on Linux arm64 when
+missing. `plan` shows download sizes, memory headroom, and extraction prerequisites. Unsupported
+hosts or missing extraction tools retain rules-only operation. These are fit
+estimates for this machine, not a remote server or a mobile-runtime promise.
+
+The worker sleeps between bounded requests and releases model residency after
+its short idle timeout. Local inference still generates tokens and uses memory,
+CPU/GPU time, and power. Disabling it stops the owned worker and filter but does
+not change an explicitly selected main planner. Personalized planning and
+approved work use the main model separately, with its normal resource and
+account limits. See [background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
+for setup and stop controls.
 
 ### Autonomous experiment loop
 

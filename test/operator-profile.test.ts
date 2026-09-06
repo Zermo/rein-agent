@@ -7,7 +7,7 @@ import {
 	ITEMS, PACKS, OPERATOR_FILES, scoreOperatorProfile, createOperatorProfile,
 	renderOperatorFiles, saveOperatorProfile, readOperatorProfile, readOperatorGuidance,
 } from "../src/harness/operator-profile.ts";
-import type { OperatorAnswers, PackId } from "../src/harness/operator-profile.ts";
+import type { PackId } from "../src/harness/operator-profile.ts";
 
 const SHIP = { q1: "a", q2: "a", q3: "c", q4: "a" };
 function privateHome(run: (home: string) => void): void {
@@ -15,33 +15,35 @@ function privateHome(run: (home: string) => void): void {
 	try { run(home); } finally { rmSync(home, { recursive: true, force: true }); }
 }
 
-test("all 108 complete answer combinations score deterministically against fixed rules", () => {
-	let count = 0;
-	for (const q1 of ITEMS[0].choices) for (const q2 of ITEMS[1].choices) for (const q3 of ITEMS[2].choices) for (const q4 of ITEMS[3].choices) {
-		const answers = { q1: q1.id, q2: q2.id, q3: q3.id, q4: q4.id };
+test("all 5760 complete preferences are deterministic and task focus selects the pack", () => {
+	const combinations = ITEMS.reduce<Record<string, string>[]>((answers, item) => answers.flatMap(previous => item.choices.map(choice => ({ ...previous, [item.id]: choice.id }))), [{ q4: "a" }]);
+	const expectedPacks = { a: "ship", b: "ops", c: "study", d: "studio", e: "everyday", f: "everyday" };
+	assert.equal(combinations.length, 5760);
+	for (const answers of combinations) {
 		const result = scoreOperatorProfile(answers);
-		assert.deepEqual(result, scoreOperatorProfile({ q4: answers.q4, q2: answers.q2, q3: answers.q3, q1: answers.q1 }));
-		assert.deepEqual(result.operator_profile, { density: q1.weights.density![0], focus: q2.weights.focus![0], autonomy: q3.weights.autonomy![0], surface: q4.weights.surface![0] });
-		const expected = (Object.keys(PACKS) as PackId[]).find(name => Object.entries(PACKS[name].rule).every(([axis, value]) => result.operator_profile[axis] === value)) ?? "ops";
-		assert.equal(result.recommended_pack, expected);
+		assert.deepEqual(result, scoreOperatorProfile(Object.fromEntries(Object.entries(answers).reverse())));
+		assert.equal(result.operator_profile.surface, "cli");
+		assert.equal(result.recommended_pack, expectedPacks[answers.q2]);
 		assert.equal(Object.values(result.tallies).reduce((total, tally) => total + Object.values(tally).reduce((sum, weight) => sum + weight, 0), 0), 8);
-		count++;
+		assert.ok(Object.values(result.preferences).every(value => typeof value === "string"));
 	}
-	assert.equal(count, 108);
 });
 
-test("all four packs match exactly and unmatched combinations suggest ops", () => {
+test("packs follow the task regardless of pacing or initiative, with useful native workflow names", () => {
 	for (const [answers, pack] of [
 		[SHIP, "ship"],
 		[{ q1: "a", q2: "b", q3: "b", q4: "b" }, "ops"],
 		[{ q1: "c", q2: "c", q3: "a", q4: "c" }, "study"],
 		[{ q1: "b", q2: "d", q3: "a", q4: "a" }, "studio"],
-		[{ q1: "a", q2: "d", q3: "c", q4: "a" }, "ops"],
-	] as [OperatorAnswers, PackId][]) assert.equal(scoreOperatorProfile(answers).recommended_pack, pack);
-	assert.deepEqual(PACKS.ship.skills, ["github-pr-workflow", "tdd", "caveman"]);
-	assert.deepEqual(PACKS.ops.skills, ["hermes-agent", "fleet-command-ops", "execution-discipline"]);
-	assert.deepEqual(PACKS.study.skills, ["grounded-citations", "plan"]);
-	assert.deepEqual(PACKS.studio.skills, ["claude-design", "comfyui"]);
+		[{ q1: "a", q2: "d", q3: "c", q4: "a" }, "studio"],
+		[{ q1: "e", q2: "e", q3: "b", q4: "a" }, "everyday"],
+		[{ q1: "d", q2: "f", q3: "a", q4: "a" }, "everyday"],
+	] as [Record<string, string>, PackId][]) assert.equal(scoreOperatorProfile(answers).recommended_pack, pack);
+	assert.deepEqual(PACKS.everyday.skills, ["task-breakdown", "routine-planning", "decision-support"]);
+	assert.deepEqual(PACKS.ship.skills, ["code-change", "tdd", "execution-discipline"]);
+	assert.deepEqual(PACKS.ops.skills, ["service-care", "durable-notes", "execution-discipline"]);
+	assert.deepEqual(PACKS.study.skills, ["grounded-research", "learning-plan"]);
+	assert.deepEqual(PACKS.studio.skills, ["creative-brief", "visual-review"]);
 });
 
 test("rejects missing, unknown, inherited, and invalid answers instead of guessing", () => {
@@ -56,7 +58,7 @@ test("skipping and overriding a suggestion never changes the work-style vector",
 	assert.equal(skipped.enabled_pack, null);
 	assert.deepEqual(skipped.enabled_skills, []);
 	assert.equal(override.recommended_pack, "ship");
-	assert.deepEqual(override.enabled_skills, ["grounded-citations", "plan"]);
+	assert.deepEqual(override.enabled_skills, ["grounded-research", "learning-plan"]);
 	assert.deepEqual(override.operator_profile, skipped.operator_profile);
 	assert.throws(() => createOperatorProfile(SHIP, "toString" as PackId), /Enabled pack/);
 });
@@ -101,7 +103,7 @@ test("reruns preserve unmanaged text and back up exact originals before changing
 	assert.ok(updated.startsWith("# Custom preface\n"));
 	assert.ok(updated.endsWith("\n## Custom notes\nUse metric units.\n"));
 	assert.equal(updated.split("<!-- rein:operator-profile:start -->").length, 2);
-	assert.match(updated, /Preferred surface: voice/);
+	assert.match(updated, /Current surface: terminal\. Earlier voice preference is retained/);
 	assert.equal(readFileSync(join(home, "config.json"), "utf8"), '{"private":"leave exactly unchanged"}\n');
 	assert.deepEqual(readOperatorProfile(home), { profile: secondProfile });
 }));
@@ -149,11 +151,11 @@ test("machine reader rejects forged vectors, unexpected skills, duplicate keys, 
 	const yaml = renderOperatorFiles(profile, home)["profile.yaml"];
 	for (const corrupted of [
 		yaml.replace('focus: "coding"', 'focus: "ops"'),
-		yaml.replace('"github-pr-workflow","tdd","caveman"', '"remote-code"'),
+		yaml.replace('"code-change","tdd","execution-discipline"', '"remote-code"'),
 		yaml + 'enabled_pack: "ops"\n',
 		yaml.replace('q1: "a"', 'q1: !script "a"'),
 		yaml.replace('q1: "a"', 'q1: &answer "a"'),
-		yaml.replace('version: 1', 'version: 2'),
+		yaml.replace('version: 2', 'version: 3'),
 		yaml + 'clinical_score: 10\n',
 	]) {
 		writeFileSync(join(home, "profile.yaml"), corrupted);
@@ -192,4 +194,104 @@ test("save validates before creating directories or files", () => privateHome(ho
 	assert.deepEqual(readdirSync(home), []);
 	assert.deepEqual(readOperatorProfile(home), {});
 	assert.deepEqual(readOperatorGuidance(home), { text: "" });
+}));
+
+const LEGACY_OPS = `version: 1
+operator_profile:
+  focus: "ops"
+  density: "terse"
+  autonomy: "plan"
+  surface: "voice"
+recommended_pack: "ops"
+enabled_pack: "ops"
+enabled_skills: ["hermes-agent","fleet-command-ops","execution-discipline"]
+answers:
+  q1: "a"
+  q2: "b"
+  q3: "b"
+  q4: "c"
+tallies:
+  focus:
+    ops: 2
+  density:
+    terse: 2
+  autonomy:
+    plan: 2
+  surface:
+    voice: 2
+`;
+
+test("valid version 1 profiles migrate in memory and preserve exact originals until an explicit save", () => privateHome(home => {
+	writeFileSync(join(home, "profile.yaml"), LEGACY_OPS);
+	const original = "My chosen vocabulary.\n<!-- rein:operator-profile:start -->\nEnabled pack skills: hermes-agent, fleet-command-ops, execution-discipline.\n<!-- rein:operator-profile:end -->\nKeep this personal note.\n";
+	for (const name of ["SOUL.md", "USER.md", "AGENTS.md"]) writeFileSync(join(home, name), original);
+	const loaded = readOperatorProfile(home);
+	assert.equal(loaded.diagnostic, undefined);
+	assert.match(loaded.migration!, /files stay unchanged/);
+	assert.equal(loaded.profile!.version, 2);
+	assert.deepEqual(loaded.profile!.enabled_skills, ["service-care", "durable-notes", "execution-discipline"]);
+	assert.equal(loaded.profile!.operator_profile.surface, "cli");
+	assert.equal(loaded.profile!.preferences.requested_surface, "voice");
+	assert.equal(loaded.profile!.preferences.pacing, "adaptive");
+	const guidance = readOperatorGuidance(home);
+	assert.equal(guidance.diagnostic, undefined);
+	assert.match(guidance.text, /Earlier voice preference is retained/);
+	assert.match(guidance.text, /service-care/);
+	assert.doesNotMatch(guidance.text, /hermes-agent|fleet-command-ops/);
+	assert.match(guidance.text, /My chosen vocabulary/);
+	assert.match(guidance.text, /Keep this personal note/);
+	assert.equal(readFileSync(join(home, "profile.yaml"), "utf8"), LEGACY_OPS);
+	for (const name of ["SOUL.md", "USER.md", "AGENTS.md"]) assert.equal(readFileSync(join(home, name), "utf8"), original);
+	const result = saveOperatorProfile(loaded.profile!, { home });
+	assert.equal(readFileSync(join(result.backupDirectory!, "profile.yaml"), "utf8"), LEGACY_OPS);
+	for (const name of ["SOUL.md", "USER.md", "AGENTS.md"]) {
+		assert.equal(readFileSync(join(result.backupDirectory!, name), "utf8"), original);
+		assert.match(readFileSync(join(home, name), "utf8"), /Keep this personal note/);
+	}
+	assert.deepEqual(readOperatorProfile(home), { profile: loaded.profile });
+}));
+
+test("version 1 migration validates old scores and skills before trusting any guidance", () => privateHome(home => {
+	for (const invalid of [
+		LEGACY_OPS.replace('"hermes-agent","fleet-command-ops","execution-discipline"', '"unreviewed-workflow"'),
+		LEGACY_OPS.replace('focus: "ops"', 'focus: "coding"'),
+		LEGACY_OPS.replace('q1: "a"', 'q1: "e"'),
+		LEGACY_OPS.replace('recommended_pack: "ops"', 'recommended_pack: "ship"'),
+		LEGACY_OPS.replace('enabled_pack: "ops"', 'enabled_pack: "everyday"'),
+	]) {
+		writeFileSync(join(home, "profile.yaml"), invalid);
+		assert.equal(readOperatorProfile(home).profile, undefined);
+		assert.ok(readOperatorProfile(home).diagnostic);
+		assert.equal(readOperatorGuidance(home).text, "");
+		assert.equal(readFileSync(join(home, "profile.yaml"), "utf8"), invalid);
+	}
+}));
+
+test("support preferences reach runtime guidance without granting new actions or assigning an ability", () => privateHome(home => {
+	const profile = createOperatorProfile({ q1: "d", q2: "f", q3: "b", q4: "a", q5: "b", q6: "b", q7: "c" }, "everyday");
+	saveOperatorProfile(profile, { home });
+	const guidance = readOperatorGuidance(home).text;
+	assert.match(guidance, /one concrete next action/);
+	assert.match(guidance, /small steps and present one next action at a time/);
+	assert.match(guidance, /concrete example or a familiar analogy/);
+	assert.match(guidance, /recap the decisions and the next step/);
+	assert.match(guidance, /not measurements of ability or a diagnosis/);
+	assert.match(guidance, /why it fits, then carry out work already authorized/);
+	assert.match(guidance, /Seek approval for new scope/);
+	assert.match(guidance, /If a proposal is declined, offer the next useful option/);
+	assert.match(guidance, /does not grant tool permissions/);
+	assert.equal(profile.operator_profile.focus, "everyday");
+	assert.equal(profile.recommended_pack, "everyday");
+}));
+
+test("support preferences change style independently of the task-matched pack", () => privateHome(home => {
+	const first = createOperatorProfile({ ...SHIP, q5: "a", q6: "a", q7: "a" }, null);
+	const next = createOperatorProfile({ ...SHIP, q5: "c", q6: "c", q7: "b" }, null);
+	assert.deepEqual(first.operator_profile, next.operator_profile);
+	assert.deepEqual(first.tallies, next.tallies);
+	assert.equal(first.recommended_pack, next.recommended_pack);
+	const rendered = renderOperatorFiles(next, home)["USER.md"];
+	assert.match(rendered, /meaningful checkpoints/);
+	assert.match(rendered, /strongest alternatives/);
+	assert.match(rendered, /briefly reflect the goal/);
 }));

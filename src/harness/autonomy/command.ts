@@ -3,11 +3,13 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { guessProvider, loadConfig, normalizeBaseUrl, PROVIDER_PRESETS } from "../../ai/models.ts";
 import type { ReinConfig } from "../../ai/models.ts";
-import { autonomyHome, canonicalWorkspace, decideProposal, readState, runsToday, updateState } from "./state.ts";
+import { autonomyHome, canonicalWorkspace, decideProposal, readState, runsToday, updateState, setPlannerMode } from "./state.ts";
 import { runCycle, runDaemon } from "./engine.ts";
 import { installService, servicePlan, serviceStatus, uninstallService, waitForService } from "./service.ts";
 import { renderDashboard, runDashboard, terminalText } from "./tui.ts";
 import type { DashboardSnapshot } from "./tui.ts";
+import { configureGuardian, guardianPlan, guardianStatus, installGuardianModel, readGuardianConfig, runGuardianServer, setupGuardian, stopGuardianRuntime, type GuardianDependencies } from "./guardian.ts";
+import { profileHardware } from "../../hardware/profile.ts";
 
 type Flags = Record<string, string | boolean>;
 export interface AutonomyCommandDependencies {
@@ -16,6 +18,9 @@ export interface AutonomyCommandDependencies {
 	install?: typeof installService;
 	wait?: typeof waitForService;
 	uninstall?: typeof uninstallService;
+	status?: typeof serviceStatus;
+	guardian?: GuardianDependencies;
+	stopGuardian?: typeof stopGuardianRuntime;
 }
 
 /** A user service does not inherit terminal exports. Do not persist credentials implicitly. */
@@ -52,11 +57,17 @@ function numberOption(flags: Flags, name: string, min: number, max: number): num
 export function autonomyServiceOptions() {
 	return { home: autonomyHome(), cliPath: realpathSync(resolve(process.argv[1])), nodePath: process.execPath };
 }
+function requireServiceModelCompatibility(dependencies: AutonomyCommandDependencies): void {
+	const status = (dependencies.status ?? serviceStatus)((dependencies.serviceOptions ?? autonomyServiceOptions)());
+	if (!status.installed) return;
+	const issue = serviceConfigurationIssue(loadConfig());
+	if (issue) throw new Error(`Background model operation was not enabled. ${issue}`);
+}
 export function autonomySnapshot(): DashboardSnapshot {
 	const state = readState(); let service: string;
 	try { service = serviceStatus(autonomyServiceOptions()).message; } catch (e) { service = (e as Error).message; }
 	return { paused: state.paused, workspaces: state.workspaces, service,
-		budget: `${runsToday(state)}/${state.maxRunsPerDay} operations in the last 24h; at most 2 model calls per scan, ${state.maxTurns} turns per run; ${state.timeoutSeconds}s timeout`,
+		budget: `${runsToday(state)}/${state.maxRunsPerDay} operations in the last 24h; ${state.planner === "main" ? "opt-in main planner: up to 2 model calls per changed scan" : "rules planner: no cloud calls, optional bounded local filter"}; ${state.maxTurns} turns per approved run; ${state.timeoutSeconds}s timeout`,
 		lastError: state.lastError, proposals: state.proposals,
 		recentRuns: state.runs.slice(-5).reverse().map(run => ({ id: run.id, status: run.status, detail: `${run.detail}${run.sessionId ? ` [session ${run.sessionId}]` : ""}` })),
 	};
@@ -76,6 +87,15 @@ const HELP = `Rein autonomy controls
   rein autonomy status [--json]        state, proposals, reports and budgets
   rein autonomy tui                   interactive controls and proposal alerts
   rein autonomy scan                  inspect changed history once, even while paused
+  rein autonomy planner rules|main     select free rules or opt-in main-model planning
+  rein autonomy guardian status       local helper state; no inference
+  rein autonomy guardian plan         inspect hardware fit and optional install steps
+  rein autonomy guardian setup        verify Rein's owned worker and enable helper
+    --base-url <loopback URL>          dedicated owned worker port (default 11435)
+  rein autonomy guardian install      start headless owned worker, download helper
+    --install-runtime                 allow missing standalone runtime download
+    --start-runtime                   compatibility flag; install starts the worker
+  rein autonomy guardian disable      disable helper; stop only Rein's guardian service
   rein autonomy show <id>              full proposed task and supporting evidence IDs
   rein autonomy approve <id>           enable read-only inspection for this task
     --allow-writes                     authorize normal Rein tools, including shell
@@ -86,14 +106,40 @@ const HELP = `Rein autonomy controls
   rein autonomy disable               pause, stop, and remove the OS user service
 
 Routine proposals recur; loop/project proposals run once. Inspection reads only
-enrolled workspaces and Rein task history. Scans use the configured model and can
-use API credits or subscription allowance. Unchanged history makes no model calls.
+enrolled workspaces and Rein task history. Rules are the default: waking, timers
+and unchanged history use no inference or cloud credits. The optional local helper
+filters rule suggestions. Main planning explicitly opts into up to two tool-free
+calls on changed evidence and can use configured API credits/subscription allowance.
+Approved task execution separately uses the main configured model/account.
 There is no process injection, automatic account login, or network discovery.
 `;
 
 export async function runAutonomyCommand(args: string[], flags: Flags = {}, dependencies: AutonomyCommandDependencies = {}): Promise<void> {
 	const command = args[0] ?? "tui";
 	if (command === "help") { console.log(HELP); return; }
+	if (command === "planner") {
+		if (!args[1]) { console.log(`Planner: ${readState().planner ?? "rules"}. Use rein autonomy planner rules|main. Main uses the configured model/account for up to two calls per changed scan.`); return; }
+		if (args[1] !== "rules" && args[1] !== "main") throw new Error("Use rein autonomy planner rules|main.");
+		if (args[1] === "main") requireServiceModelCompatibility(dependencies);
+		await setPlannerMode(args[1]);
+		console.log(args[1] === "main" ? "Main-model planning enabled by explicit request. Changed history can use up to two tool-free calls on your configured model/account, within the daily budget and timeout. Cloud providers can use credits or subscription allowance. Suggestions remain pending until approved." : "Rules planning selected. Scans use no main-model calls; the optional local helper can filter candidates. Existing approved task execution remains separate."); return;
+	}
+	if (command === "guardian") {
+		const action = args[1] ?? "status", deps = dependencies.guardian ?? {};
+		if (action === "status") { const status = await guardianStatus({}, deps); console.log(flags.json === true ? JSON.stringify(status, null, 2) : `${status.mode}: ${status.detail}`); return; }
+		if (action === "plan") { console.log(JSON.stringify(guardianPlan(await (deps.profile ?? profileHardware)()), null, 2)); return; }
+		if (action === "disable") { const existing = readGuardianConfig(); configureGuardian({ mode: "rules", baseUrl: existing.baseUrl }); const result = (dependencies.stopGuardian ?? stopGuardianRuntime)(); console.log(terminalText(`Local helper disabled. ${result.message} Planner mode and approved tasks are unchanged.`)); return; }
+		if (action === "serve") { await runGuardianServer(); return; }
+		if (action === "setup" || action === "install") {
+			const controller = new AbortController(), stop = () => controller.abort(); process.on("SIGINT", stop); process.on("SIGTERM", stop);
+			try {
+				if (action === "setup") { const status = await setupGuardian({ baseUrl: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined, signal: controller.signal }, deps); console.log(status.detail); }
+				else { const result = await installGuardianModel({ baseUrl: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined, installRuntime: flags["install-runtime"] === true, startRuntime: flags["start-runtime"] === true, signal: controller.signal, log: text => console.log(terminalText(text)) }, deps); if (!result.installed) throw new Error(terminalText(result.detail)); console.log(terminalText(result.detail)); }
+			} finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); }
+			return;
+		}
+		throw new Error("Use rein autonomy guardian status|plan|setup|install|disable.");
+	}
 	if (command === "init" || command === "enable") {
 		const workspace = canonicalWorkspace(typeof flags.workspace === "string" ? flags.workspace : process.cwd());
 		const interval = numberOption(flags, "interval", 5, 10080);
@@ -111,7 +157,7 @@ export async function runAutonomyCommand(args: string[], flags: Flags = {}, depe
 		if (command === "enable") {
 			// Pause before installation. A failed service start cannot enable work.
 			const paused = await updateState(state => { state.paused = true; state.controlRevision = (state.controlRevision ?? 0) + 1; });
-			const issue = serviceConfigurationIssue(loadConfig());
+			const issue = paused.planner === "main" || paused.proposals.some(p => p.status === "enabled") ? serviceConfigurationIssue(loadConfig()) : undefined;
 			if (issue) throw new Error(issue);
 			const options = (dependencies.serviceOptions ?? autonomyServiceOptions)();
 			const installed = (dependencies.install ?? installService)(options);
@@ -139,6 +185,7 @@ export async function runAutonomyCommand(args: string[], flags: Flags = {}, depe
 		console.log(terminalText((dependencies.uninstall ?? uninstallService)((dependencies.serviceOptions ?? autonomyServiceOptions)()).message)); return;
 	}
 	if (command === "pause" || command === "resume") {
+		if (command === "resume" && (readState().planner === "main" || readState().proposals.some(p => p.status === "enabled"))) requireServiceModelCompatibility(dependencies);
 		await updateState(state => { state.paused = command === "pause"; state.controlRevision = (state.controlRevision ?? 0) + 1; });
 		console.log(command === "pause" ? "Autonomy paused. Active background work is being cancelled." : "Autonomy resumed. Start the supervisor with enable or daemon if it is not running."); return;
 	}
@@ -156,16 +203,17 @@ export async function runAutonomyCommand(args: string[], flags: Flags = {}, depe
 		if (!proposal) throw new Error("Unknown proposal. Use rein autonomy status to list proposal IDs.");
 		console.log(terminalText(JSON.stringify(proposal, null, 2), true));
 		if (command !== "show") {
+			if (command === "approve") requireServiceModelCompatibility(dependencies);
 			await decideProposal(proposal.id, command === "approve" ? "enabled" : "dismissed", flags["allow-writes"] === true);
-			console.log(command === "dismiss" ? "Proposal dismissed." : flags["allow-writes"] === true ? "Enabled with normal Rein tools, including shell and file writes. Review saved run sessions for results." : "Enabled for read-only workspace inspection.");
+			console.log(command === "dismiss" ? "Proposal dismissed." : flags["allow-writes"] === true ? "Enabled with normal Rein tools, including shell and file writes. Runs use the main configured model/account and may consume credits. Review saved run sessions for results." : "Enabled for read-only workspace inspection using the main configured model/account; runs may consume credits.");
 		}
 		return;
 	}
 	if (command === "tui") {
 		await runDashboard({ snapshot: autonomySnapshot, async action(action, id) {
 			if (action === "refresh") return;
-			if (action === "pause" || action === "resume") { await updateState(state => { state.paused = action === "pause"; state.controlRevision = (state.controlRevision ?? 0) + 1; }); return action === "pause" ? "Paused; active background work is being cancelled." : "Resumed. The service must be running to execute work."; }
-			if (action === "approve" || action === "dismiss") { await decideProposal(id!, action === "approve" ? "enabled" : "dismissed"); return action === "approve" ? "Enabled for read-only workspace inspection." : "Dismissed."; }
+			if (action === "pause" || action === "resume") { if (action === "resume" && (readState().planner === "main" || readState().proposals.some(p => p.status === "enabled"))) requireServiceModelCompatibility(dependencies); await updateState(state => { state.paused = action === "pause"; state.controlRevision = (state.controlRevision ?? 0) + 1; }); return action === "pause" ? "Paused; active background work is being cancelled." : "Resumed. The service must be running to execute work."; }
+			if (action === "approve" || action === "dismiss") { if (action === "approve") requireServiceModelCompatibility(dependencies); await decideProposal(id!, action === "approve" ? "enabled" : "dismissed"); return action === "approve" ? "Enabled for read-only inspection using the main model/account; may consume credits." : "Dismissed."; }
 			// Schedule immediately and let the supervisor do the work, keeping UI
 			// controls responsive while a model/tool is running.
 			if (action === "run") { await updateState(state => {

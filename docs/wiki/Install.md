@@ -6,8 +6,8 @@ and make a first request. You can revise every work preference later.
 ## Before you begin
 
 You need Node.js 18 or newer, npm, Git, curl, and Bash for the installer. It
-supports macOS, Linux, and WSL. Open Terminal, a NodeTerm shell, or your preferred
-terminal and check:
+supports macOS, Linux, and WSL. Open Ghostty, Terminal, a NodeTerm terminal node,
+or your preferred terminal and check:
 
 ```sh
 node --version
@@ -29,11 +29,12 @@ Keep this terminal open. Setup reads your answers from it even though the
 installer arrived through a pipe. Follow the numbered choices shown by Rein.
 If you already installed Rein, start the same walkthrough with `rein setup`.
 
-On a local macOS desktop, the installer also adds the separate official NodeTerm
-app if missing. Existing apps are preserved. When NodeTerm is closed, Rein
-registers itself as its default agent. If it is already running, close it when
-convenient and run `rein desktop install --no-launch` to finish registration.
-Other platforms and remote shells retain terminal installation.
+When setup has a working model connection, the installer starts interactive
+Rein in this same terminal and directory. There is no app project to create or
+browser activity page to open. NodeTerm is optional: add `--nodeterm` after
+`bash -s --` to install and register its separate macOS app, then open it yourself
+with `rein desktop open` when wanted. Installing it does not redirect ordinary
+`rein` commands away from your terminal.
 
 For native Windows, install with npm, then start the wizard:
 
@@ -44,14 +45,16 @@ rein setup
 
 ## Tell Rein how you work
 
-Answer four questions about the work you plan to do, how much explanation you
-want, how you prefer changes handled, and where you want to talk to Rein. Setup
-shows your operator profile and recommends a skill pack. Go back to change an
-answer, choose another pack, or skip packs before saving.
+Answer six questions about the tasks you want help with, explanation style,
+initiative, pacing, understanding, and listening. Everyday organization and
+small life improvements are included alongside code, services, research, and
+creative work. Options include small steps, examples, checkpoints, and recaps.
+The terminal is the supported surface today.
 
-The questions record work preferences. There are no scores for health,
-intelligence, personality type, or attention span. The same answers always
-produce the same recommendation. You can change it as your work changes.
+Setup suggests workflows based on your task focus. Review the exact skills,
+choose another pack, or skip packs before saving. These are editable support
+preferences, with no score for health, personality, ability, or attention.
+The same answers always produce the same recommendation.
 
 Your private Rein home receives four files:
 
@@ -106,22 +109,40 @@ Choose manual scans for that folder, enroll it and start the background service,
 or skip this and use ordinary chat.
 
 Suggestions use your Rein task history and the workspace's current state.
-Proposed tasks stay pending until you approve them. Background runs have fixed
+Default checks use deterministic rules without model calls. An optional small
+headless helper can filter new candidates for the harness; it has no user chat
+or tools and is not downloaded by default. Its dedicated worker and model store
+are separate from your main model server. Use `rein autonomy guardian plan` to
+review fit and downloads, then `rein autonomy guardian install` to start it. Add
+`--install-runtime` only when you want a missing standalone runtime downloaded.
+For personalized proposals, explicitly choose `rein autonomy planner main`.
+It uses up to two calls to your main model per changed scan, with your saved
+preferences and history; cloud allowances can apply. Approved task execution
+uses your main model separately, so its normal resource usage and account
+limits still apply. Proposed tasks stay pending until you approve them. Background runs have fixed
 budgets and can be paused. Choosing an assertive work style or a skill pack does
 not grant background approval or change tool permissions.
 
-Review and control suggestions later:
+Review proposals from the same Rein chat terminal:
 
-```sh
-rein autonomy status
-rein autonomy tui
-rein autonomy pause
-rein autonomy disable
+```text
+/autonomy
+/autonomy show <id>
+/autonomy approve <id>
+/autonomy dismiss <id>
+/autonomy pause
+/autonomy resume
 ```
 
+`approve` permits read-only checks. Add `--allow-writes` only when you explicitly
+want that proposal to use normal tools, including commands and writes. No
+second terminal is needed. The optional standalone dashboard is
+`rein autonomy tui`; use `rein autonomy disable` from your shell to remove the
+supervisor service.
+
 `disable` stops and removes Rein's service while keeping reports and decisions.
-The [README](https://github.com/Zermo/rein-agent#proactive-work-from-task-history)
-has enrollment, budgets, and approval details.
+See [background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
+for the optional local helper, runtime installation, budgets, and stop controls.
 
 ## Make a first request
 
@@ -136,19 +157,25 @@ HTTP connections should report `connection: passed`, followed by a short model
 reply. Subscription connections report the official CLI's authentication status;
 the model request checks that the connection works.
 
-Open a folder you want to work in. Bare `rein` opens an installed NodeTerm on a
-local macOS desktop. Choose that project and add a Rein agent node. In your
-current terminal and directory, use `rein --terminal`.
+The installer starts Rein in your current terminal after successful interactive
+setup. To start another session later, open a folder and run `rein`. Ghostty,
+Terminal, and other compatible terminals use the same interface.
 
 Try a small first task:
+
+> Help me make one small thing easier today. Ask what is getting in the way,
+> then suggest a next step I can realistically start.
+
+For a project, try:
 
 > Read the files in this folder and explain what is here. Suggest one useful
 > next step, and wait for me before changing anything.
 
-Chat has numbered OPERATOR and REIN labels with distinct colors. Local NodeTerm
-sessions open the detailed activity view automatically, using a browser when
-the native node cannot embed it. `--no-browser` disables that opening. Install
-tmux for the explicit split view, `rein --visual`. Ordinary chat does not need tmux.
+Chat has numbered OPERATOR and REIN labels with distinct colors. Tool calls and
+results have their own labels. Use `/activity` to read the numbered activity
+timeline, `/activity 3` to inspect a step, and `/legend` for the label key.
+No separate app or browser is needed. `rein --visual` explicitly starts a tmux
+split view; ordinary chat and `/activity` do not need tmux.
 
 ## Change preferences or update
 
@@ -179,10 +206,11 @@ Add options after `bash -s --` in the curl command:
 
 | Option | Effect |
 | --- | --- |
-| `--skip-setup` | Install without onboarding, connection checks, or app launch |
+| `--skip-setup` | Install without onboarding, connection checks, or interactive launch |
 | `--yes` | Run unattended connection setup; do not invent an operator profile |
-| `--no-launch` | Keep the native app closed after setup |
-| `--terminal-only` | Skip NodeTerm installation and save a terminal preference |
+| `--no-launch` | Finish setup without starting interactive Rein |
+| `--terminal-only` | Explicitly keep the terminal default |
+| `--nodeterm` | Install/register the optional NodeTerm macOS app; leave it closed |
 
 If the installer cannot access an interactive terminal, run `rein setup` from
 one afterward.

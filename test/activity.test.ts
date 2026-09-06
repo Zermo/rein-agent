@@ -4,10 +4,12 @@ import { mkdtempSync, rmSync, readFileSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { get } from "node:http";
+import { spawn } from "node:child_process";
 import { ActivityJournal, activityFile, newActivityId, readActivity } from "../src/harness/activity/store.ts";
 import { renderActivity } from "../src/harness/activity/terminal.ts";
 import { startCanvas } from "../src/harness/activity/server.ts";
 import { createRunner } from "../src/harness/runner.ts";
+import { readState, updateState } from "../src/harness/autonomy/state.ts";
 
 async function isolated(fn: (cwd: string) => Promise<void>) {
 	const cwd = mkdtempSync(join(tmpdir(), "rein-activity-")), saved = process.env.REIN_HOME;
@@ -32,6 +34,10 @@ test("live activity records real writes and visible responses without changing m
 	assert.doesNotMatch(readFileSync(activityFile(id), "utf8"), /PRIVATE_THINKING_SENTINEL/);
 	assert.equal(statSync(activityFile(id)).mode & 0o777, 0o600);
 	assert.match(renderActivity(snapshot), /Response/);
+	const inline = renderActivity(snapshot, tool.id, 90, 24, "/activity <step> for detail · /help for commands");
+	assert.match(inline, /TOOL write/); assert.match(inline, /OPERATOR User request/);
+	assert.match(inline, /Input:/); assert.match(inline, /output.txt/);
+	assert.match(inline, /\/activity <step>/); assert.doesNotMatch(inline, /canvas|browser|↑↓ select/);
 }));
 
 test("activity bounds history and terminal output, and marks interrupted nodes cancelled", async () => isolated(async cwd => {
@@ -73,4 +79,94 @@ test("a successful recovery turn clears the activity error state", async () => i
 	journal.event({ type: "agent_end", messages: [] }); journal.end();
 	assert.equal(readActivity(journal.snapshot.id)?.state, "idle");
 	assert.deepEqual(readActivity(journal.snapshot.id)?.nodes.map(node => node.status), ["error", "done"]);
+}));
+
+test("the REPL inspects recorded steps in place without starting a provider request", { timeout: 5000 }, async () => isolated(async cwd => {
+	const journal = new ActivityJournal(newActivityId(), cwd);
+	journal.event({ type: "message_end", message: { role: "user", content: "Summarize my task list", timestamp: Date.now() } });
+	journal.event({ type: "tool_execution_start", toolCallId: "read-list", toolName: "read", args: { path: "tasks.txt" } });
+	journal.event({ type: "tool_execution_end", toolCallId: "read-list", toolName: "read", result: { content: "Three tasks remain" }, isError: false }); journal.end();
+	const source = `import { startRepl } from ${JSON.stringify(new URL("../src/harness/repl.ts", import.meta.url).href)};
+const runner = { model: { provider: 'fixture', id: 'fixture' }, toolsMode: 'native', toolsModeSource: 'fixture', context: { messages: [] }, setSession() {}, run() { throw new Error('Unexpected provider call'); } };
+await startRepl({ runner, activityId: ${JSON.stringify(journal.snapshot.id)} });`;
+	const child = spawn(process.execPath, ["--input-type=module", "-e", source], { cwd, env: { ...process.env, NODETERM_NODE_ID: "", NO_COLOR: "1" } });
+	let output = "";
+	child.stdout.on("data", data => output += data); child.stderr.on("data", data => output += data);
+	const timer = setTimeout(() => child.kill("SIGKILL"), 4000);
+	try {
+		const done = new Promise<number | null>((resolve, reject) => { child.on("error", reject); child.on("close", resolve); });
+		child.stdin.end("/activity\n/activity 1\n/activity 999\n/quit\n");
+		assert.equal(await done, 0, output);
+		assert.match(output, /REIN \/ ACTIVITY/); assert.match(output, /TOOL read/); assert.match(output, /Three tasks remain/);
+		assert.match(output, /Summarize my task list/); assert.match(output, /Unknown activity step/);
+		assert.doesNotMatch(output, /Unexpected provider call|http:\/\/|Opening.*browser/);
+	} finally { clearTimeout(timer); child.kill(); }
+}));
+
+test("the REPL reviews and controls proposals here, with strict commands and no nested work", { timeout: 5000 }, async () => isolated(async cwd => {
+	await updateState(state => {
+		state.workspaces = [cwd];
+		state.proposals.push({ id: "proposal-fixture", title: "Weekly task review", kind: "routine", workspace: cwd, prompt: "Review the task list and suggest the next small step.", reason: "The operator requested a weekly review.", evidenceIds: ["history-fixture"], intervalMinutes: 10080, status: "pending", allowWrites: false, created: Date.now() });
+	});
+	const source = `import { startRepl } from ${JSON.stringify(new URL("../src/harness/repl.ts", import.meta.url).href)};
+globalThis.fetch = () => { throw new Error('UNEXPECTED_PROVIDER_CALL'); };
+const runner = { model: { provider: 'fixture', id: 'fixture' }, toolsMode: 'native', toolsModeSource: 'fixture', context: { messages: [] }, setSession() {}, run() { throw new Error('UNEXPECTED_PROVIDER_CALL'); } };
+await startRepl({ runner });`;
+	const script = join(cwd, "repl-control-fixture.mjs"); writeFileSync(script, source);
+	const child = spawn(process.execPath, [script], { cwd, env: { ...process.env, NODETERM_NODE_ID: "", NO_COLOR: "1", REIN_BASE_URL: "http://fixture.invalid/v1", REIN_MODEL: "fixture" } });
+	let output = "";
+	child.stdout.on("data", data => output += data); child.stderr.on("data", data => output += data);
+	const timer = setTimeout(() => child.kill("SIGKILL"), 4000);
+	try {
+		const done = new Promise<number | null>((resolve, reject) => { child.on("error", reject); child.on("close", resolve); });
+		child.stdin.end(["/autonomy", "/autonomy show proposal-fixture", "/autonomy approve proposal-fixture", "/autonomy approve proposal-fixture --allow-writes", "/autonomy approve proposal-fixture --allow-writes --extra", "/autonomy scan", "/autonomy run proposal-fixture", "/autonomy tui", "/autonomy dismiss proposal-fixture", "/autonomy pause", "/autonomy resume", "/quit"].join("\n") + "\n");
+		assert.equal(await done, 0, output);
+		assert.match(output, /\/autonomy show <id> to review here/);
+		assert.match(output, /Review the task list and suggest the next small step/);
+		assert.match(output, /Enabled for read-only workspace inspection/); assert.match(output, /Enabled with normal Rein tools/);
+		assert.equal((output.match(/Usage: \/autonomy/g) ?? []).length, 4);
+		assert.match(output, /Proposal dismissed/); assert.match(output, /Autonomy paused/); assert.match(output, /Autonomy resumed/);
+		assert.doesNotMatch(output, /UNEXPECTED_PROVIDER_CALL|another terminal|select button|Enter: activate|\[Approve read-only\]/);
+		const state = readState(); assert.equal(state.paused, false); assert.equal(state.proposals[0].status, "dismissed"); assert.equal(state.proposals[0].allowWrites, false); assert.equal(state.runs.length, 0);
+	} finally { clearTimeout(timer); child.kill(); }
+}));
+
+for (const mode of ["streaming", "approval"] as const) test(`autonomy pause is immediate during ${mode} without canceling foreground work`, { timeout: 6000 }, async () => isolated(async cwd => {
+	await updateState(state => { state.paused = false; state.workspaces = [cwd]; });
+	const release = join(cwd, "release-provider");
+	const source = `import { startRepl } from ${JSON.stringify(new URL("../src/harness/repl.ts", import.meta.url).href)};
+import { existsSync } from 'node:fs';
+Object.defineProperty(process.stdin, 'isTTY', {value:true}); Object.defineProperty(process.stdout, 'isTTY', {value:true});
+process.stdin.setRawMode = () => {}; process.stdout.columns = 120;
+const message = {role:'assistant',content:[{type:'text',text:'Foreground completed'}],stopReason:'stop',provider:'fixture',model:'fixture',usage:{input:0,output:1,totalTokens:1},timestamp:0};
+const runner = { model:{provider:'fixture',id:'fixture'},toolsMode:'native',toolsModeSource:'fixture',tools:[],askTools:[],context:{messages:[]},setSession(){},steer(){throw new Error('PAUSE_BECAME_STEERING');},
+async run(_prompt,{onEvent,signal}) {
+ onEvent({type:'message_start',message}); process.stderr.write('FOREGROUND_WAITING\\n');
+ if (${mode === "approval"}) { if (!await runner.askFallback('write',{})) throw new Error('PAUSE_CONSUMED_APPROVAL'); }
+ else while (!existsSync(${JSON.stringify(release)})) await new Promise(resolve=>setTimeout(resolve,10));
+ if (signal.aborted) throw new Error('FOREGROUND_WAS_CANCELED');
+ onEvent({type:'message_update',message,event:{type:'text_delta',delta:'Foreground completed'}}); onEvent({type:'message_end',message});
+ process.stderr.write('FOREGROUND_FINISHED\\n');
+} };
+await startRepl({runner});`;
+	const script = join(cwd, "repl-pause-fixture.mjs"); writeFileSync(script, source);
+	const child = spawn(process.execPath, [script], { cwd, env: { ...process.env, NODETERM_NODE_ID: "", NO_COLOR: "1", TERM: "xterm" } });
+	let output = "";
+	child.stdout.on("data", data => output += data); child.stderr.on("data", data => output += data);
+	const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+	const until = async (condition: () => boolean) => { const deadline = Date.now() + 2500; while (!condition() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10)); assert.ok(condition(), output); };
+	try {
+		const done = new Promise<number | null>((resolve, reject) => { child.on("error", reject); child.on("close", resolve); });
+		child.stdin.write("work\n");
+		await until(() => output.includes(mode === "approval" ? "[y/N]" : "FOREGROUND_WAITING"));
+		child.stdin.write("/autonomy pause\n");
+		await until(() => readState().paused);
+		assert.doesNotMatch(output, /FOREGROUND_FINISHED|PAUSE_BECAME_STEERING|PAUSE_CONSUMED_APPROVAL|FOREGROUND_WAS_CANCELED/);
+		if (mode === "approval") { await until(() => output.includes("Tool approval still waiting")); child.stdin.write("yes\n"); }
+		else writeFileSync(release, "continue");
+		await until(() => output.includes("FOREGROUND_FINISHED"));
+		child.stdin.end("/quit\n"); assert.equal(await done, 0, output);
+		assert.match(output, /Autonomy paused/); assert.match(output, /Foreground completed/);
+		assert.doesNotMatch(output, /PAUSE_BECAME_STEERING|PAUSE_CONSUMED_APPROVAL|FOREGROUND_WAS_CANCELED/);
+	} finally { clearTimeout(timer); child.kill(); }
 }));

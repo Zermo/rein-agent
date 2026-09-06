@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { createRunner, type RunnerOptions } from "../src/harness/runner.ts";
 import { createSession, loadSession } from "../src/agent/session.ts";
 import { decideToolMode } from "../src/ai/compat.ts";
+import { ActivityJournal, activityFile, newActivityId } from "../src/harness/activity/store.ts";
 
 const user = (content: string) => ({ role: "user" as const, content, timestamp: Date.now() });
 const defaults: RunnerOptions = { cwd: process.cwd(), modelOverride: "runner-fixture", baseUrlOverride: "http://fixture.invalid/v1", systemPrompt: "Test harness", maxTurns: 6 };
@@ -22,6 +23,30 @@ async function isolated(fn: (directory: string) => Promise<void>) {
 		rmSync(directory, { recursive: true, force: true });
 	}
 }
+
+test("optional activity storage failures preserve chat, while invalid and reused IDs still fail", async (t) => isolated(async directory => {
+	const messages: string[] = [];
+	t.mock.method(console, "error", (text: string) => { messages.push(text); });
+	let requests = 0;
+	t.mock.method(globalThis, "fetch", async () => { requests++; return reply("Still usable"); });
+	await assert.rejects(createRunner({ ...defaults, activityId: "../../other-session" }), /activity ID/);
+	await assert.rejects(createRunner({ ...defaults, activityId: "" }), /activity ID/);
+	assert.equal(requests, 0);
+	const journal = new ActivityJournal(newActivityId(), directory), before = readFileSync(activityFile(journal.snapshot.id), "utf8");
+	await assert.rejects(createRunner({ ...defaults, activityId: journal.snapshot.id }), /EEXIST/);
+	assert.equal(readFileSync(activityFile(journal.snapshot.id), "utf8"), before);
+	const healthy = await createRunner({ ...defaults, activityId: newActivityId(), tools: [] });
+	assert.ok(healthy.activityId);
+	rmSync(join(directory, "activity"), { recursive: true });
+	// A regular file in place of the directory fails on every OS, even as root.
+	writeFileSync(join(directory, "activity"), "keep me");
+	const runner = await createRunner({ ...defaults, activityId: newActivityId(), tools: [] });
+	assert.equal(runner.activityId, undefined);
+	const result = await runner.run(user("hello"));
+	assert.ok(result.some(message => message.role === "assistant" && message.content.some(part => part.type === "text" && part.text === "Still usable")));
+	assert.equal(requests, 1); assert.equal(messages.length, 1); assert.match(messages[0], /Recording is unavailable/);
+	assert.equal(readFileSync(join(directory, "activity"), "utf8"), "keep me");
+}));
 
 test("default runner registers context tools and {} status calls keep native mode", async (t) => isolated(async () => {
 	let requests = 0;

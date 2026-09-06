@@ -17,6 +17,7 @@ export interface AutonomyRun {
 }
 export interface AutonomyState {
 	version: 1; paused: boolean; workspaces: string[]; intervalMinutes: number;
+	planner?: "rules" | "main";
 	controlRevision?: number;
 	maxRunsPerDay: number; maxTurns: number; timeoutSeconds: number;
 	lastDigest?: string; nextScan?: number; lastError?: string;
@@ -24,7 +25,7 @@ export interface AutonomyState {
 }
 export const autonomyHome = () => resolve(process.env.REIN_HOME || join(homedir(), ".rein"));
 export const autonomyDirectory = () => join(autonomyHome(), "autonomy");
-export const initialState = (): AutonomyState => ({ version: 1, paused: true, controlRevision: 0, workspaces: [], intervalMinutes: 60, maxRunsPerDay: 6, maxTurns: 8, timeoutSeconds: 180, proposals: [], runs: [] });
+export const initialState = (): AutonomyState => ({ version: 1, paused: true, planner: "rules", controlRevision: 0, workspaces: [], intervalMinutes: 60, maxRunsPerDay: 6, maxTurns: 8, timeoutSeconds: 180, proposals: [], runs: [] });
 export function privateDirectory(): string {
 	const directory = autonomyDirectory();
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -44,6 +45,7 @@ export function readState(): AutonomyState {
 	return validateState(state);
 }
 function validateState(state: any): AutonomyState {
+	if (state?.planner !== undefined && !["rules", "main"].includes(state.planner)) throw new Error("Invalid autonomy planner. Select rules or main.");
 	if (state?.version !== 1 || typeof state.paused !== "boolean" || !Array.isArray(state.workspaces) || !state.workspaces.every((p: unknown) => typeof p === "string") || !Array.isArray(state.proposals) || !Array.isArray(state.runs)) throw new Error("Invalid autonomy state. Restore state.json before restarting autonomy.");
 	for (const [name, min, max] of [["intervalMinutes", 5, 10080], ["maxRunsPerDay", 1, 100], ["maxTurns", 1, 30], ["timeoutSeconds", 10, 1800]] as const) {
 		if (!Number.isSafeInteger(state[name]) || state[name] < min || state[name] > max) throw new Error(`Invalid autonomy ${name}.`);
@@ -74,7 +76,7 @@ function releaseOwnedLock(path: string, token: string): void {
 	try { regularFile(path, true); if (JSON.parse(readFileSync(path, "utf8")).token === token) unlinkSync(path); } catch {}
 }
 /** Lock ownership is checked on release. Only dead, old locks are reclaimed. */
-export function acquireLock(name: "state" | "cycle" | "daemon"): (() => void) | undefined {
+export function acquireLock(name: "state" | "cycle" | "daemon" | "guardian" | "guardian-install"): (() => void) | undefined {
 	const path = join(privateDirectory(), `${name}.lock`);
 	const token = randomUUID();
 	const temp = `${path}.${token}.tmp`;
@@ -130,6 +132,15 @@ export async function updateState(change: (state: AutonomyState) => void): Promi
 		renameSync(temp, join(autonomyDirectory(), "state.json"));
 		return state;
 	} finally { try { unlinkSync(temp); } catch {} unlock(); }
+}
+/** Explicit opt-in; migration never enables main-model background calls. */
+export async function setPlannerMode(mode: "rules" | "main"): Promise<AutonomyState> {
+	if (mode !== "rules" && mode !== "main") throw new Error("Planner must be rules or main.");
+	return updateState(state => {
+		if ((state.planner ?? "rules") === mode) return;
+		state.planner = mode; state.lastDigest = undefined; state.nextScan = undefined;
+		state.controlRevision = (state.controlRevision ?? 0) + 1;
+	});
 }
 export function canonicalWorkspace(path: string): string {
 	const canonical = realpathSync(resolve(path));

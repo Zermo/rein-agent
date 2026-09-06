@@ -1,5 +1,52 @@
 # Posthorse and harness review
 
+## 0.13.0 Terminal setup and personal assistance
+
+The installer now finishes interactive setup by replacing itself with Rein in
+the same controlling terminal and working directory. NodeTerm installation is
+an explicit extra. Activity, proposal inspection and approval are available in
+the REPL; a browser canvas opens only when explicitly requested. Optional
+activity storage failures no longer prevent a normal chat from starting.
+
+Six practical questions cover communication, intended tasks, initiative, pacing,
+explanations and listening. Suggestions follow task focus, including everyday
+assistance. Packs contain actual Rein workflows and are optional. All 5,760
+answer combinations are checked. Version 1 profiles are strictly validated and
+migrated in memory; explicit saves preserve unmanaged notes and back up exact
+originals. Neither scoring nor migration calls a model.
+
+Background supervision defaults to deterministic checks with no inference.
+The optional loopback-only guardian verifies a pinned local artifact and can
+only keep or drop bounded candidates. It runs only as Rein's dedicated headless worker, with its own loopback endpoint and model store.
+Its model download, private standalone runtime installation and named service
+start are explicit actions; no desktop app or system service is launched. A separate opt-in main planner uses current
+preferences, history, prior decisions and results to propose personal
+improvements with benefits, risks and alternatives. It makes at most two
+bounded, tool-free generation passes per changed scan. Task execution remains
+separately approved and uses the configured main account or server.
+
+Independent review found and fixed installation cancellation that could leave
+children running or start a service after abort, rejected HTTP responses that
+left sockets open, fixed output reserves incompatible with saved model settings,
+and account changes when moving an active service from free checks to inference.
+A dismissed or enabled proposal cannot be reintroduced under another title with
+the same evidence. Interrupted installation does not enroll or enable work.
+Review also corrected misleading free-check wording for a retained main planner
+and exact retry commands after a failed runtime installation.
+
+Validation includes real PTY installer handoff, real REPL input and local mock
+HTTP providers. Guardian model/runtime operations use fixtures: no model was
+downloaded, no user service installed, and no cloud inference performed for
+these checks. Hardware fit is an estimate, not a speed or quality benchmark.
+The current helper has one verified small-model recipe; phone runtimes and
+self-training are not implemented. Guide checks cover structure and scripts;
+no browser-rendered visual validation is claimed.
+
+Release checks passed: 496 source tests with no failures or skips; the Node
+18.20.8 bundle smoke; native provenance; package contents; public-text privacy;
+and the staged field guide. The runtime checksum smoke read only the official
+release checksum file; runtime archives and models were not downloaded.
+
 ## 0.12.0 Grok, server discovery and serving recipes
 
 Grok Build subscriptions and the xAI HTTP API are separate selectable routes.

@@ -3,10 +3,10 @@ import { desktopAvailable, nativeApp, openNodeTerm, preferSurface, preferredSurf
 export async function desktopCommand(args: string[], flags: Record<string, string | boolean>): Promise<void> {
 	const action = args[0] ?? "status";
 	if (action === "use" && args.length === 2 && ["terminal", "nodeterm"].includes(args[1])) {
-		preferSurface(args[1] as "terminal" | "nodeterm"); console.log(`Rein's preferred surface is ${args[1]}.`); return;
+		preferSurface(args[1] as "terminal" | "nodeterm"); console.log(`Saved optional desktop preference: ${args[1]}. The rein command stays in this terminal. Use rein desktop open to open NodeTerm.`); return;
 	}
 	if (args.length > 1 || !["install", "open", "status"].includes(action)) throw new Error("Usage: rein desktop install [--no-launch] | open | status | use terminal|nodeterm");
-	if (action === "status") { console.log(`Preferred surface: ${preferredSurface()}\nNodeTerm: ${nativeApp() ? "installed" : "not found"}`); return; }
+	if (action === "status") { console.log(`Default: current terminal\nOptional desktop preference: ${preferredSurface()}\nNodeTerm: ${nativeApp() ? "installed" : "not found"}`); return; }
 	if (action === "install") {
 		if (flags["if-supported"] === true && preferredSurface() === "terminal") {
 			console.log("Keeping Rein's saved terminal preference. Run rein desktop install to switch to NodeTerm."); return;

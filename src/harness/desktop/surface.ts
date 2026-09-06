@@ -20,8 +20,8 @@ export function nativeApp(home = homedir()): string | undefined {
 	return [join(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find(path => existsSync(join(path, "Contents/MacOS/nodeterm")));
 }
 export function preferredSurface(home = desktopHome()): "nodeterm" | "terminal" {
-	try { return JSON.parse(readFileSync(join(home, "desktop.json"), "utf8")).surface === "terminal" ? "terminal" : "nodeterm"; }
-	catch { return "nodeterm"; }
+	try { return JSON.parse(readFileSync(join(home, "desktop.json"), "utf8")).surface === "nodeterm" ? "nodeterm" : "terminal"; }
+	catch { return "terminal"; }
 }
 export function preferSurface(surface: "nodeterm" | "terminal", home = desktopHome()) {
 	mkdirSync(home, { recursive: true, mode: 0o700 });
@@ -67,6 +67,7 @@ export async function openNodeTerm(app = nativeApp()): Promise<void> {
 	if (!app) throw new Error("NodeTerm is not installed. Run rein desktop install, or use rein --terminal.");
 	await exec("open", ["-a", app], { timeout: 10_000 });
 }
-export function shouldOpenDesktop(input: { terminal?: boolean; visual?: boolean; activity?: string; hasSessionOptions?: boolean; interactive: boolean; insideNodeTerm: boolean; available: boolean; preference: string }): boolean {
-	return input.interactive && !input.hasSessionOptions && !input.terminal && input.visual === undefined && !input.activity && !input.insideNodeTerm && input.available && input.preference === "nodeterm";
+export function shouldOpenDesktop(input: { requested?: boolean; terminal?: boolean; visual?: boolean; activity?: string; hasSessionOptions?: boolean; interactive: boolean; insideNodeTerm: boolean; available: boolean; preference: string }): boolean {
+	// Saved preferences from older installers never move a new chat out of its terminal.
+	return input.requested === true && input.interactive && !input.hasSessionOptions && !input.terminal && input.visual === undefined && !input.activity && !input.insideNodeTerm && input.available && input.preference === "nodeterm";
 }
