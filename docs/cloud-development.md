@@ -7,8 +7,9 @@ model, or model API key.
 
 ## Environment setup
 
-Choose Node 24 or newer in the environment's package settings. Source commands
-also support Node 22.18 or newer in the 22 series. The installed bundle supports
+Choose Node 22 in the environment's package settings, with version 22.18 or
+newer. Node 24 or newer also works when available. The script checks actual
+TypeScript support before installing dependencies. The installed bundle supports
 Node 18, but that is insufficient for the source test suite.
 
 Set the setup script to run from the repository root:
@@ -19,7 +20,9 @@ bash scripts/setup-cloud.sh
 
 The script checks native TypeScript execution, Git, npm, and tar. It installs
 missing tmux, Python 3, and zstd on Linux through apt-get when running as root or
-with noninteractive sudo. If installation is unavailable, it explains what to
+with noninteractive sudo. It tries the existing signed package indexes first,
+refreshing them only if installation fails. It keeps apt signature checks and
+package sources unchanged. If installation is unavailable, it explains what to
 add to the image. These tools enable persistent-shell, installer PTY, and
 archive integration tests. It then runs `npm ci --include=dev` using the lockfile.
 Rerunning setup refreshes dependencies and keeps existing system tools.

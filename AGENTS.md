@@ -6,7 +6,8 @@ Keep changes small and preserve compatibility with self-hosted model APIs.
 
 ## Setup and commands
 
-- Source development: Node 24 or newer, npm, Git, Bash, tmux, Python 3, zstd.
+- Source development: Node 22.18+ (22 series) or 24+, npm, Git, Bash, tmux,
+  Python 3, zstd.
   The installed JavaScript bundle still supports Node 18.
 - Cloud setup: `bash scripts/setup-cloud.sh`; see `docs/cloud-development.md`.
 - Dependencies: `npm ci --include=dev`.

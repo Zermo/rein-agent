@@ -18,8 +18,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
-      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: bash scripts/setup-cloud.sh
       - run: npm test
       - run: npm run check:posthorse
       - run: npm run check:natives

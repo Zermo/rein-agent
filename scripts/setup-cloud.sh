@@ -19,7 +19,7 @@ REIN_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rein-cloud-node.XXXXXX")"
 trap 'rm -rf -- "$REIN_PROBE_DIR"' EXIT
 printf 'const ready: number = 1; if (ready !== 1) process.exit(1);\n' > "$REIN_PROBE_DIR/probe.ts"
 node "$REIN_PROBE_DIR/probe.ts" >/dev/null 2>&1 ||
-    fail "$(node --version) cannot run source TypeScript. Choose Node 24 or newer in the environment package settings, or Node 22.18+. Check that NODE_OPTIONS does not disable type stripping."
+    fail "$(node --version) cannot run source TypeScript. Choose Node 22.18+ in the environment package settings, or Node 24 or newer if available. Check that NODE_OPTIONS does not disable type stripping."
 
 missing=()
 for dependency in tmux python3 zstd; do
@@ -36,9 +36,14 @@ if [ "${#missing[@]}" -gt 0 ]; then
         fail "Missing ${missing[*]}. Preinstall them in the cloud image or allow noninteractive apt-get through sudo; setup cannot request a password."
     fi
     printf 'Installing missing development tools: %s\n' "${missing[*]}"
-    "${apt_command[@]}" update || fail "apt-get update failed. Check setup-phase network access and package sources, then rerun."
-    "${apt_command[@]}" install -y --no-install-recommends "${missing[@]}" ||
-        fail "Could not install ${missing[*]}. Preinstall them in the cloud image, then rerun."
+    # The cloud image may already have usable signed package indexes. Avoid
+    # refreshing unrelated repositories unless installation actually needs it.
+    if ! "${apt_command[@]}" install -y --no-install-recommends "${missing[@]}"; then
+        printf 'Package installation needs a refresh; updating indexes and retrying.\n'
+        "${apt_command[@]}" update || fail "apt-get update failed. Check setup-phase network access and package sources, or preinstall ${missing[*]} in the cloud image, then rerun."
+        "${apt_command[@]}" install -y --no-install-recommends "${missing[@]}" ||
+            fail "Could not install ${missing[*]} after refreshing package indexes. Preinstall them in the cloud image, then rerun."
+    fi
 fi
 for dependency in tmux python3 zstd; do
     command -v "$dependency" >/dev/null 2>&1 || fail "$dependency is still unavailable on PATH after installation."
