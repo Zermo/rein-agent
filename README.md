@@ -254,6 +254,11 @@ rein tmux start               start a persistent bash shell
 rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
 rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
 rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
+rein learn [--json]           read-only pass: boot chain + security surface; writes a new dossier
+rein learn ios [--udid U]     learn an attached iOS device via libimobiledevice
+rein export browse            Finder-style TUI: choose personal files, export before an OS replace
+rein export presets [--to D]  copy standard personal data groups (Documents, Mail, keys, …)
+rein export <paths…> --to D   copy chosen files/folders to a directory; sources are never touched
 rein setup                    work preferences, task limits, model, follow-ups, first task
 rein setup --connection-only  change only the model connection
 rein setup profile            offline work-style wizard; review and choose a pack
@@ -784,6 +789,37 @@ That ordering is the point: *perception (doctor) → action (tasks) →
 egeneration (improve) → memory (log)*. An agent that can check itself,
 fix itself, do its periodic work, and improve itself from its own lessons
 is the baseline for fully self-sustaining agents.
+
+### Dareecho — learning the machine, keeping the files
+
+Dareecho is the OS-replacement path on top of Rein. It learns the machine first,
+and the export commands keep the files that are yours before anything is replaced.
+Replacing an OS obviously removes the current image and its settings — these are
+the data-loss prevention steps.
+
+```sh
+rein learn [--json]           read-only pass on this machine: boot chain of trust,
+                              security posture, per-probe evidence. Writes a new
+                              dossier under ~/.rein/redteam/ (refuses to
+                              overwrite). macOS, Windows, Linux, any architecture.
+
+rein learn ios [--udid U]     an attached iPhone or iPad via libimobiledevice
+                              (brew install libimobiledevice).
+
+rein export browse            Finder-style TUI: navigate, select files and folders,
+                              export to a new directory. [e] exports, [q] quits.
+
+rein export presets [--to D]  the standard personal data groups: Documents, Desktop,
+                              Downloads, Pictures, Movies, Music — plus Mail,
+                              keychains, browser profiles, and SSH/GPG keys where
+                              they exist.
+
+rein export <paths…> --to D   exactly the paths you name.
+```
+
+Export copies. Sources are never moved or deleted; an existing target receives
+newer copies of the same files. The dossier writer is stricter: it refuses an
+existing directory and steps to the next free name instead.
 
 ### Proactive work from task history
 

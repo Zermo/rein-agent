@@ -14,9 +14,19 @@ Rein stays the commander. CyberStrike is the weapon. We do not merge the two cod
   directory under `~/.rein/redteam/`. Refuses to overwrite; never deletes.
 - `rein learn ios [--udid U]` — learns an attached iOS device through libimobiledevice,
   mapping it onto the iOS boot chain (bootrom → iBSS/iBEC → AppleLL → KernelCache → launchd).
+- `rein export` — data-loss prevention before any replacement. `rein export browse` is a
+  Finder-style TUI (navigate, select, export); `rein export presets` copies the standard
+  personal data groups (Documents, Desktop, Downloads, Pictures, Movies, Music, and on
+  macOS Mail, keychains, browser profiles, SSH/GPG keys); `rein export <paths...> --to D`
+  copies exactly what you name. The engine copies, never moves or deletes; it refuses a
+  target inside a source and a source inside a target.
 - Verified live on thebrain (SIP disabled) and macserver (SIP enabled), both M4 Mac minis;
-  dossiers written to `~/.rein/redteam/` on each. 13 new tests, full suite green except the
-  pre-existing tmux environment failures on main.
+  dossiers written to `~/.rein/redteam/` on each. 34 new tests (learn + export), full suite
+  green except the pre-existing tmux environment failures on main.
+- Docs: README usage block + Dareecho section, wiki page `Dareecho-export`, this plan.
+- Scope note: the never-delete rule covers our work on the operator's test machines and the
+  learn/export paths. Dareecho the OS replacement itself obviously removes the image it
+  replaces — the installer says so, and `rein export` exists for the personal data.
 - Remaining: vendor CyberStrike skills, the `dareecho-firmware` plugin for x86 UEFI/BIOS
   depth, and the `rein os plan --dossier` hook.
 
