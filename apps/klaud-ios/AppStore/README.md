@@ -35,7 +35,55 @@ asc metadata apply \
   --dry-run
 ```
 
-## Internal TestFlight upload
+## Upload with an account connected to Xcode
+
+Xcode can sign and upload using the Apple Account in **Xcode > Settings > Accounts**. The `asc xcode` commands delegate to `xcodebuild`; they don't copy that account into `asc` API or web authentication.
+
+For the first upload, open the signed archive in Xcode Organizer:
+
+```sh
+open apps/klaud-ios/.build/testflight/ReinKlaud.xcarchive
+```
+
+Choose **Distribute App > TestFlight Internal Only**. If the app record doesn't exist, enter `rein-klaʊd`, SKU `rein-klaud-ios-001`, and English as the primary language. Confirm that the bundle identifier is `org.zermo.rein-klaud.ios`. Xcode can create the record and continue the upload with its connected account. The account needs permission to create apps. [Apple's TestFlight tutorial](https://developer.apple.com/tutorials/develop-in-swift/test-your-beta-app) describes this flow.
+
+Internal-only builds cannot be used for external TestFlight testing or App Store release. For either of those later, upload a new build through **Distribute App > App Store Connect** instead.
+
+Once the app record exists, the same signed archive can be uploaded through `asc xcode export`. Generate the upload options inside the ignored `.build` directory, taking the team from the archive:
+
+```sh
+python3 - <<'PY'
+from pathlib import Path
+import plistlib
+
+release_dir = Path("apps/klaud-ios/.build/testflight")
+archive = release_dir / "ReinKlaud.xcarchive"
+with (archive / "Info.plist").open("rb") as source:
+    team = plistlib.load(source)["ApplicationProperties"]["Team"]
+if not isinstance(team, str) or not team:
+    raise SystemExit("The signed archive has no development team.")
+with (release_dir / "UploadExportOptions.plist").open("wb") as target:
+    plistlib.dump({
+        "method": "app-store-connect",
+        "destination": "upload",
+        "signingStyle": "automatic",
+        "testFlightInternalTestingOnly": True,
+        "teamID": team,
+    }, target)
+PY
+
+asc xcode export \
+  --archive-path apps/klaud-ios/.build/testflight/ReinKlaud.xcarchive \
+  --export-options apps/klaud-ios/.build/testflight/UploadExportOptions.plist \
+  --ipa-path apps/klaud-ios/.build/testflight/ReinKlaud.ipa \
+  --xcodebuild-flag=-allowProvisioningUpdates
+```
+
+`destination=upload` sends the build to Apple and does not write an IPA. A local export alone does not upload anything. Choose either Organizer or the command for a given build, then check its processing status in App Store Connect before assigning it to a TestFlight group.
+
+Omit `--wait` unless `asc auth status --validate` confirms API authentication. Upload uses Xcode's account, but `asc` build polling and TestFlight group management require its own API credentials. Keep the generated plist, signing material, and account identifiers out of Git.
+
+## Internal TestFlight upload with API authentication
 
 Install and authenticate `asc`, then keep the credentials in its macOS Keychain profile. Export the app and team identifiers only for the release command:
 
