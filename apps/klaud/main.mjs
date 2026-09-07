@@ -175,7 +175,7 @@ async function startRun(input) {
           if (event.name === "klaud.frontend_tool" && !frontendTools.some(tool => tool.name === value.toolName)) throw new Error("Unknown frontend tool.");
           run.pending.set(id, { ...value, kind: event.name, event });
         }
-        if (event.type === "TOOL_CALL_RESULT") run.pending.delete(event.toolCallId);
+        if (event.type === "TOOL_CALL_RESULT") run.pending.delete(event.providerToolCallId ?? event.toolCallId);
         if (["RUN_FINISHED", "RUN_ERROR"].includes(event.type)) run.terminal = true;
         if (!run.replayTruncated) {
           run.events.push(event); run.eventBytes += JSON.stringify(event).length;

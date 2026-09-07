@@ -414,7 +414,7 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			}
 		}
 		if (event.type === "TOOL_CALL_RESULT" && typeof event.toolCallId === "string") {
-			run.pending.delete(event.toolCallId);
+			run.pending.delete(typeof event.providerToolCallId === "string" ? event.providerToolCallId : event.toolCallId);
 			if (run.status === "waiting" && run.pending.size === 0) run.status = "running";
 		}
 		if (event.type === "STATE_SNAPSHOT" && object(event.snapshot) && Array.isArray(event.snapshot.approvals)) {

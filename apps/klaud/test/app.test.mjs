@@ -178,7 +178,7 @@ test("run reload retains a pre-run baseline and replays only unresolved frontend
   assert.equal(run.events.length, 0);
   assert.equal(run.controller.signal.aborted, false, "the UI replay bound cannot stop the agent run");
   assert.equal(replayEvents(run)[0].value.toolCallId, "call-2", "pending actions remain available after replay truncation");
-  push({ type: "TOOL_CALL_RESULT", toolCallId: "call-2", content: "Timed out" });
+  push({ type: "TOOL_CALL_RESULT", toolCallId: "display-scope-call-2", providerToolCallId: "call-2", content: "Timed out" });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(replayEvents(run).length, 0, "expired frontend actions cannot reopen after reload");
   push({ type: "RUN_FINISHED", runId }); controller.close();

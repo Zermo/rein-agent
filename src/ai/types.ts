@@ -13,6 +13,7 @@
  */
 
 import type { AssistantMessageEventStream } from "./event-stream.ts";
+import type { ReasoningEffort } from "./reasoning.ts";
 
 export interface TextContent {
 	type: "text";
@@ -108,6 +109,8 @@ export interface Model {
 	sshHost?: string;
 	contextWindow: number;
 	maxTokens: number;
+	/** Request preference inherited by nested calls using this model connection. */
+	reasoningEffort?: ReasoningEffort;
 }
 
 export interface StreamOptions {
@@ -116,6 +119,8 @@ export interface StreamOptions {
 	temperature?: number;
 	topP?: number;
 	maxTokens?: number;
+	/** Default preserves the endpoint's behavior; unsupported explicit controls fail. */
+	reasoningEffort?: ReasoningEffort;
 	/** Extra body fields merged in as-is (e.g. top_k for llama.cpp). */
 	extra?: Record<string, unknown>;
 	headers?: Record<string, string>;

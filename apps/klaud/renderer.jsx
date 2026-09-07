@@ -1,10 +1,29 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { applyDelta, applyShellPatch, validateMessages, validateState } from "./model.mjs";
+import { applyDelta, applyShellPatch, presentTranscript, publicProgress, readTranscriptView, saveTranscriptView, updateTranscript, validateActivity, validateMessages, validateRunSettings, validateState } from "./model.mjs";
 import { createSoundEngine, readSoundEnabled } from "./sounds.mjs";
 
 const api = window.klaud;
 const errorText = error => String(error?.message || "Something went wrong.").replace(/^Error invoking remote method '[^']+': Error: /, "");
+const rainPreference = "rein.klaud.rain-enabled";
+function readRainEnabled() {
+  try { return localStorage.getItem(rainPreference) !== "false"; } catch { return true; }
+}
+
+function RainFrame({ paused }) {
+  return <div className="rain-frame" data-paused={paused} aria-hidden="true">
+    <svg className="rain-cloud" viewBox="0 0 32 16" shapeRendering="crispEdges"><path fill="currentColor" d="M2 8h4V4h6V2h8v2h6v4h4v6H2Z"/><path className="rain-cloud-cutout" d="M10 6h4V4h4v2h4v2h-4V6h-4v2h-4Z"/></svg>
+    <span className="rain-drops">{Array.from({ length: 12 }, (_, index) => <i key={index}/>)}</span>
+  </div>;
+}
+
+function ActivitySignal({ phase = "ready", toolName, className = "" }) {
+  const labels = { ready: "Ready", working: "Working", thinking: "Thinking", responding: "Typing", journaling: "Journaling", autonomy: "Autonomy work", tool: toolName ? `Running ${toolName}` : "Running tool" };
+  const label = labels[phase] ?? labels.working;
+  return <span className={`activity ${phase === "ready" ? "ready" : "working"} ${className}`} data-phase={phase} role="status" aria-live="polite" aria-atomic="true">
+    <span className="activity-signal" aria-hidden="true"><i/><i/><i/></span><span className="activity-label" title={label}>{label}</span>
+  </span>;
+}
 
 function App() {
   const [connection, setConnection] = useState(null), [state, setState] = useState(null), [error, setError] = useState("");
@@ -13,7 +32,13 @@ function App() {
   const [chats, setChats] = useState({}), [message, setMessage] = useState(""), [botName, setBotName] = useState("");
   const [busy, setBusy] = useState(false), [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
+  const [progress, setProgress] = useState(null);
+  const [autonomyActivity, setAutonomyActivity] = useState(null);
   const [soundEnabled, setSoundEnabled] = useState(() => readSoundEnabled());
+  const [rainEnabled, setRainEnabled] = useState(() => readRainEnabled());
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== "hidden");
+  const [transcriptView, setTranscriptView] = useState(() => readTranscriptView());
+  const [runSettings, setRunSettings] = useState(null), [settingsError, setSettingsError] = useState(""), [savingRunSettings, setSavingRunSettings] = useState(false);
   const stateRef = useRef(null), runBot = useRef(null), selectedRef = useRef(""), processed = useRef(new Set()), transcript = useRef(null);
   const pendingLoads = useRef(new Map());
   const [historyBefore, setHistoryBefore] = useState({}), [loadingHistory, setLoadingHistory] = useState(false);
@@ -65,6 +90,14 @@ function App() {
       return { ...previous, [botId]: messages };
     });
   }
+  function transcriptEvent(event) {
+    const botId = runBot.current;
+    if (!botId) return;
+    // Validate before React executes its updater so malformed events reach onEvent's error handler.
+    updateTranscript([], event);
+    pendingLoads.current.delete(botId);
+    setChats(previous => ({ ...previous, [botId]: updateTranscript(previous[botId] || [], event) }));
+  }
   async function frontend(event) {
     const value = event.value, key = `${value.runId}:${value.toolCallId ?? value.id}`;
     if (processed.current.has(key)) return;
@@ -105,35 +138,38 @@ function App() {
           try { adopt(applyDelta(stateRef.current, event.delta)); } catch { await refresh(); }
           break;
         case "TEXT_MESSAGE_START":
-          updateMessage(event.messageId, existing => existing || { id: event.messageId, role: "assistant", content: "" });
-          if (!replay && !soundedReplies.current.has(event.messageId)) {
-            soundedReplies.current.add(event.messageId); sound.current?.play("reply");
-          }
-          break;
+        case "TEXT_MESSAGE_END":
+          transcriptEvent(event); break;
         case "TEXT_MESSAGE_CONTENT":
-          if (typeof event.delta !== "string") throw new Error("Invalid transcript event.");
-          updateMessage(event.messageId, existing => ({ id: event.messageId, role: "assistant", content: (existing?.content || "") + event.delta }));
-          if (!replay && !soundedReplies.current.has(event.messageId)) {
+          transcriptEvent(event);
+          if (!replay && event.delta?.trim() && !soundedReplies.current.has(event.messageId)) {
             soundedReplies.current.add(event.messageId); sound.current?.play("reply");
           }
           break;
         case "TOOL_CALL_START":
-          updateMessage(`tool-${event.toolCallId}`, () => ({ id: `tool-${event.toolCallId}`, role: "tool", content: `Calling ${event.toolCallName}…` }));
+          transcriptEvent(event);
           if (!replay) sound.current?.play("tool");
           break;
+        case "TOOL_CALL_ARGS":
         case "TOOL_CALL_RESULT":
-          updateMessage(`tool-${event.toolCallId}`, () => ({ id: `tool-${event.toolCallId}`, role: "tool", content: String(event.content) })); break;
+          transcriptEvent(event); break;
         case "CUSTOM":
+          if (event.name === "klaud.progress") { setProgress(publicProgress(event.value)); break; }
           if (["klaud.frontend_tool", "klaud.approval"].includes(event.name)) await frontend(event); break;
         case "RUN_ERROR": setError(String(event.message || "Run failed.")); break;
         case "RUN_SETTLED":
-          runBot.current = null; setBusy(false); processed.current.clear(); recovering.current = false; setNotice("");
+          runBot.current = null; setBusy(false); setProgress(null); processed.current.clear(); recovering.current = false; setNotice("");
           if (!replay) sound.current?.play("ready");
           await loadMessages(event.botId); break;
-        case "CONNECTION_ERROR": setConnection(null); setError(String(event.message)); runBot.current = null; setBusy(false); recovering.current = false; setNotice(""); break;
+        case "CONNECTION_ERROR": setConnection(null); setError(String(event.message)); runBot.current = null; setBusy(false); setProgress(null); recovering.current = false; setNotice(""); break;
       }
     } catch (error) { setError(errorText(error)); }
   }
+  useEffect(() => {
+    const updateVisibility = () => setPageVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => document.removeEventListener("visibilitychange", updateVisibility);
+  }, []);
   useEffect(() => {
     const engine = createSoundEngine({ enabled: soundEnabled });
     sound.current = engine;
@@ -195,6 +231,43 @@ function App() {
     return unsubscribe;
   }, []);
   useEffect(() => {
+    if (!connection) { setRunSettings(null); return; }
+    let active = true;
+    setRunSettings(null); setSettingsError("");
+    void api.request("getRunSettings").then(value => {
+      const next = validateRunSettings(value);
+      if (active) setRunSettings(next);
+    }).catch(error => { if (active) setSettingsError(`Run controls unavailable: ${errorText(error)} Update the connected Rein backend and reconnect to use these settings.`); });
+    return () => { active = false; };
+  }, [connection]);
+  useEffect(() => {
+    setAutonomyActivity(null);
+    if (!connection) return;
+    let active = true, pending = false, timer;
+    const visible = () => document.visibilityState !== "hidden";
+    async function pollActivity() {
+      if (!active || pending || !visible()) return;
+      pending = true;
+      try {
+        const value = validateActivity(await api.request("getActivity"));
+        if (active && visible()) setAutonomyActivity(value.autonomy);
+      } catch {
+        // An older or unreachable backend is unknown, never a running daemon.
+        if (active && visible()) setAutonomyActivity({ status: "unavailable" });
+      } finally {
+        pending = false;
+        if (active && visible()) timer = setTimeout(pollActivity, 3000);
+      }
+    }
+    function visibilityChanged() {
+      clearTimeout(timer);
+      if (visible()) void pollActivity(); else setAutonomyActivity(null);
+    }
+    document.addEventListener("visibilitychange", visibilityChanged);
+    void pollActivity();
+    return () => { active = false; clearTimeout(timer); document.removeEventListener("visibilitychange", visibilityChanged); };
+  }, [connection]);
+  useEffect(() => {
     if (!state) return;
     const root = document.documentElement, shell = state.shell;
     root.dataset.accent = shell.theme.accent;
@@ -230,7 +303,7 @@ function App() {
     if (!bot || !text || busy) return;
     soundedReplies.current.clear();
     void sound.current?.playFromEvent("send", event.nativeEvent);
-    setError(""); setBusy(true); setMessage(""); runBot.current = bot.id; recovering.current = false; setNotice("");
+    setError(""); setBusy(true); setProgress(null); setMessage(""); runBot.current = bot.id; recovering.current = false; setNotice("");
     const id = crypto.randomUUID();
     updateMessage(id, () => ({ id, role: "user", content: text }));
     try { await api.run({ botId: bot.id, threadId: bot.sessionId, message: text }); }
@@ -248,7 +321,21 @@ function App() {
     setSoundEnabled(next);
     if (next) await engine.playFromEvent("ready", event.nativeEvent);
   }
+  function toggleRain(event) {
+    const enabled = event.target.checked;
+    setRainEnabled(enabled);
+    try { localStorage.setItem(rainPreference, String(enabled)); } catch { /* Keep this window's choice if device storage is blocked. */ }
+  }
+  async function saveRunSetting(key, value) {
+    setSavingRunSettings(true); setSettingsError("");
+    try { setRunSettings(validateRunSettings(await api.request("saveRunSettings", { [key]: value }))); }
+    catch (error) { setSettingsError(errorText(error)); }
+    finally { setSavingRunSettings(false); }
+  }
+  function chooseTranscriptView(value) { setTranscriptView(saveTranscriptView(value)); }
   const bot = state?.bots.find(item => item.id === selected);
+  const visibleMessages = presentTranscript(chats[selected] || [], transcriptView);
+  const workingHere = busy && runBot.current === selected;
   const botList = <>
     <div className="section-heading">
       <p className="eyebrow">Agent roster / live</p>
@@ -268,6 +355,7 @@ function App() {
     </form>
   </>;
   return <div className="app">
+    {rainEnabled && <RainFrame paused={!pageVisible}/>}
     <header className="masthead">
       <div className="brand"><img src="./rein-logo.svg" alt="Rein"/><span className="brand-name">rein-klaʊd</span><span className="edition">Field console / 01</span></div>
       {connection && <nav aria-label="Main">
@@ -276,7 +364,7 @@ function App() {
         <button aria-current={view === "settings" ? "page" : undefined} onClick={() => setView("settings")}><span>03</span> Settings</button>
       </nav>}
       <div className="masthead-tools">
-        <span className="connection-label">{connection ? "Link / local" : "Awaiting link"}</span>
+        <div className="masthead-signals"><span className="connection-label">{connection ? "Link / local" : "Awaiting link"}</span>{connection && autonomyActivity?.status === "running" && <ActivitySignal phase="autonomy" className="autonomy-indicator"/>}{connection && autonomyActivity?.status === "unavailable" && <span className="autonomy-unavailable">Autonomy / unavailable</span>}</div>
         <button className="sound-toggle" type="button" aria-pressed={soundEnabled} aria-label={`Sound effects ${soundEnabled ? "on" : "off"}`} onClick={toggleSound}>SFX <span>{soundEnabled ? "ON" : "OFF"}</span></button>
       </div>
     </header>
@@ -305,23 +393,32 @@ function App() {
       {state?.shell.chrome.sidebar && view !== "bots" && <aside>{botList}</aside>}
       <main className={`content ${view}`}>
         {view === "bots" ? <section className="page bots-page">{botList}</section> : view === "settings" ? <section className="page settings">
-          <div className="page-heading"><p className="eyebrow">Console controls / device</p><h1>Set the working rhythm.</h1><p className="lede">Rein saves shared shell settings through the server. Sound effects stay with this device.</p></div>
+          <div className="page-heading"><p className="eyebrow">Console controls / device</p><h1>Set the working rhythm.</h1><p className="lede">Run settings are saved by the connected Rein backend. Transcript views, rain and sound effects stay with this device.</p></div>
+          {settingsError && <p className="run-settings-error" role="alert">{settingsError}</p>}
           <div className="setting-list">
+            <label data-sound-control><span><strong>Bash approval</strong><small>Auto runs Bash within authorized tasks. Ask restores a review before each Bash call.</small></span><select value={runSettings?.bashApproval ?? ""} disabled={!runSettings || savingRunSettings || busy} onChange={event => saveRunSetting("bashApproval", event.target.value)}><option value="" disabled>{settingsError ? "Unavailable" : "Loading…"}</option><option value="auto">Auto</option><option value="ask">Ask every time</option></select></label>
+            <label data-sound-control><span><strong>Reasoning effort</strong><small>{runSettings?.reasoningControl?.description ?? "Requested effort for new runs. Provider support varies; this is not a measured reasoning score."}</small></span><select value={runSettings?.reasoningEffort ?? ""} disabled={!runSettings || savingRunSettings || busy} onChange={event => saveRunSetting("reasoningEffort", event.target.value)}><option value="" disabled>{settingsError ? "Unavailable" : "Loading…"}</option>{[["default", "Provider default"], ["off", "Off, if supported"], ["low", "Low"], ["medium", "Medium"], ["high", "High"]].map(([value, label]) => <option key={value} value={value} disabled={runSettings?.reasoningControl && !runSettings.reasoningControl.supported.includes(value)}>{label}</option>)}</select></label>
+            <label data-sound-control><span><strong>Transcript view</strong><small>Replies keeps conversation and failures. Activity adds compact tools and public progress.</small></span><select value={transcriptView} onChange={event => chooseTranscriptView(event.target.value)}><option value="replies">Replies</option><option value="activity">Compact activity</option><option value="full">Full details</option></select></label>
             <label data-sound-control><span><strong>Accent signal</strong><small>Action and active-state color</small></span><select value={state.shell.theme.accent} disabled={saving} onChange={event => patch("/theme/accent", event.target.value)}><option value="rain">Rein rust</option><option value="slate">Field ink</option><option value="storm">Terminal green</option></select></label>
             <label data-sound-control><span><strong>Information density</strong><small>Space between working rows</small></span><select value={state.shell.theme.density} disabled={saving} onChange={event => patch("/theme/density", event.target.value)}><option value="compact">Compact</option><option value="regular">Regular</option><option value="roomy">Roomy</option></select></label>
             <label data-sound-control><span><strong>Tray presence</strong><small>How Rein waits in the system tray</small></span><select value={state.shell.chrome.tray} disabled={saving} onChange={event => patch("/chrome/tray", event.target.value)}><option value="normal">Normal</option><option value="quiet">Quiet</option><option value="hidden">Hidden</option></select></label>
             {[["Night console", "Charcoal field surface", "/theme/dark", state.shell.theme.dark], ["Show agent rail", "Keep field units at the left", "/chrome/sidebar", state.shell.chrome.sidebar], ["Show activity signal", "Display ready and working state", "/chrome/showActivity", state.shell.chrome.showActivity]].map(([label, help, path, checked]) => <label className="toggle" data-sound-control key={path}><span><strong>{label}</strong><small>{help}</small></span><input type="checkbox" checked={checked} disabled={saving} onChange={event => patch(path, event.target.checked)}/></label>)}
             <label className="toggle" data-sound-control><span><strong>Vintage console sounds</strong><small>Quiet, local relay and CRT cues</small></span><input type="checkbox" checked={soundEnabled} onChange={toggleSound}/></label>
+            <label className="toggle" data-sound-control><span><strong>Rain effects</strong><small>Pixel rain in the console frame. Pauses when hidden; reduced motion keeps a static cloud and drops.</small></span><input type="checkbox" checked={rainEnabled} onChange={toggleRain}/></label>
           </div>
           <div className="service-note"><p>With the tray hidden, click the Dock icon or launch the app again to reopen this window. Quit from the app menu.</p><p>Connected to <code>{connection}</code></p></div>
         </section> : <>
-          <div className="chat-heading"><div><p className="eyebrow">Conversation ledger / current</p><h1>{bot?.name || "Choose a field unit"}</h1></div><div className="chat-status"><span className="folio">Thread / {bot ? bot.id.slice(-4).toUpperCase() : "----"}</span>{state?.shell.chrome.showActivity && <span className={`activity ${busy ? "working" : "ready"}`} role="status" aria-live="polite">{busy ? "Working" : "Ready"}</span>}</div></div>
+          <div className="chat-heading"><div><p className="eyebrow">Conversation ledger / current</p><h1>{bot?.name || "Choose a field unit"}</h1></div><div className="chat-status"><span className="folio">Thread / {bot ? bot.id.slice(-4).toUpperCase() : "----"}</span>{state?.shell.chrome.showActivity && <ActivitySignal phase={workingHere ? progress?.phase ?? "working" : "ready"} toolName={workingHere ? progress?.toolName : undefined}/>}</div></div>
+          <div className="transcript-controls">
+            <div className="view-switch" role="group" aria-label="Transcript view">{[["replies", "Replies"], ["activity", "Activity"], ["full", "Full"]].map(([value, label]) => <button key={value} aria-pressed={transcriptView === value} onClick={() => chooseTranscriptView(value)}>{label}</button>)}</div>
+            <span className="transcript-context">{transcriptView === "replies" ? "Conversation + failures" : transcriptView === "full" ? "Full tool details · collapsible" : "Public activity · expand any tool"}</span>
+            {workingHere && transcriptView !== "replies" && progress && <span className="run-progress">Turn {progress.turn}</span>}
+          </div>
           <div className="transcript" ref={transcript} aria-label="Conversation" aria-live="polite" aria-relevant="additions text">
             {historyBefore[selected] != null && <button className="history-control" disabled={busy || loadingHistory} onClick={earlier}>{loadingHistory ? "Opening archive…" : "Open earlier ledger"}</button>}
-            {!bot ? <div className="empty"><p className="eyebrow">No active unit</p><h2>Give your first agent a name.</h2><p className="muted">Rein keeps its conversation between visits.</p><button onClick={() => setView("bots")}>Open field units</button></div> : !(chats[selected]?.length) ? <div className="empty"><p className="eyebrow">Ledger clear</p><h2>What are we working on?</h2><p className="muted">Send an instruction to start this durable conversation.</p></div> : chats[selected].map((item, index) => <article className={`message ${item.role}`} key={item.id}>
-              <div className="role"><span>{item.role === "user" ? "Operator input" : item.role === "tool" ? "Tool call / exec" : "Rein / agent reply"}</span><span>{String(index + 1).padStart(3, "0")}</span></div>
-              <div className="message-text">{item.content || "…"}</div>
-              {item.toolCalls?.map(call => <details key={call.id}><summary>{call.function?.name || "Tool call"}</summary><pre>{call.function?.arguments}</pre></details>)}
+            {!bot ? <div className="empty"><p className="eyebrow">No active unit</p><h2>Give your first agent a name.</h2><p className="muted">Rein keeps its conversation between visits.</p><button onClick={() => setView("bots")}>Open field units</button></div> : !(chats[selected]?.length) ? <div className="empty"><p className="eyebrow">Ledger clear</p><h2>What are we working on?</h2><p className="muted">Send an instruction to start this durable conversation.</p></div> : visibleMessages.map((item, index) => <article className={`message ${item.role}${item.isError ? " tool-error" : ""}`} key={item.id}>
+              <div className="role"><span>{item.role === "user" ? "Operator input" : item.role === "tool" ? "Tool / exec" : item.completion?.stopReason === "toolUse" ? "Rein / progress" : "Rein / reply"}</span><span>{String(index + 1).padStart(3, "0")}</span></div>
+              {item.role === "tool" ? <div className="tool-record"><div className="tool-summary"><strong>{item.toolName}</strong><span>{item.isError ? "Failed" : item.status === "running" ? "Running" : item.status === "recorded" ? "Call recorded" : "Complete"}</span></div><details open={transcriptView === "full" || item.isError === true}><summary>Inspect arguments and result</summary>{item.arguments && <><span className="detail-label">Arguments</span><pre>{item.arguments}</pre></>}{item.content ? <><span className="detail-label">{item.isError ? "Error output" : "Result"}</span><pre>{item.content}</pre></> : <p className="muted">{item.status === "running" ? "Waiting for the tool result." : "No text result recorded."}</p>}{item.truncated && <p className="muted">Preview shortened. Full output remains in session history.</p>}</details></div> : <div><div className="message-text">{item.content}</div>{transcriptView !== "replies" && item.completion && <div className="completion-meta">{item.completion.stopReason && <span>Completion / {item.completion.stopReason}</span>}{item.completion.reasoningTokens && <span>Reported reasoning tokens / {item.completion.reasoningTokens.toLocaleString()}</span>}</div>}</div>}
             </article>)}
           </div>
           {state?.approvals.length > 0 && <div className="approvals">{state.approvals.map(item => <div key={item.id}><span><strong>Operator decision /</strong> {item.tool} needs review</span><button onClick={() => { void api.confirm(item.id).catch(error => setError(errorText(error))); }}>Review</button></div>)}</div>}

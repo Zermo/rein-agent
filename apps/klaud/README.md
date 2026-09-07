@@ -3,8 +3,8 @@
 Display name: **rein-klaʊd**. Bundle id: `org.zermo.rein-klaud`.
 
 This Electron app connects to `rein serve`. The server runs the agent loop and
-stores bot conversations. The React window displays that state and asks before
-approving an action. The packaged Mac app includes its runtime. Node 22.18+
+stores bot conversations. The React window displays that state and handles
+operator approvals. The packaged Mac app includes its runtime. Node 22.18+
 is required only to develop or build it from source.
 
 Install the latest published Mac app:
@@ -70,14 +70,62 @@ app again also shows the existing window. **Quit rein-klaʊd** in the tray or ap
 menu exits the app and stops the server it started. An external server remains
 owned by its launcher. The app does not install a login item or background service.
 
-Settings are saved by Rein and reflected through validated AG-UI snapshots and
-deltas. Invalid deltas trigger a fresh snapshot without changing part of the UI.
+Shell settings are saved by Rein and reflected through validated AG-UI snapshots
+and deltas. Invalid deltas trigger a fresh snapshot without changing part of the UI.
 Normal tray mode shows run status, quiet mode keeps only Open and Quit, and hidden
 mode removes the tray icon. With the tray hidden, use the Dock icon or launch the
 app again to reopen it. Use the app menu to quit.
 
+**Bash approval** defaults to **Auto** for commands within an authorized run.
+Choose **Ask every time** in Settings to review each Bash call in a native dialog.
+Other tool approvals and the harness's task controls still apply. The choice is
+saved by the connected Rein backend, so it survives an app or server restart.
+
+**Reasoning effort** applies to new runs. **Provider default** leaves the server's
+choice unchanged. Low, Medium, High, and Off are offered only where Rein has a
+compatible request mapping. A self-hosted server may ignore the field or support
+only an on/off switch; its model and chat template determine what happens.
+Subscription CLIs manage their own reasoning settings and expose only Provider
+default here. Unsupported choices fail without saving. Higher effort may use
+more tokens and time; it is not a measured accuracy or reasoning score.
+
+Run controls are stored in `$REIN_HOME/klaud/run-settings.json` (normally
+`~/.rein/klaud/run-settings.json`). Updating them preserves the model connection,
+turn and iteration budgets, and session files. Transcript view and sound choices
+stay on the device. The three transcript views are:
+
+- **Replies:** operator messages, agent replies, and failed tools.
+- **Activity:** replies plus compact tool records and public progress; expand a
+  record to inspect its arguments and output. This is the default view.
+- **Full:** expanded tool arguments and output alongside the conversation.
+
+Tool calls and results share one record, and each assistant turn keeps its own
+reply. Completion labels show actual stop reasons and provider-reported reasoning
+token counts when available. Private thought content is not displayed. These
+controls retain the cream, charcoal, rust, and vintage-computer sound theme.
+
+Animated terminal signals identify **Thinking**, **Typing**, **Journaling**, and
+tool execution from actual run events. Journaling means the durable `notes`
+tool is writing or appending; reading notes remains a tool operation. Generic
+**Working** covers the wait before the model reports a more specific phase.
+The phase stays visible in Replies view when the activity signal is enabled.
+Reduced motion replaces animation with static symbols and readable labels.
+
+**Rain effects** adds sparse pixel rain and a small cloud in a separate console
+frame above the masthead. It never covers conversation or input. The device-local
+switch defaults on, pauses the rain while hidden, and uses a static motif with
+reduced motion. It adds no looping sound or animation dependency.
+
+The separate **Autonomy work** signal observes an active background scan or
+routine in the connected backend's home. A live owner, a running record, and its
+deadline must agree; an idle daemon or stale record does not animate. The
+authenticated activity check reads metadata only, starts no services or model
+calls, and pauses when the app view is hidden or disconnected. An unavailable
+check displays a quiet status rather than claiming the engine is working.
+
 The main process uses authenticated `GET /state`, `POST /state`, `GET /bots`,
-`POST /bots`, `GET /bots/:id/messages`, `POST /prefs`, and `POST /run`. Streaming
+`POST /bots`, `GET /bots/:id/messages`, `GET /settings`, `POST /settings`,
+`POST /prefs`, and `POST /run`. Streaming
 frontend tools and approvals use `/runs/:runId/tools/:callId` and
 `/runs/:runId/approvals/:id`; Stop uses `/runs/:runId/cancel`. The renderer receives
 no bearer token and cannot choose arbitrary HTTP routes, open remote pages, or

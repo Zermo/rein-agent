@@ -14,6 +14,7 @@
  */
 import { readConfig } from "./config.ts";
 import type { Model } from "./types.ts";
+import type { ReasoningEffort } from "./reasoning.ts";
 import { discoverServers as probeServers, type DiscoverServersOptions, type DiscoveryDependencies, type DiscoveryEndpoint, type ServerDiscoveryReport } from "./discovery.ts";
 export type { DiscoverServersOptions, DiscoveredServer, ServerDiscoveryReport, DiscoveryStatus, DiscoverySource } from "./discovery.ts";
 
@@ -115,6 +116,7 @@ export interface ReinConfig {
 	apiKey?: string;
 	model?: string;
 	temperature?: number;
+	reasoningEffort?: ReasoningEffort;
 	maxTokens?: number;
 	/** Model calls per foreground prompt (including retries). */
 	maxTurns?: number;

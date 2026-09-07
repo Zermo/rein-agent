@@ -57,6 +57,9 @@ export function requestRoute(operation, input = {}) {
   if (!object(input)) throw new Error("Invalid request.");
   switch (operation) {
     case "state": return { method: "GET", path: "/state" };
+    case "getRunSettings": return { method: "GET", path: "/settings" };
+    case "getActivity": return { method: "GET", path: "/activity" };
+    case "saveRunSettings": return { method: "POST", path: "/settings", body: validateRunSettings(input, true) };
     case "bots": return { method: "GET", path: "/bots" };
     case "messages":
       if (input.before !== undefined && (!Number.isSafeInteger(input.before) || input.before < 0)) throw new Error("Invalid history cursor.");
@@ -95,6 +98,88 @@ export async function* sseEvents(body) {
 export function validateMessages(messages) {
   if (!Array.isArray(messages) || messages.some(item => !object(item) || !string(item.id, 300) || !["user", "assistant", "tool"].includes(item.role) || typeof item.content !== "string" || item.toolCalls !== undefined && (!Array.isArray(item.toolCalls) || item.toolCalls.some(call => !object(call) || !string(call.id, 160) || !object(call.function) || !string(call.function.name, 160) || typeof call.function.arguments !== "string")))) throw new Error("Invalid bot transcript.");
   return structuredClone(messages);
+}
+const runSettingsValues = { bashApproval: ["auto", "ask"], reasoningEffort: ["default", "off", "low", "medium", "high"] };
+export function validateRunSettings(value, partial = false) {
+  if (!object(value) || !Object.keys(value).length || Object.keys(value).some(key => key === "reasoningControl" && !partial ? false : !Object.hasOwn(runSettingsValues, key) || !runSettingsValues[key].includes(value[key])) || !partial && Object.keys(runSettingsValues).some(key => !Object.hasOwn(value, key))) throw new Error("Invalid run settings.");
+  if (value.reasoningControl !== undefined) {
+    const control = value.reasoningControl;
+    if (!object(control) || Object.keys(control).some(key => !["supported", "mode", "description", "field"].includes(key)) || !Array.isArray(control.supported) || !control.supported.includes("default") || control.supported.some(effort => !runSettingsValues.reasoningEffort.includes(effort)) || !["supported", "server-dependent", "unsupported"].includes(control.mode) || !string(control.description) || control.field !== undefined && !string(control.field, 100)) throw new Error("Invalid reasoning control description.");
+  }
+  return { ...value };
+}
+export function publicProgress(value) {
+  if (!object(value) || !["working", "thinking", "responding", "tool", "journaling", "autonomy"].includes(value.phase) || !Number.isSafeInteger(value.turn) || value.turn < 1) return null;
+  return { phase: value.phase, turn: value.turn, ...(string(value.toolName, 160) ? { toolName: value.toolName } : {}) };
+}
+export function validateActivity(value) {
+  const item = object(value) ? value.autonomy : undefined;
+  if (!object(item) || !["inactive", "running", "unavailable"].includes(item.status) || (item.status === "running" ? !["scan", "routine"].includes(item.kind) : item.kind !== undefined)) throw new Error("Invalid activity status.");
+  return { autonomy: { status: item.status, ...(item.status === "running" ? { kind: item.kind } : {}) } };
+}
+export const transcriptViews = ["replies", "activity", "full"];
+const transcriptViewKey = "rein.klaud.transcript-view";
+export function readTranscriptView(storage) {
+  try { const value = (storage ?? globalThis.localStorage)?.getItem(transcriptViewKey); return transcriptViews.includes(value) ? value : "activity"; }
+  catch { return "activity"; }
+}
+export function saveTranscriptView(value, storage) {
+  if (!transcriptViews.includes(value)) throw new Error("Invalid transcript view.");
+  try { (storage ?? globalThis.localStorage)?.setItem(transcriptViewKey, value); } catch { /* The selection still applies when device storage is unavailable. */ }
+  return value;
+}
+const textContent = content => typeof content === "string" ? content : Array.isArray(content) ? content.filter(part => part?.type === "text" && typeof part.text === "string").map(part => part.text).join("\n") : "";
+/** Stream only public text, tool records and reported completion metadata. */
+export function updateTranscript(messages, event) {
+  let messageId, transform;
+  if (["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"].includes(event.type)) {
+    if (!string(event.messageId, 300)) throw new Error("Invalid transcript message identifier.");
+    if (event.type === "TEXT_MESSAGE_CONTENT" && typeof event.delta !== "string") throw new Error("Invalid transcript text delta.");
+    if (event.type === "TEXT_MESSAGE_END" && event.content !== undefined && typeof event.content !== "string") throw new Error("Invalid completed transcript text.");
+    messageId = event.messageId;
+    transform = existing => ({ ...existing, id: messageId, role: "assistant", content: event.type === "TEXT_MESSAGE_END" && event.content !== undefined ? event.content : (existing?.content ?? "") + (event.type === "TEXT_MESSAGE_CONTENT" ? event.delta : ""), ...(event.completion ? { completion: publicCompletion(event.completion) } : {}) });
+  } else if (["TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_CALL_RESULT"].includes(event.type)) {
+    if (!string(event.toolCallId, 160)) throw new Error("Invalid tool call identifier.");
+    if (event.type === "TOOL_CALL_ARGS" && typeof event.delta !== "string") throw new Error("Invalid tool argument delta.");
+    messageId = messages.find(item => item.role === "tool" && item.toolCallId === event.toolCallId)?.id ?? `tool-${event.toolCallId}`;
+    transform = existing => ({ ...existing, id: messageId, role: "tool", toolCallId: event.toolCallId,
+      toolName: event.toolCallName ?? event.toolName ?? existing?.toolName ?? "Tool call",
+      arguments: (existing?.arguments ?? "") + (event.type === "TOOL_CALL_ARGS" ? event.delta : ""),
+      content: event.type === "TOOL_CALL_RESULT" ? textContent(event.content) : existing?.content ?? "",
+      status: event.type === "TOOL_CALL_RESULT" ? "complete" : existing?.status ?? "running",
+      isError: event.type === "TOOL_CALL_RESULT" ? event.isError === true : existing?.isError === true,
+    });
+  } else return messages;
+  const index = messages.findIndex(item => item.id === messageId), next = [...messages];
+  const message = transform(index < 0 ? undefined : messages[index]);
+  if (index < 0) next.push(message); else next[index] = message;
+  return next;
+}
+export function publicCompletion(value) {
+  const result = {};
+  if (object(value) && ["stop", "length", "toolUse", "error", "aborted", "budget"].includes(value.stopReason)) result.stopReason = value.stopReason;
+  if (object(value) && Number.isSafeInteger(value.reasoningTokens) && value.reasoningTokens > 0) result.reasoningTokens = value.reasoningTokens;
+  return result;
+}
+/** Coalesce historical call/result pairs while retaining failures in every view. */
+export function presentTranscript(messages, view = "activity") {
+  if (!transcriptViews.includes(view)) throw new Error("Invalid transcript view.");
+  const results = new Map(messages.filter(item => item.role === "tool" && item.toolCallId).map(item => [item.toolCallId, item]));
+  const rendered = new Set(), rows = [];
+  const toolRow = (call, result) => ({ ...result, id: result?.id ?? `tool-${call.id}`, role: "tool", toolCallId: call.id,
+    toolName: result?.toolName ?? call.function?.name ?? "Tool call", arguments: result?.arguments ?? call.function?.arguments ?? "", content: result?.content ?? "", status: result ? result.status ?? "complete" : "recorded", isError: result?.isError === true });
+  for (const item of messages) {
+    if (item.role === "user" || item.role === "assistant" && item.content.trim()) rows.push({ ...item, toolCalls: undefined, ...(item.completion ? { completion: publicCompletion(item.completion) } : {}) });
+    if (item.role === "assistant") for (const call of item.toolCalls ?? []) {
+      if (rendered.has(call.id)) continue;
+      rendered.add(call.id); rows.push(toolRow(call, results.get(call.id)));
+    }
+    if (item.role === "tool" && (!item.toolCallId || !rendered.has(item.toolCallId))) {
+      if (item.toolCallId) rendered.add(item.toolCallId);
+      rows.push({ ...item, toolName: item.toolName ?? "Tool call", arguments: item.arguments ?? "", status: item.status ?? "complete" });
+    }
+  }
+  return rows.filter(item => view !== "replies" || item.role !== "tool" || item.isError === true);
 }
 export function replayEvents(run) {
   // Finished turns may already be durable. Replay only against the saved pre-run baseline.
