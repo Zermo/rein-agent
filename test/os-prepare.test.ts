@@ -175,12 +175,17 @@ test("the ChromeOS kit exports a userland installer, not the Omarchy fetch", asy
 test("the ChromeOS target check rejects foreign platforms and non-ChromeOS releases", async t => {
 	const f = await fixture(t), output = join(f.base, "kit-cros-check");
 	await prepareReinOS({ output, bundleRoot: f.root, target: "chromeos" });
-	const { validateTarget } = await import(pathToFileURL(join(output, "install-chromeos.mjs")).href);
+	const { validateTarget, chromeosUserHome } = await import(pathToFileURL(join(output, "install-chromeos.mjs")).href);
 	assert.doesNotThrow(() => validateTarget("linux", "NAME=Chrome OS\nID=chromeos\nCROS_RELEASE=132.0.0.0\n"));
 	assert.doesNotThrow(() => validateTarget("linux", "CROS_RELEASE=132.0.0.0\n"));
 	assert.throws(() => validateTarget("linux", "PRETTY_NAME=\"Ubuntu 24.04\"\n"), /ChromeOS/);
 	assert.throws(() => validateTarget("darwin", "ID=chromeos\n"), /linux/);
 	assert.throws(() => validateTarget("linux", ""), /ChromeOS/);
+	assert.throws(() => validateTarget("linux", "NOT_ID=chromeos\n"), /ChromeOS/);
+	assert.throws(() => validateTarget("linux", "# CROS_RELEASE=132.0.0.0\n"), /ChromeOS/);
+	assert.equal(await chromeosUserHome("/home/chronos/user/1000"), "/home/chronos/user/1000");
+	await assert.rejects(chromeosUserHome("/tmp/home/chronos/user/1000"), /ChromeOS chronos user/);
+	assert.equal(await chromeosUserHome("/tmp/home/chronos/user/1000", true), "/tmp/home/chronos/user/1000");
 });
 
 test("the ChromeOS bootstrap installs chronos user files only, and preserves user data", async t => {

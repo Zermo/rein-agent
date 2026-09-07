@@ -18,6 +18,13 @@ Rain is static by default; --animate requires a TTY. q or Ctrl-C restores the sc
 REIN_REDUCED_MOTION=1 keeps the preview still. No desktop theme is activated.
 Use the kit's instructions on a disposable VM before testing physical hardware.`;
 type Flags = Record<string, string | boolean>;
+export function isChromeOSRelease(contents: string): boolean {
+	return contents.split(/\r?\n/).some(line => {
+		const match = /^\s*([A-Z0-9_]+)\s*=\s*["']?([^"'#\s]+)["']?\s*(?:#.*)?$/i.exec(line);
+		return match !== null && (match[1].toUpperCase().startsWith("CROS_RELEASE") ||
+			(match[1].toUpperCase() === "ID" && match[2].toLowerCase() === "chromeos"));
+	});
+}
 export async function runOSCommand(args: string[], flags: Flags = {}, deps: {
 	log?: (text: string) => void; hardware?: typeof profileHardware;
 	plan?: typeof planReinOS; prepare?: typeof prepareReinOS; rain?: typeof previewRain;
@@ -46,7 +53,7 @@ export async function runOSCommand(args: string[], flags: Flags = {}, deps: {
 		const hardware = await (deps.hardware ?? profileHardware)();
 		let chromeos = false;
 		if (mode === "host" && hardware.os === "linux") {
-			try { const osRelease = await readFile("/etc/os-release", "utf8"); chromeos = /ID=chromeos/i.test(osRelease) || /CROS_RELEASE/i.test(osRelease); } catch { /* not ChromeOS */ }
+			try { chromeos = isChromeOSRelease(await readFile("/etc/os-release", "utf8")); } catch { /* not ChromeOS */ }
 		}
 		const plan = (deps.plan ?? planReinOS)(hardware, { mode, chromeos });
 		log(flags.json === true ? JSON.stringify(plan, null, 2) : formatReinOSPlan(plan)); return;
