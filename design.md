@@ -55,6 +55,11 @@ A named four-point scale lives in `tokens.css`. App styles use those names rathe
   the established rust/paper/amber palette. Keep it in frame or wallpaper areas,
   away from reading and input surfaces. Provide an off switch, pause while hidden,
   and use static rain with reduced motion. Ambient rain does not imply agent work.
+- The OS build is named **Dareecho**. Its intended brand meaning is a window, portal,
+  or metaphorical glimpse into the unknown. Frame the rain around a readable,
+  unobscured working surface.
+  Its rain theme shares Rein-klaud's
+  palette and field-guide artwork; keep the OS name on OS-facing surfaces.
 
 ## Sound
 
@@ -78,7 +83,7 @@ Use [Beautiful UI](https://beautifului.dev), [beUI](https://beui.dev),
 disclosure, and restrained motion. Adapt useful patterns to Rein's square field
 controls, paper surfaces, hard rules, and existing sound cues. Keep the palette,
 typography, and reduced-motion behavior above; a reference is not a new theme or
-  a reason to add a component dependency.
+a reason to add a component dependency.
 
 ## Navigation and control voice
 

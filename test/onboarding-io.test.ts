@@ -47,7 +47,7 @@ test("queued answers survive profile, real HTTP setup, and follow-up choices on 
 		res.end(req.method === "GET" ? JSON.stringify({ data: [{ id: "queued-input-model" }] }) : JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }));
 	});
 	await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-	const io = queuedPrompt(["a", "a", "c", "a", "a", "a", "3", "1", "4", "750", "40", "", "3", "caller-still-owns-this-prompt"]);
+	const io = queuedPrompt(["a", "a", "c", "a", "a", "a", "3", "1", "4", "750", "40", "", "3", "1", "caller-still-owns-this-prompt"]);
 	const logs: string[] = [];
 	let autonomyCalls = 0;
 	try {
@@ -119,7 +119,7 @@ test("full noninteractive CLI setup rejects before creating a profile or connect
 
 test("manual onboarding pauses a previously resumed state with no enrolled folders", { timeout: 5000 }, async () => isolated(async home => {
 	await updateState(state => { state.paused = false; state.workspaces = []; });
-	const io = queuedPrompt(["skip", "1", "1", home, "1", "1", "1"]);
+	const io = queuedPrompt(["skip", "1", "1", home, "1", "1", "1", "1"]);
 	const logs: string[] = [], autonomyCommands: string[] = [];
 	try {
 		const code = await runOnboarding({ provider: "custom", baseUrl: "http://fixture.invalid/v1", model: "manual-state-fixture", noBrowser: true }, {

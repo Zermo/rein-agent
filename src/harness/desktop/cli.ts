@@ -1,5 +1,6 @@
 import { accessSync, constants, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DesktopSurface } from "./surface.ts";
@@ -12,7 +13,7 @@ export async function desktopCommand(args: string[], flags: Record<string, strin
 		preferSurface(args[1] as DesktopSurface); console.log(`I saved the desktop preference: ${args[1]}. Use rein desktop open to open it. Bare rein sessions stay in this terminal.`); return;
 	}
 	if (args.length > 1 || !["install", "open", "status"].includes(action)) throw new Error("Usage: rein desktop install [--no-launch] | open | status | use klaud|nodeterm|terminal");
-	if (action === "status") { console.log(`Default: current terminal\nOptional desktop preference: ${preferredSurface()}\nrein-klaʊd: ${klaudElectron(klaudAppDirectory()) ? "installed" : "not found"}\nNodeTerm: ${nativeApp() ? "installed" : "not found"}`); return; }
+	if (action === "status") { console.log(`Default: current terminal\nOptional desktop preference: ${preferredSurface()}\nrein-klaʊd: ${klaudNativeExecutable() || klaudElectron(klaudAppDirectory()) ? "installed" : "not found"}\nNodeTerm: ${nativeApp() ? "installed" : "not found"}`); return; }
 	if (action === "open" && preferredSurface() === "klaud") { await launchKlaud(); return; }
 	if (action === "open" && preferredSurface() === "terminal") { console.log("I'm using this terminal. Run rein to start a session."); return; }
 	if (action === "install") {
@@ -49,25 +50,39 @@ function klaudElectron(appDir: string): string | undefined {
 		return path;
 	} catch { return; }
 }
+export function klaudNativeExecutable(options: { platform?: string; home?: string; installDir?: string } = {}): string | undefined {
+	if ((options.platform ?? process.platform) !== "darwin") return;
+	const directory = options.installDir ?? process.env.REIN_APP_INSTALL_DIR;
+	const roots = directory ? [directory] : [join(options.home ?? homedir(), "Applications"), "/Applications"];
+	for (const root of roots) {
+		if (!root.startsWith("/")) continue;
+		const file = join(root, "rein-klaud.app/Contents/MacOS/rein-klaud");
+		try { accessSync(file, constants.X_OK); return file; } catch { /* Try the other standard installation location. */ }
+	}
+}
 interface KlaudLaunchDependencies {
 	appDir?: string;
+	nativeExecutable?: string | null;
 	start?: () => Promise<ServeHandle>;
 	spawn?: typeof spawn;
 	signals?: Pick<NodeJS.Process, "once" | "removeListener">;
 	log?: (message: string) => void;
+	ignoreInput?: boolean;
+	timeoutMs?: number;
 }
-async function runDesktopChild(command: string, args: string[], appDir: string, env: NodeJS.ProcessEnv, deps: KlaudLaunchDependencies, onStop = () => {}): Promise<number> {
+export async function runDesktopChild(command: string, args: string[], appDir: string, env: NodeJS.ProcessEnv, deps: KlaudLaunchDependencies, onStop = () => {}): Promise<number> {
 	return new Promise((done, reject) => {
-		const child = (deps.spawn ?? spawn)(command, args, { cwd: appDir, env, stdio: "inherit", shell: false, detached: process.platform !== "win32" });
+		const child = (deps.spawn ?? spawn)(command, args, { cwd: appDir, env, stdio: deps.ignoreInput ? ["ignore", "inherit", "inherit"] : "inherit", shell: false, detached: process.platform !== "win32" });
 		const signals = deps.signals ?? process;
-		let cancelled = 0, closed = false, code = 1, error: Error | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+		let cancelled = 0, closed = false, code = 1, error: Error | undefined, timer: ReturnType<typeof setTimeout> | undefined, deadline: ReturnType<typeof setTimeout> | undefined;
 		const kill = (signal: NodeJS.Signals) => {
 			try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal); else child.kill(signal); }
 			catch { /* The owned child or process group has already exited. */ }
 		};
 		const finish = () => {
 			if (!closed || timer) return;
-			signals.removeListener("SIGINT", interrupt); signals.removeListener("SIGTERM", terminate);
+			clearTimeout(deadline);
+			signals.removeListener("SIGINT", interrupt); signals.removeListener("SIGTERM", terminate); signals.removeListener("SIGHUP", hangup);
 			if (error) reject(error); else done(cancelled || code);
 		};
 		const stop = (status: number) => {
@@ -77,8 +92,9 @@ async function runDesktopChild(command: string, args: string[], appDir: string, 
 			timer = setTimeout(() => { kill("SIGKILL"); timer = undefined; finish(); }, 1_000);
 			kill("SIGTERM");
 		};
-		const interrupt = () => stop(130), terminate = () => stop(143);
-		signals.once("SIGINT", interrupt); signals.once("SIGTERM", terminate);
+		const interrupt = () => stop(130), terminate = () => stop(143), hangup = () => stop(129);
+		signals.once("SIGINT", interrupt); signals.once("SIGTERM", terminate); signals.once("SIGHUP", hangup);
+		if (deps.timeoutMs) deadline = setTimeout(() => stop(124), deps.timeoutMs);
 		child.once("error", cause => { error = cause; closed = true; finish(); });
 		child.once("close", status => { code = status ?? 1; closed = true; finish(); });
 	});
@@ -95,22 +111,24 @@ async function runDesktopChild(command: string, args: string[], appDir: string, 
  */
 export async function launchKlaud(deps: KlaudLaunchDependencies = {}): Promise<void> {
 	const appDir = deps.appDir ?? klaudAppDirectory(), electron = klaudElectron(appDir);
-	if (!electron) {
-		(deps.log ?? console.log)("I couldn't find an installed rein-klaʊd app. From the Rein checkout, start rein serve in one terminal, then run:\n  cd apps/klaud && npm install && npm run dev\nConnect using the loopback URL and private token file reported by rein serve.");
-		return;
+	const native = deps.nativeExecutable === undefined ? deps.appDir ? undefined : klaudNativeExecutable() : deps.nativeExecutable;
+	if (!native && !electron) {
+		throw new Error("The Rein Cloud app is not installed. Run rein setup edition --edition cloud --yes, then rein desktop open.");
 	}
 	const env: NodeJS.ProcessEnv = { ...process.env, REIN_SURFACE: "klaud", REIN_KLAUD: "1" };
 	delete env.ELECTRON_RUN_AS_NODE; delete env.REIN_KLAUD_URL; delete env.REIN_KLAUD_TOKEN;
 	// Dist is intentionally ignored, so rebuild from the checkout that supplied
 	// this CLI. An update can never keep opening an older renderer by accident.
-	const buildCode = await runDesktopChild(process.platform === "win32" ? "npm.cmd" : "npm", ["--prefix", appDir, "run", "build"], appDir, env, deps);
-	if (buildCode !== 0) { process.exitCode = buildCode; return; }
+	if (!native) {
+		const buildCode = await runDesktopChild(process.platform === "win32" ? "npm.cmd" : "npm", ["--prefix", appDir, "run", "build"], appDir, env, deps);
+		if (buildCode !== 0) { process.exitCode = buildCode; return; }
+	}
 	const start = deps.start ?? (await import("../klaud/serve.ts")).startKlaudServe;
 	const handle = await start();
 	let closing: Promise<void> | undefined;
 	const close = () => closing ??= handle.close();
 	try {
-		const code = await runDesktopChild(electron, [appDir], appDir, { ...env, REIN_KLAUD_URL: handle.url, REIN_KLAUD_TOKEN: handle.token }, deps, () => { void close().catch(() => {}); });
+		const code = await runDesktopChild(native || electron!, native ? [] : [appDir], native ? dirname(native) : appDir, { ...env, REIN_KLAUD_URL: handle.url, REIN_KLAUD_TOKEN: handle.token }, deps, () => { void close().catch(() => {}); });
 		if (code !== 0) process.exitCode = code;
 	} finally { await close(); }
 }

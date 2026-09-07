@@ -12,6 +12,7 @@ function fixture(answers: string[]) {
 	const previous = process.env.REIN_HOME; process.env.REIN_HOME = home;
 	const logs: string[] = [], asked: string[] = [];
 	const prompt = { async ask(question: string, fallback = "") {
+		if (question.startsWith("Installation [")) return "1";
 		asked.push(question); assert.ok(answers.length, `Unexpected prompt: ${question}\n${logs.join("\n")}`);
 		return answers.shift()! || fallback;
 	}, async secret() { return undefined; }, close() {} };
@@ -55,7 +56,7 @@ test("full walkthrough saves profile, tests connection, and leaves background wo
 		const code = await runOnboarding({}, { ...f, setup: async () => { connectionCalls++; return 0; }, autonomy: async () => { autonomyCalls++; } });
 		assert.equal(code, 0); assert.equal(connectionCalls, 1); assert.equal(autonomyCalls, 0);
 		assert.equal(readOperatorProfile().profile?.enabled_pack, "ship");
-		assert.match(f.logs.join("\n"), /Setup complete/); assert.match(f.logs.join("\n"), /\[5\/5\]/);
+		assert.match(f.logs.join("\n"), /Setup complete/); assert.match(f.logs.join("\n"), /\[6\/6\]/);
 	} finally { f.close(); }
 });
 
@@ -239,4 +240,17 @@ test("a failed helper runtime installation reports the exact retry without block
 		assert.match(f.logs.join("\n"), /Retry with rein autonomy guardian install --install-runtime/);
 		assert.match(f.logs.join("\n"), /Rules-only checks remain available/);
 	} finally { f.close(); }
+});
+
+test("an explicit unattended edition follows base connection setup without inventing a profile", async () => {
+ const f = fixture([]), events: string[] = [];
+ try {
+  const code = await runOnboarding({ yes: true, edition: "cloud" }, { ...f,
+   setup: async () => { events.push("base-setup"); return 1; },
+   edition: async options => { assert.deepEqual(options, { edition: "cloud", yes: true }); events.push("selected-edition"); return "cloud"; },
+  });
+  assert.equal(code, 1, "an incomplete model connection is still reported");
+  assert.deepEqual(events, ["base-setup", "selected-edition"]);
+  assert.deepEqual(readdirSync(f.home), []); assert.equal(f.asked.length, 0);
+ } finally { f.close(); }
 });

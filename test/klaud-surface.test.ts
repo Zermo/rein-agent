@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcess, spawn } from "node:child_process";
-import { desktopCommand, launchKlaud } from "../src/harness/desktop/cli.ts";
+import { desktopCommand, launchKlaud, klaudNativeExecutable, runDesktopChild } from "../src/harness/desktop/cli.ts";
 import { preferSurface, preferredSurface } from "../src/harness/desktop/surface.ts";
 import { buildSystemPrompt } from "../src/harness/system-prompt.ts";
 import { main } from "../src/cli.ts";
@@ -19,14 +19,12 @@ function appFixture(built = true) {
 	return root;
 }
 
-test("missing klaud installation gives manual npm instructions without starting serve or a child", async () => {
+test("missing klaud installation fails with edition setup instructions without starting serve or a child", async () => {
 	const root = mkdtempSync(join(tmpdir(), "rein-klaud-missing-")), output: string[] = [];
 	try {
-		await launchKlaud({ appDir: root, log: message => output.push(message),
+		await assert.rejects(launchKlaud({ appDir: root, log: message => output.push(message),
 			start: async () => { throw new Error("must not start serve"); },
-			spawn: (() => { throw new Error("must not launch software"); }) as typeof spawn });
-		assert.match(output.join("\n"), /rein serve/);
-		assert.match(output.join("\n"), /cd apps\/klaud && npm install && npm run dev/);
+			spawn: (() => { throw new Error("must not launch software"); }) as typeof spawn }), /rein setup edition --edition cloud --yes/);
 	} finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -87,7 +85,7 @@ test("klaud spawn failures close the owned backend and remove signal listeners",
 test("CLI cancellation closes serve promptly, terminates Electron, and preserves a signal exit code", async () => {
 	const root = appFixture(), previousExitCode = process.exitCode;
 	try {
-		for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
+		for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]] as const) {
 			const signals = new EventEmitter(); let closes = 0, calls = 0;
 			await launchKlaud({ appDir: root, signals,
 				start: async () => ({ url: "http://127.0.0.1:49152", token: "fixture", close: async () => { closes++; } }),
@@ -177,4 +175,36 @@ test("desktop use persists klaud and both new command help paths describe loopba
 		console.log = oldLog; if (oldHome === undefined) delete process.env.REIN_HOME; else process.env.REIN_HOME = oldHome;
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("native app launch attaches the selected harness without npm or a second gateway", async t => {
+ const root = mkdtempSync(join(tmpdir(), "rein-native-launch-")), executable = join(root, "rein-klaud.app/Contents/MacOS/rein-klaud");
+ mkdirSync(join(root, "rein-klaud.app/Contents/MacOS"), { recursive: true });
+ writeFileSync(executable, "fixture executable, never executed", { mode: 0o700 });
+ t.after(() => rmSync(root, { recursive: true, force: true }));
+ assert.equal(klaudNativeExecutable({ platform: "darwin", installDir: root }), executable);
+ assert.equal(klaudNativeExecutable({ platform: "linux", installDir: root }), undefined);
+ let starts = 0, closes = 0, calls = 0;
+ await launchKlaud({ appDir: root, nativeExecutable: executable, signals: new EventEmitter(),
+  start: async () => { starts++; return { url: "http://127.0.0.1:49152", token: "native-fixture-secret", close: async () => { closes++; } }; },
+  spawn: ((command, args, options) => {
+   calls++; assert.equal(command, executable); assert.deepEqual(args, []);
+   assert.equal(starts, 1); assert.equal(options.env.REIN_KLAUD_TOKEN, "native-fixture-secret");
+   assert.equal(options.env.REIN_KLAUD_URL, "http://127.0.0.1:49152"); assert.equal(options.shell, false);
+   const child = new EventEmitter(); queueMicrotask(() => child.emit("close", 0)); return child as ChildProcess;
+  }) as typeof spawn });
+ assert.equal(calls, 1); assert.equal(closes, 1);
+});
+
+test("app installation subprocesses cannot consume setup answers and have a bounded shutdown", async () => {
+ const signals = new EventEmitter(), sent: unknown[] = [];
+ const code = await runDesktopChild("fixture-installer", [], ".", {}, { ignoreInput: true, timeoutMs: 10, signals,
+  spawn: ((_command, _args, options) => {
+   assert.deepEqual(options.stdio, ["ignore", "inherit", "inherit"]);
+   const child = new EventEmitter() as ChildProcess;
+   child.kill = signal => { sent.push(signal); if (signal === "SIGTERM") queueMicrotask(() => child.emit("close", null)); return true; };
+   return child;
+  }) as typeof spawn });
+ assert.equal(code, 124); assert.deepEqual(sent, ["SIGTERM", "SIGKILL"]);
+ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) assert.equal(signals.listenerCount(signal), 0);
 });

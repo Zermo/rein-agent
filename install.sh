@@ -5,10 +5,11 @@
 #   curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
 #
 # Installs the harness (prebuilt, zero runtime deps) and runs the interactive
-# onboarding wizard: work style → model connection → follow-ups → first task.
+# onboarding wizard, then offers Rein Agent, Rein Cloud, or Dareecho development.
 #
 # Options (after `bash -s --`):
-#   --skip-setup    install only; skip the wizard and connection checks
+#   --edition ID    gateway (terminal), cloud (bot app), or os (assessment/VM kit)
+#   --skip-setup    skip onboarding; apply an edition only when explicitly requested
 #   --yes           non-interactive wizard (first local server / existing config)
 #   --no-app        install CLI only; skip the native Mac app
 #   --app-only      install the native Mac app without Git, Node, or npm
@@ -35,19 +36,27 @@ LAUNCH_SESSION=true
 SETUP_READY=false
 SETUP_TTY=""
 RUN_APP=false
-[ "$(uname -s)" != Darwin ] || RUN_APP=true
+EDITION=""
+SETUP_RAN=false
+set_edition() {
+    case "$1" in gateway|cloud|os) ;; *) echo "--edition must be gateway, cloud, or os" >&2; exit 2 ;; esac
+    [ -z "$EDITION" ] || [ "$EDITION" = "$1" ] || { echo "Conflicting installation choices" >&2; exit 2; }
+    EDITION="$1"
+}
 APP_ONLY=false
-APP_READY=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --skip-setup) RUN_SETUP=false ;;
         --yes) ASSUME_YES=true ;;
-        --no-app) RUN_APP=false ;;
+        --no-app) RUN_APP=false; set_edition gateway ;;
         --app-only) RUN_APP=true; APP_ONLY=true ;;
-        --terminal-only) RUN_APP=false; RUN_DESKTOP=false; PREFER_TERMINAL=true ;;
-        --nodeterm) RUN_DESKTOP=true; PREFER_TERMINAL=false ;;
+        --terminal-only) RUN_APP=false; RUN_DESKTOP=false; PREFER_TERMINAL=true; set_edition gateway ;;
+        --nodeterm) RUN_DESKTOP=true; PREFER_TERMINAL=false; set_edition gateway ;;
         --no-launch) LAUNCH_SESSION=false ;;
+        --edition)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "--edition requires gateway, cloud, or os" >&2; exit 2; }
+            shift; set_edition "$1" ;;
         --branch)
             [ $# -ge 2 ] && [ -n "$2" ] || { echo "--branch requires a name" >&2; exit 2; }
             shift; BRANCH="$1" ;;
@@ -57,16 +66,19 @@ Rein installer
   curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
 
 Options after bash -s --:
-  --skip-setup     Install only; keep saved settings and skip checks
+  --edition ID     gateway: terminal; cloud: bot app; os: Dareecho assessment/VM kit
+  --skip-setup     Skip onboarding; an explicit --edition still applies that choice
   --yes            Unattended model setup; never invent an operator profile
-  --no-app         Install only the CLI; skip the native Mac app
+  --no-app         Alias for --edition gateway
   --app-only       Install the native Mac app; no Git, Node, or npm needed
   --terminal-only  Stay in the current terminal; skip native apps
   --nodeterm       Also install the optional native NodeTerm app
   --no-launch      Finish setup without starting a chat session
   --branch NAME    Install a branch, default main
 
-Run rein setup later for the guided walkthrough.
+Every guided edition installs Rein Agent first and keeps the current OS.
+Dareecho is a development VM overlay, not a bootable OS or firmware installer.
+Run rein setup later, or rein setup edition to change your choice.
 HELP
             exit 0
             ;;
@@ -74,6 +86,9 @@ HELP
     esac
     shift
 done
+
+[ "$APP_ONLY" = false ] || [ -z "$EDITION" ] || { echo "--app-only cannot be combined with --edition, --no-app, or --terminal-only" >&2; exit 2; }
+[ "$RUN_DESKTOP" = false ] || [ -z "$EDITION" ] || [ "$EDITION" = gateway ] || { echo "--nodeterm is an optional terminal surface for --edition gateway" >&2; exit 2; }
 
 # ---- ui --------------------------------------------------------------------
 if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ]; then
@@ -163,17 +178,39 @@ fi
 ok "$VERSION"
 echo ""
 
-# Native Mac app is an optional addition; a missing app release never removes
-# the working CLI. Keep setup here in the caller's terminal before opening it.
-if [ "$RUN_APP" = true ] && [ "$(uname -s)" = Darwin ]; then
-    step "installing the native rein-klaud app"
-    if [ -f "$REPO_DIR/scripts/install-macos-app.sh" ] && bash "$REPO_DIR/scripts/install-macos-app.sh" --no-launch; then
-        APP_READY=true
-    else
-        warn "Rein CLI is installed. The native app could not be installed; quit an existing app before updating, or retry: curl -fsSL https://github.com/Zermo/rein-agent/releases/latest/download/install-macos-app.sh | bash"
+# ---- onboarding -------------------------------------------------------------
+SETUP_ARGS=(setup)
+if [ -n "$EDITION" ]; then SETUP_ARGS+=(--edition "$EDITION"); fi
+if [ "$RUN_SETUP" = false ]; then
+    step "setup skipped (--skip-setup)"
+elif [ "$ASSUME_YES" = true ]; then
+    SETUP_RAN=true
+    node "$REPO_DIR/dist/rein.js" "${SETUP_ARGS[@]}" --yes ||
+        warn "Connection setup needs attention. Run rein setup for the guided walkthrough."
+elif [ -t 0 ] && [ -t 1 ]; then
+    SETUP_TTY=stdin
+    SETUP_RAN=true
+    if node "$REPO_DIR/dist/rein.js" "${SETUP_ARGS[@]}"; then SETUP_READY=true; else
+        warn "Setup is unfinished. Run rein setup to continue; saved settings are kept."
     fi
+# curl owns stdin. Read answers from the controlling terminal instead of the script.
+elif [ -t 1 ] && [ -z "${CI:-}" ] && ( : < /dev/tty ) 2>/dev/null; then
+    SETUP_TTY=controlling
+    SETUP_RAN=true
+    if node "$REPO_DIR/dist/rein.js" "${SETUP_ARGS[@]}" < /dev/tty; then SETUP_READY=true; else
+        warn "Setup is unfinished. Run rein setup to continue; saved settings are kept."
+    fi
+else
+    step "No interactive terminal. Run rein setup when ready, or use --yes for unattended model setup."
 fi
 
+echo ""
+# Explicit edition flags also work offline with --skip-setup. They never enable
+# services or perform OS installation. Plain updates preserve the saved choice.
+if [ "$SETUP_RAN" = false ] && [ -n "$EDITION" ]; then
+    node "$REPO_DIR/dist/rein.js" setup edition --edition "$EDITION" --yes ||
+        fail "Rein Agent is installed; edition setup needs attention. Retry: rein setup edition --edition $EDITION --yes"
+fi
 # NodeTerm remains an explicit extra.
 # Use the just-installed bundle, not a potentially stale global executable.
 if [ "$RUN_DESKTOP" = true ]; then
@@ -183,38 +220,22 @@ elif [ "$PREFER_TERMINAL" = true ]; then
     node "$REPO_DIR/dist/rein.js" desktop use terminal
 fi
 
-# ---- onboarding -------------------------------------------------------------
-if [ "$RUN_SETUP" = false ]; then
-    step "setup skipped (--skip-setup)"
-elif [ "$ASSUME_YES" = true ]; then
-    node "$REPO_DIR/dist/rein.js" setup --yes ||
-        warn "Connection setup needs attention. Run rein setup for the guided walkthrough."
-elif [ -t 0 ] && [ -t 1 ]; then
-    SETUP_TTY=stdin
-    if node "$REPO_DIR/dist/rein.js" setup; then SETUP_READY=true; else
-        warn "Setup is unfinished. Run rein setup to continue; saved settings are kept."
-    fi
-# curl owns stdin. Read answers from the controlling terminal instead of the script.
-elif [ -t 1 ] && [ -z "${CI:-}" ] && ( : < /dev/tty ) 2>/dev/null; then
-    SETUP_TTY=controlling
-    if node "$REPO_DIR/dist/rein.js" setup < /dev/tty; then SETUP_READY=true; else
-        warn "Setup is unfinished. Run rein setup to continue; saved settings are kept."
-    fi
-else
-    step "No interactive terminal. Run rein setup when ready, or use --yes for unattended model setup."
-fi
-
-echo ""
 echo "${BOLD}done.${NC} Quick start:"
 echo "    rein -p \"hello, what model are you?\"   # one-shot"
 echo "    rein                                     # interactive session"
 echo "    rein models                              # what rein can see"
 echo "    rein setup --status                      # re-check config + connection"
+echo "    rein setup edition                       # Agent / Cloud / Dareecho"
 if [ "$SETUP_READY" = true ] && [ "$LAUNCH_SESSION" = true ] && [ -z "${CI:-}" ]; then
-    if [ "$APP_READY" = true ]; then
-        step "Opening the native rein-klaud app. Choose Start local rein serve to begin."
-        if open -a "${REIN_APP_INSTALL_DIR:-$HOME/Applications}/rein-klaud.app"; then exit 0; fi
-        warn "macOS could not open the app. Open rein-klaud from Finder; continuing in this terminal."
+    SELECTED_EDITION=$(node "$REPO_DIR/dist/rein.js" setup edition --status --id) ||
+        fail "Could not read the selected edition. Run rein setup edition before launching."
+    case "$SELECTED_EDITION" in gateway|cloud|os) ;; *) fail "The installed build returned an invalid edition. Run rein setup edition." ;; esac
+    if [ "$SELECTED_EDITION" = cloud ]; then
+        step "Opening Rein Cloud with the installed Rein Agent gateway."
+        exec node "$REPO_DIR/dist/rein.js" desktop open
+    elif [ "$SELECTED_EDITION" = os ]; then
+        step "Dareecho assessment finished. Follow the reported VM preparation steps when ready."
+        exit 0
     fi
     step "Starting Rein in this terminal. Type /help for commands or /quit to exit."
     # Replace the installer so Ctrl-C, EOF and terminal resize go straight to Rein.

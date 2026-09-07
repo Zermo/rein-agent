@@ -63,11 +63,20 @@ Install on macOS, Linux, or WSL and start the guided setup:
 curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
 ```
 
-Rein runs in the terminal you already use: Ghostty, Terminal, a NodeTerm terminal
-node, or another compatible shell. On macOS the installer also installs the
-native rein-klaud app and opens it after successful guided setup. On Linux and
-WSL it starts interactive Rein in the current terminal. Neither path requires
-NodeTerm or a browser activity page.
+The installer adds **Rein Agent first**, then runs the guided onboarding in your
+current terminal. After your profile, model connection, and optional follow-ups,
+choose how this machine should participate:
+
+| Choice | What happens |
+| --- | --- |
+| **Rein Agent** (`gateway`) | Terminal harness and an optional loopback API through `rein serve`. Your existing OS and desktop stay usable. |
+| **Rein Cloud** (`cloud`) | Adds the bot app and connects it to this harness. macOS uses the native package; Linux desktops use the included Electron app. |
+| **Dareecho development** (`os`) | Runs hardware and model-fit assessment and shows the Omarchy VM overlay path. No bootable image or physical-machine migration is available yet. |
+
+All choices share your private profile, model accounts, task limits, and sessions.
+Background autonomy remains an explicitly enabled service, independent of the
+app's foreground gateway. Choosing an edition never grants new task permissions
+or starts background work. See [installation choices](docs/install-editions.md).
 
 To install only the Mac app from the latest published release, with its own
 runtime and no global Node installation:
@@ -82,13 +91,14 @@ normal macOS approval checks apply. See the [Mac release notes](docs/macos-devel
 
 Answer six practical questions about your tasks and communication preferences,
 review a suggested workflow pack, then connect a model. You can change answers
-before saving, choose another pack, or skip skills. The final step offers
-optional follow-ups for a folder you choose and a first task to try.
+before saving, choose another pack, or skip skills. Then choose optional follow-ups, your installation edition, and a first task to try.
 
-Flags after `bash -s --`: `--skip-setup` skips onboarding, model checks, and launch;
+Flags after `bash -s --`: `--edition gateway|cloud|os` preselects a path;
+`--skip-setup` skips onboarding, model checks, and launch (an explicit edition still applies);
 `--yes` runs unattended connection setup without inventing a profile;
 `--no-launch` finishes setup without starting interactive Rein.
-`--no-app` skips the native Mac app; `--app-only` installs just that app.
+`--no-app` is an alias for the gateway edition. The legacy `--app-only` utility
+installs the standalone Mac app with its bundled harness, without a global CLI.
 `--terminal-only` keeps setup and chat in the current terminal. NodeTerm is optional:
 use `--nodeterm` only when you want its separate native macOS app installed and
 registered. Open it explicitly with `rein desktop open`.
@@ -429,6 +439,12 @@ for findings, fixes, and limitations. Both upstreams are pinned under `vendor/`;
 `npm run check:natives` verifies their source and license hashes.
 
 ### Host models on your own hardware
+
+Rein now has an explicit [managed model workflow](docs/managed-models.md) for pinned
+GGUF downloads, integrity checks, headless serving, and scoped background services.
+Start with `rein model help`. Existing server discovery remains `rein models`.
+The [Dareecho development kit](docs/rein-os.md) prepares a verified terminal overlay
+for an Omarchy VM, with separate platform and installation checks.
 
 Rein connects to an OpenAI-compatible Chat Completions server on this computer,
 on another machine in your LAN, or through a mesh VPN such as NetBird or Tailscale.

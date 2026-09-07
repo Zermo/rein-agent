@@ -186,7 +186,7 @@ if (process.argv.includes('--global') && process.env.REIN_UPDATE_NPM_FAIL === '1
 		npmCalls: () => readFileSync(join(f.root, "npm.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)) };
 }
 
-for (const scenario of ["success", "no-launch", "setup-failed", "setup-eof", "setup-cancel"] as const) test(`curl-piped installer keeps setup and chat in its controlling terminal (${scenario})`, posix, async t => {
+for (const scenario of ["success", "cloud", "os", "no-launch", "setup-failed", "setup-eof", "setup-cancel"] as const) test(`curl-piped installer keeps setup and chat in its controlling terminal (${scenario})`, posix, async t => {
 	if (spawnSync("python3", ["--version"]).error) { t.skip("python3 is needed only to create a real test PTY"); return; }
 	const f = installFixture();
 	let child: ReturnType<typeof spawn> | undefined;
@@ -196,13 +196,15 @@ for (const scenario of ["success", "no-launch", "setup-failed", "setup-eof", "se
 const fs = require('node:fs'), path = require('node:path');
 const args = process.argv.slice(2);
 fs.appendFileSync(path.join(process.env.REIN_UPDATE_FIXTURE, 'installed-cli.jsonl'), JSON.stringify(args) + '\\n');
-if (args[0] === 'setup') {
+if (args[0] === 'setup' && args[1] === 'edition') { console.log(['cloud','os'].includes(process.env.REIN_TEST_SCENARIO) ? process.env.REIN_TEST_SCENARIO : 'gateway');
+} else if (args[0] === 'setup') {
   if (args.length !== 1 || !process.stdin.isTTY) { console.error('GUIDED_SETUP_HAS_NO_TTY'); process.exit(8); }
   console.log('OPERATOR_PROFILE_READY');
   const rl = require('node:readline').createInterface({ input: process.stdin });
   let answered = false;
   rl.once('line', line => { answered = true; console.log('OPERATOR_ANSWER=' + line); rl.close(); process.exit(process.env.REIN_TEST_SCENARIO === 'setup-failed' ? 1 : 0); });
   rl.once('close', () => { if (!answered) process.exit(1); });
+} else if (args[0] === 'desktop' && args[1] === 'open') { console.log('BOT_APP_LAUNCHED');
 } else if (args[0] === '--terminal') {
   if (!process.stdin.isTTY || fs.realpathSync(process.cwd()) !== fs.realpathSync(process.env.REIN_UPDATE_FIXTURE)) { console.error('CHAT_WRONG_TTY_OR_CWD'); process.exit(9); }
   console.log('INTERACTIVE_SESSION_READY');
@@ -261,7 +263,10 @@ finally:
 		else if (scenario === "setup-cancel") assert.doesNotMatch(output, /Starting Rein in this terminal/);
 		else assert.doesNotMatch(output, /Setup is unfinished/);
 		const calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
-		assert.equal(calls.some(args => args[0] === "desktop"), false, "Default installs must not install or launch NodeTerm.");
+		assert.equal(calls.some(args => args[0] === "desktop" && args[1] === "install"), false, "Default installs must not install NodeTerm.");
+		assert.equal(calls.some(args => args.join(" ") === "desktop open"), scenario === "cloud");
+		if (scenario === "cloud") assert.match(output, /BOT_APP_LAUNCHED/);
+		if (scenario === "os") assert.match(output, /Dareecho assessment finished/);
 		f.unchanged();
 	} finally { clearTimeout(timer); child?.kill(); f.close(); }
 });
@@ -305,9 +310,9 @@ for (const scenario of ["default", "opt-out", "unavailable", "linux"] as const) 
 		f.gitAt(f.remote, "add", "."); f.gitAt(f.remote, "commit", "-m", "Native app fixture");
 		const result = await f.install(["--skip-setup", ...(scenario === "opt-out" ? ["--no-app"] : [])]);
 		assert.equal(result.code, 0, result.stdout + result.stderr);
-		assert.equal(existsSync(join(f.root, "native-app-called")), scenario !== "opt-out" && scenario !== "linux");
-		if (scenario === "default") assert.equal(readFileSync(join(f.root, "native-app-called"), "utf8").trim(), "--no-launch");
-		if (scenario === "unavailable") assert.match(result.stdout, /CLI is installed.*native app could not be installed/);
+		assert.equal(existsSync(join(f.root, "native-app-called")), false);
+		assert.equal(existsSync(join(f.root, "native-app-called")), false, "The base install never adds an app before selection");
+		assert.doesNotMatch(result.stdout, /installing the native rein-klaud app/);
 		assert.ok(f.npmCalls().some(args => args.includes("--global")));
 		f.unchanged();
 	} finally { f.close(); }
@@ -387,4 +392,28 @@ test("installer reports global npm failures without claiming a successful instal
 		assert.equal(existsSync(join(f.root, "setup-called")), false);
 		f.unchanged();
 	} finally { f.close(); }
+});
+
+for (const edition of ["gateway", "cloud", "os"]) test(`installer applies explicit ${edition} after the base harness, with setup skipped`, posix, async () => {
+ const f = installFixture();
+ try {
+  const result = await f.install(["--skip-setup", "--edition", edition, "--no-launch"]);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.ok(f.npmCalls().some(args => args.includes("--global")));
+  const calls = readFileSync(join(f.root, "installed-cli.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(calls.filter(args => args.join(" ") === `setup edition --edition ${edition} --yes`).length, 1);
+  assert.equal(calls.some(args => args[0] === "--terminal" || args.join(" ") === "desktop open"), false);
+  f.unchanged();
+ } finally { f.close(); }
+});
+
+test("installer rejects invalid or conflicting editions before touching a checkout", posix, async () => {
+ const f = installFixture();
+ try {
+  for (const args of [["--edition"], ["--edition", "wipe"], ["--edition", "cloud", "--terminal-only"], ["--edition", "os", "--nodeterm"], ["--app-only", "--edition", "cloud"]]) {
+   const result = await f.install(args); assert.equal(result.code, 2, result.stdout + result.stderr);
+   assert.equal(existsSync(f.checkout), false);
+  }
+  assert.equal(existsSync(join(f.root, "npm.jsonl")), false); f.unchanged();
+ } finally { f.close(); }
 });

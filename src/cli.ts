@@ -46,6 +46,10 @@ Usage:
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
+  rein model help               pinned GGUF downloads, serving and background model services
+  rein model plan <repo> --file <gguf> [--revision <ref>] [--json]
+  rein os plan [--mode host|image] [--json]    native host and OS installation gates
+  rein os prepare --output <dir>             prepare a pinned Omarchy VM overlay kit
   rein skills [name]            list bundled workflows, or read one without running it
   rein profile [--json]         view your operator profile and enabled skill pack
   rein profile pack <name>      enable everyday|ship|ops|study|studio, or none
@@ -78,8 +82,10 @@ Usage:
   rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
-  rein setup                    work style → limits → model → follow-ups → first task
+  rein setup                    work style → limits → model → follow-ups → edition → first task
   rein setup budgets            turn/iteration limits, offline; --status or --json shows effective settings
+  rein setup edition            choose Rein Agent, Rein Cloud, or Dareecho development
+  rein setup --edition cloud    complete onboarding, then install the bot app
   rein setup profile            communication preferences and optional workflows, offline
   rein setup --connection-only  provider → login/key → model → connection test
                                 saves $REIN_HOME/config.json (default ~/.rein)
@@ -231,6 +237,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 	if (flags.silent !== undefined && !["doctor", "heartbeat", "hb"].includes(_[0])) throw new Error("--silent controls compatibility flags for doctor and heartbeat.");
+	if ((_[0] === "model" || _[0] === "models") && _.length > 1) {
+		const { runModelCommand } = await import("./models/command.ts");
+		await runModelCommand(_.slice(1), flags); return;
+	}
+	if (_[0] === "os") {
+		const { runOSCommand } = await import("./os/command.ts");
+		await runOSCommand(_.slice(1), flags); return;
+	}
 	if (_[0] === "update") {
 		if (_.length !== 1 || Object.keys(flags).length) throw new Error("Usage: rein update");
 		const { runUpdate } = await import("./harness/update.ts");
@@ -279,6 +293,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	if (_[0] === "profile" || _[0] === "setup" && _[1] === "profile") {
 		const { profileCommand } = await import("./harness/onboarding.ts");
 		await profileCommand(_[0] === "profile" ? _.slice(1) : ["setup", ..._.slice(2)], flags); return;
+	}
+	if (_[0] === "setup" && _[1] === "edition") {
+		if (_.length !== 2) throw new Error("Usage: rein setup edition [--edition gateway|cloud|os --yes] | --status [--id]");
+		const { editionCommand } = await import("./harness/installation.ts");
+		await editionCommand(flags); return;
 	}
 
 	if (_[0] === "setup" && _[1] === "budgets") {
@@ -451,16 +470,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	}
 
 	if (_[0] === "setup") {
-		if (_.length !== 1) throw new Error("Usage: rein setup [profile|budgets] [--connection-only|--yes|--status]");
+		if (_.length !== 1) throw new Error("Usage: rein setup [profile|budgets|edition] [--connection-only|--yes|--status]");
+		const { parseEdition } = await import("./harness/installation.ts");
+		const edition = flags.edition === undefined ? undefined : parseEdition(flags.edition);
+		if (edition && (flags.status || flags["connection-only"])) throw new Error("Choose an edition with full onboarding or rein setup edition; connection-only and status do not install apps.");
 		const auth = stringFlag(flags, "auth");
 		if (auth !== undefined && auth !== "api-key" && auth !== "cli") throw new Error("--auth must be api-key or cli");
 		const cliProvider = stringFlag(flags, "cli-provider");
 		if (cliProvider !== undefined && cliProvider !== "codex" && cliProvider !== "copilot" && cliProvider !== "grok") throw new Error("--cli-provider must be codex, copilot, or grok");
 		const { runSetup } = await import("./harness/setup.ts");
 		const { runOnboarding } = await import("./harness/onboarding.ts");
-		const setup = flags["connection-only"] === true || flags.yes === true || flags.status === true ? runSetup : runOnboarding;
+		const setup = flags["connection-only"] === true || flags.status === true ? runSetup : runOnboarding;
 		const code = await setup({ ...discoveryFlags(flags), yes: flags.yes === true, status: flags.status === true,
-			api: common.api, maxTurns: common.maxTurns, maxIterations,
+			api: common.api, maxTurns: common.maxTurns, maxIterations, edition,
 			provider: common.providerOverride, baseUrl: common.baseUrlOverride, model: common.modelOverride,
 			sshHost: common.sshHostOverride, auth, cliProvider, deviceAuth: flags["device-auth"] !== false, noBrowser: flags["no-browser"] === true });
 		process.exitCode = code;
