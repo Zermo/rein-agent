@@ -25,8 +25,8 @@ Rein stays the commander. CyberStrike is the weapon. We do not merge the two cod
   copies exactly what you name. The engine copies, never moves or deletes; it refuses a
   target inside a source and a source inside a target.
 - Verified live on thebrain (SIP disabled) and macserver (SIP enabled), both M4 Mac minis;
-  dossiers written to `~/.rein/redteam/` on each. 45 new tests (learn + export), full suite
-  green except the pre-existing tmux environment failures on main.
+  dossiers written to `~/.rein/redteam/` on each. 40 tests across the learn and export
+  suites, full suite green except the pre-existing tmux environment failures on main.
 - Rebuild engine (`codex/rein-os`): `rein os plan` detects ChromeOS on linux hosts and
   plans a `chromeos-userland` adapter with developer-mode and backup gates; `rein os
   prepare --target chromeos --output DIR` stages a ChromeOS userland kit whose installer
