@@ -52,6 +52,10 @@ test("ChromeOS planning uses the userland adapter and gates developer mode and b
 	// The chromeos marker is host-mode only; image mode keeps the Omarchy VM path.
 	assert.equal(planReinOS(profile("linux", "x64"), { mode: "image", chromeos: true }).adapter, "omarchy-x86_64-vm-overlay");
 	assert.equal(planReinOS(profile("darwin", "arm64"), { chromeos: true }).adapter, "macos-native");
+	const unknown = planReinOS(profile("linux", "riscv64"), { chromeos: true });
+	assert.equal(unknown.status, "unsupported");
+	assert.equal(unknown.adapter, "unsupported");
+	assert.ok(!unknown.gates.some(gate => gate.id === "developer-mode"));
 });
 
 test("unknown platforms are unsupported and Linux ARM is host-only", () => {

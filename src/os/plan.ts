@@ -56,7 +56,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 			plan.gates.push({ id: "wsl2", status: "required", detail: "Confirm WSL2 and a Linux distribution, then run Rein's hardware and connection checks inside that distribution." });
 			plan.sources.push("https://learn.microsoft.com/en-us/windows/wsl/install");
 		}
-		if (chromeos && profile.os === "linux") {
+		if (chromeos && recognized && profile.os === "linux") {
 			plan.adapter = "chromeos-userland";
 			plan.facts.push("ChromeOS reports as linux to the harness. The overlay installs only into the chronos user's home; the verified (dm-verity) root and A/B partitions stay untouched.");
 			plan.facts.push("ChromeOS user data (My Files) lives under /home/chronos/user/<id>; export it with rein export before any OS-level change.");

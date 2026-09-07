@@ -218,12 +218,16 @@ async function absent(path) {
 }
 export function validateTarget(platform, osRelease) {
   if (platform !== 'linux') fail('Apply this overlay only inside ChromeOS (it reports as linux).');
-  if (!/ID=chromeos/i.test(osRelease ?? '') && !/CROS_RELEASE/i.test(osRelease ?? '')) fail('This kit targets ChromeOS. /etc/os-release must identify Chrome OS.');
+  const chromeos = String(osRelease ?? '').split(/\r?\n/).some(line => {
+    const match = /^\s*([A-Z0-9_]+)\s*=\s*["']?([^"'#\s]+)["']?\s*(?:#.*)?$/i.exec(line);
+    return match && (match[1].toUpperCase().startsWith('CROS_RELEASE') || (match[1].toUpperCase() === 'ID' && match[2].toLowerCase() === 'chromeos'));
+  });
+  if (!chromeos) fail('This kit targets ChromeOS. /etc/os-release must identify Chrome OS.');
 }
-export async function chromeosUserHome() {
-  const home = homedir();
-  if (/\/home\/chronos\/user\/\d+/.test(home)) return home;
-  fail('Run this as the ChromeOS chronos user; its home must be under /home/chronos/user/<id>.');
+export async function chromeosUserHome(home = homedir(), allowStaging = false) {
+  if (/^\/home\/chronos\/(?:user(?:\/\d+)?|u-[a-f0-9]+)$/i.test(home)) return home;
+  if (allowStaging && /\/home\/chronos\/user\/\d+$/.test(home)) return home;
+  fail('Run this as the ChromeOS chronos user; its home must be a ChromeOS path under /home/chronos.');
 }
 async function verifyPayload() {
   const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
@@ -254,7 +258,7 @@ export async function main(args) {
   if (args[0] === '--help') { console.log('Dareecho ChromeOS userland overlay. Verify checks the exported files; check validates the ChromeOS user; install creates a new user-local terminal installation. The verified root and A/B partitions are not touched.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
-  const userHome = await chromeosUserHome();
+  const userHome = await chromeosUserHome(homedir(), Boolean(process.env.REIN_OS_OSRELEASE));
   // REIN_OS_OSRELEASE exists so this kit can be tested on non-ChromeOS staging hosts.
   const osRelease = await readFile(process.env.REIN_OS_OSRELEASE || '/etc/os-release', 'utf8').catch(() => '');
   validateTarget(process.platform, osRelease);
