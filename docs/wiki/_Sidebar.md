@@ -14,5 +14,5 @@
 
 - [Server discovery](https://github.com/Zermo/rein-agent/wiki/Server-discovery)
 - [Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and-serving)
-- [Dareecho export — keep your files](https://github.com/Zermo/rein-agent/wiki/Dareecho-export)
+- [Dareecho Learn + export](https://github.com/Zermo/rein-agent/wiki/Dareecho-export)
 - [Grok and X Premium+](https://github.com/Zermo/rein-agent/wiki/Grok)

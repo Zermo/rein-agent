@@ -94,6 +94,34 @@ session, prints a resume command, and exits with code 3. See
 [task limits](https://github.com/Zermo/rein-agent/wiki/Task-limits) for exact
 settings and how long runs preserve context.
 
+## Dareecho Learn and export
+
+If you are evaluating this machine for a future Dareecho replacement, learn it
+before changing anything:
+
+```sh
+rein learn
+```
+
+Dareecho Learn is a read-only Rein pass. It records the boot chain, security
+gates, persistence surface, and probe evidence in a new dossier under
+`~/.rein/redteam/`; it does not write firmware, replace an OS, or start a
+service. For an attached iPhone or iPad, install libimobiledevice and run
+`rein learn ios`.
+
+Copy personal files to a destination you control before any replacement:
+
+```sh
+rein export presets --to /path/to/backup
+```
+
+The export path copies and never removes source files. `rein export browse`
+offers an interactive file selector when you want to choose exact paths. The
+[Dareecho export guide](https://github.com/Zermo/rein-agent/wiki/Dareecho-export)
+has the full safe sequence and ChromeOS notes. Dareecho currently provides VM
+and ChromeOS userland overlays; it does not install a bootable image or alter
+firmware.
+
 ## Connect a model
 
 Continue in the wizard. Reuse a saved connection or choose where your model

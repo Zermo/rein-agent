@@ -1,13 +1,19 @@
-# Dareecho red-team: learning the machine before we replace it
+# Dareecho Learn and red-team plan
 
-Goal: use [CyberStrike](https://github.com/CyberStrikeus/CyberStrike) as the red-team engine
-for the machine the commander runs on. The output of that pass is a machine dossier —
-firmware, boot chain, security posture, credential and persistence surface — that Dareecho's
-planner consumes to rank injection paths and earn its gates.
+**Dareecho Learn** is Rein's implemented, read-only red-team assessment pass:
+it writes a machine dossier covering the boot chain, security posture,
+credential and persistence surface, and probe evidence before a Dareecho
+replacement is considered. Rein stays the commander and keeps the assessment
+inside its existing approvals and budgets.
 
-Rein stays the commander. CyberStrike is the weapon. We do not merge the two codebases.
+[CyberStrike](https://github.com/CyberStrikeus/CyberStrike) informed the
+research and platform-playbook direction. It is not the engine bundled by this
+repository: Rein imports no CyberStrike code, invokes no CyberStrike binary, and
+ships none of its offensive or credential-harvesting tooling. Any future
+process-bound integration must remain optional, separately licensed, and
+explicitly approved.
 
-## Built so far (dev/dareecho-learn)
+## Implemented now
 
 - `rein learn [--json] [--output DIR]` — read-only pass on macOS, Windows, Linux (any arch),
   and ChromeOS (reports as linux; detected via `/etc/os-release`, where the model comes
@@ -24,21 +30,23 @@ Rein stays the commander. CyberStrike is the weapon. We do not merge the two cod
   re-homed to the chronos user directory plus the Chromium profile); `rein export <paths...> --to D`
   copies exactly what you name. The engine copies, never moves or deletes; it refuses a
   target inside a source and a source inside a target.
-- Verified live on thebrain (SIP disabled) and macserver (SIP enabled), both M4 Mac minis;
-  dossiers written to `~/.rein/redteam/` on each. 40 tests across the learn and export
-  suites, full suite green except the pre-existing tmux environment failures on main.
+- Focused learn/export/OS fixtures cover dossier creation, iOS and ChromeOS
+  detection, copy-only exports, preset selection, the interactive exporter, and
+  overlay boundaries. Run `npm test` for the current suite instead of carrying a
+  stale test count or host-specific result into public documentation.
 - Rebuild engine (`codex/rein-os`): `rein os plan` detects ChromeOS on linux hosts and
   plans a `chromeos-userland` adapter with developer-mode and backup gates; `rein os
   prepare --target chromeos --output DIR` stages a ChromeOS userland kit whose installer
   verifies the machine identifies as ChromeOS, then writes only the chronos user's
   `.local/share/rein-os` and `.local/bin/rein` — the verified (dm-verity) root and A/B
   partitions stay untouched. The Omarchy VM kit remains the default `--target omarchy`.
-- Docs: README usage block + Dareecho section, wiki page `Dareecho-export`, this plan.
+- Docs: README usage block + Dareecho section, wiki page `Dareecho-export`, the
+  field guide, branding previews, and this plan.
 - Scope note: the never-delete rule covers our work on the operator's test machines and the
   learn/export paths. Dareecho the OS replacement itself obviously removes the image it
   replaces — the installer says so, and `rein export` exists for the personal data.
-- Remaining: vendor CyberStrike skills, the `dareecho-firmware` plugin for x86 UEFI/BIOS
-  depth, and the `rein os plan --dossier` hook.
+- Remaining: a reviewed `rein os plan --dossier` handoff, hardware-specific
+  firmware validation, and any separately licensed CyberStrike integration.
 
 ## What was learned
 

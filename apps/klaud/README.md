@@ -29,6 +29,11 @@ sounds are on by default, unlock after the first interaction, and can be
 disabled in Settings. The sound choice stays on this device. The renderer
 synthesizes each tone without audio files or an added dependency.
 
+The repository's [branding preview catalogue](../../docs/branding.md#product-previews)
+links the current desktop captures beside the Dareecho rain asset and mobile UI.
+Treat those as visual references; activity, approvals, and status must remain
+driven by actual gateway state.
+
 From this directory:
 
 ```sh

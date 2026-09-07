@@ -12,6 +12,10 @@ default, unlock after the first interaction, and can be disabled in Settings.
 The preference stays on that device, and the renderer synthesizes the tones
 without audio assets or an added dependency.
 
+See the checked-in [desktop, mobile, and Dareecho product previews](branding.md#product-previews)
+before changing this visual system. The rain motif belongs in a frame or
+wallpaper and never indicates that a bot is running.
+
 Install the native Mac app from the latest published release:
 
 ```sh

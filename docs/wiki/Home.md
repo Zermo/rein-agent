@@ -13,7 +13,7 @@ Open the [retro field guide](https://zermo.github.io/rein-agent/) for copyable c
 | Set turn and iteration limits, understand context, or continue paused work | [Task limits](https://github.com/Zermo/rein-agent/wiki/Task-limits) |
 | Set up rules-only follow-ups or the optional local helper | [Background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination) |
 | Host a model locally or connect over LAN, mesh, or SSH | [Self-hosted models](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models) |
-| Learn a machine before an OS replacement, or export personal files first | [Dareecho export](https://github.com/Zermo/rein-agent/wiki/Dareecho-export) |
+| Learn a machine before an OS replacement, or export personal files first | [Dareecho Learn + export](https://github.com/Zermo/rein-agent/wiki/Dareecho-export) |
 | Use Codex, Copilot, Grok, or a cloud API key | [Cloud connections](https://github.com/Zermo/rein-agent/wiki/Cloud-connections) |
 | Publish the field guide or update this wiki | [Deploy the field guide](https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide) |
 

@@ -60,6 +60,10 @@ A named four-point scale lives in `tokens.css`. App styles use those names rathe
   unobscured working surface.
   Its rain theme shares Rein-klaud's
   palette and field-guide artwork; keep the OS name on OS-facing surfaces.
+- **Dareecho Learn** is the OS-facing assessment pass behind `rein learn`. It is
+  a dossier and evidence surface, not an activity signal or a permission to
+  replace an OS. When it receives a UI, keep the same quiet field-manual
+  hierarchy: readable gates first, evidence second, decorative rain in the frame.
 
 ## Sound
 

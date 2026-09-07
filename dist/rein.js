@@ -96,23 +96,23 @@ function sshArguments(host, baseUrl, localPort) {
 }
 async function unusedPort() {
   const server = createServer();
-  await new Promise((resolve38, reject) => {
+  await new Promise((resolve43, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve38);
+    server.listen(0, "127.0.0.1", resolve43);
   });
   const port = server.address().port;
-  await new Promise((resolve38, reject) => server.close((error) => error ? reject(error) : resolve38()));
+  await new Promise((resolve43, reject) => server.close((error) => error ? reject(error) : resolve43()));
   return port;
 }
 function portReady(port) {
-  return new Promise((resolve38) => {
+  return new Promise((resolve43) => {
     const socket = createConnection({ host: "127.0.0.1", port });
     let done = false;
     const finish = (ready) => {
       if (done) return;
       done = true;
       socket.destroy();
-      resolve38(ready);
+      resolve43(ready);
     };
     socket.once("connect", () => finish(true));
     socket.once("error", () => finish(false));
@@ -129,16 +129,16 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
   let failure;
   let closed = false;
   let stderr = "";
-  const exited = new Promise((resolve38) => {
+  const exited = new Promise((resolve43) => {
     child.once("error", (error) => {
       failure = error;
       closed = true;
-      resolve38();
+      resolve43();
     });
     child.once("close", (code) => {
       closed = true;
       failure ??= new Error(`SSH exited (${code ?? "signal"}). ${stderr.trim()}`);
-      resolve38();
+      resolve43();
     });
   });
   child.stderr?.on("data", (chunk) => {
@@ -156,7 +156,7 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
       if (failure) throw new Error(`Cannot open SSH tunnel through ${sshHost}: ${failure.message}. Check that ssh ${sshHost} works with key authentication.`);
       if (Date.now() >= deadline) throw new Error(`SSH tunnel through ${sshHost} timed out. Check the VPN and SSH connection.`);
       if (await portReady(port)) break;
-      await new Promise((resolve38) => setTimeout(resolve38, 40));
+      await new Promise((resolve43) => setTimeout(resolve43, 40));
     }
     const forwarded = new URL(baseUrl);
     forwarded.hostname = "127.0.0.1";
@@ -212,8 +212,8 @@ function prepareGrokProfile(directory2, systemDirectory = "/etc/grok") {
   for (const name of ["managed_config.toml", "requirements.toml", "sandbox.toml", "hooks", "plugins", "agents", "skills", "mcp.json", "mcp-config.json"]) {
     const path2 = join2(directory2, name);
     if (!existsSync(path2)) continue;
-    const stat3 = lstatSync(path2);
-    if (stat3.isDirectory() && !stat3.isSymbolicLink() && readdirSync(path2).length === 0) continue;
+    const stat5 = lstatSync(path2);
+    if (stat5.isDirectory() && !stat5.isSymbolicLink() && readdirSync(path2).length === 0) continue;
     throw new Error(`Rein's isolated Grok profile contains custom ${name}. Remove that customization from ${directory2} or use Grok directly.`);
   }
   const config = join2(directory2, "config.toml");
@@ -360,8 +360,8 @@ disable_api_key_auth = true
 });
 
 // src/ai/endpoints.ts
-function localHost(hostname) {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+function localHost(hostname2) {
+  const host = hostname2.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host === "::1" || host.startsWith("fc") && host.includes(":") || host.startsWith("fd") && host.includes(":")) return true;
   if (!host.includes(".") && !host.includes(":")) return true;
   if (/\.(?:localhost|local|lan|internal|netbird\.cloud|netbird\.selfhosted|ts\.net)$/.test(host)) return true;
@@ -652,7 +652,7 @@ function parseLinuxNeighbors(output) {
   }))];
 }
 function commandOutput(command, args) {
-  return new Promise((resolve38, reject) => execFile(command, args, { encoding: "utf8", timeout: 1200, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve38(stdout)));
+  return new Promise((resolve43, reject) => execFile(command, args, { encoding: "utf8", timeout: 1200, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve43(stdout)));
 }
 async function knownPeers(dependencies) {
   const platform2 = dependencies.platform ?? process.platform;
@@ -1133,9 +1133,9 @@ function parseProfileYaml(text) {
 }
 function readOptionalFile(path2) {
   try {
-    const stat3 = lstatSync2(path2);
-    if (!stat3.isFile() || stat3.isSymbolicLink()) throw new Error(`${path2} must be a regular file, not a link or directory.`);
-    if (stat3.size > MAX_FILE_BYTES) throw new Error(`${path2} is too large; keep operator files below ${MAX_FILE_BYTES / 1024} KiB.`);
+    const stat5 = lstatSync2(path2);
+    if (!stat5.isFile() || stat5.isSymbolicLink()) throw new Error(`${path2} must be a regular file, not a link or directory.`);
+    if (stat5.size > MAX_FILE_BYTES) throw new Error(`${path2} is too large; keep operator files below ${MAX_FILE_BYTES / 1024} KiB.`);
     return readFileSync3(path2, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
@@ -2484,8 +2484,8 @@ var init_event_stream = __esm({
       constructor(isComplete, extractResult) {
         this.isComplete = isComplete ?? (() => false);
         this.extractResult = extractResult ?? ((event) => event);
-        this.finalResultPromise = new Promise((resolve38) => {
-          this.resolveFinalResult = resolve38;
+        this.finalResultPromise = new Promise((resolve43) => {
+          this.resolveFinalResult = resolve43;
         });
       }
       push(event) {
@@ -2514,7 +2514,7 @@ var init_event_stream = __esm({
           if (this.queue.length > 0) yield this.queue.shift();
           else if (this.done) return;
           else {
-            const result = await new Promise((resolve38) => this.waiting.push(resolve38));
+            const result = await new Promise((resolve43) => this.waiting.push(resolve43));
             if (result.done) return;
             yield result.value;
           }
@@ -3242,7 +3242,7 @@ function streamCli(model, context, options = {}) {
   return out;
 }
 function runCliProcess(provider, args, input, cwd, env, options) {
-  return new Promise((resolve38, reject) => {
+  return new Promise((resolve43, reject) => {
     const child = spawn3(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
     let stdout = "", stderr = "", pendingLine = "", bytes = 0, error, forceKill;
     let closed = false, settled = false, exitCode = null, exitSignal = null;
@@ -3275,7 +3275,7 @@ function runCliProcess(provider, args, input, cwd, env, options) {
       options.signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (exitCode !== 0) reject(new Error(`${provider} CLI exited ${exitCode ?? exitSignal}. ${stderr.trim().slice(-2e3)} Run 'rein login ${provider}' if authentication is required.`));
-      else resolve38(stdout);
+      else resolve43(stdout);
     };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -3377,7 +3377,7 @@ async function loginCli(provider, options = {}) {
   }
   const device = options.deviceAuth !== false || provider === "grok" && options.openBrowser === false;
   const args = ["login", ...device ? [provider !== "copilot" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
-  return new Promise((resolve38) => {
+  return new Promise((resolve43) => {
     const captureDeviceLink = provider === "grok" && device;
     const child = spawn4(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory2, stdio: captureDeviceLink ? ["inherit", "pipe", "pipe"] : "inherit", shell: false });
     let loginOutput = "", openedDevicePage = false;
@@ -3421,20 +3421,20 @@ async function loginCli(provider, options = {}) {
     };
     child.on("error", (error) => {
       cleanup();
-      resolve38({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
+      resolve43({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
     });
     child.on("close", (code) => {
       cleanup();
-      if (options.signal?.aborted || timedOut) resolve38({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
-      else resolve38(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
+      if (options.signal?.aborted || timedOut) resolve43({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
+      else resolve43(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
     });
   });
 }
 async function checkCliAuth(provider, options = {}) {
   if (!(provider in CLI_PROVIDERS)) return { available: false, authenticated: false, detail: `Unknown CLI provider: ${provider}` };
   const env = cliEnvironment(provider, options.env);
-  const run4 = (args) => new Promise((resolve38) => {
-    execFile3(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve38({ ok: !error, missing: error?.code === "ENOENT" }));
+  const run4 = (args) => new Promise((resolve43) => {
+    execFile3(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve43({ ok: !error, missing: error?.code === "ENOENT" }));
   });
   const version = await run4(["--version"]);
   if (!version.ok) return { available: false, authenticated: false, detail: version.missing ? missingCli(provider) : `${provider} CLI could not be checked. Update it and try again.` };
@@ -3490,8 +3490,8 @@ function createSetupPrompt(input = process.stdin, output = process.stdout) {
     output.write(text);
     if (queue.length) return queue.shift().trim() || fallback;
     if (closed) throw eof();
-    const answer = await new Promise((resolve38, reject) => {
-      pending = { resolve: resolve38, reject };
+    const answer = await new Promise((resolve43, reject) => {
+      pending = { resolve: resolve43, reject };
     });
     return answer.trim() || fallback;
   };
@@ -4095,8 +4095,8 @@ async function safeOpen(path2, flags) {
 async function jsonFile(path2) {
   const file = await safeOpen(path2, constants4.O_RDONLY);
   try {
-    const stat3 = await file.stat();
-    if (stat3.size > MANIFEST_LIMIT) throw new Error("Model manifest exceeds its size limit.");
+    const stat5 = await file.stat();
+    if (stat5.size > MANIFEST_LIMIT) throw new Error("Model manifest exceeds its size limit.");
     return JSON.parse(await file.readFile("utf8"));
   } finally {
     await file.close();
@@ -4377,15 +4377,15 @@ async function privateParents(path2, home, create = false) {
         if (error.code !== "EEXIST") throw error;
       }
     }
-    const stat3 = await lstat2(directory2);
-    if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18 || process.getuid && stat3.uid !== process.getuid()) throw new Error("Model connection directory must be owned by the user and cannot be a symlink or writable by other users.");
+    const stat5 = await lstat2(directory2);
+    if (!stat5.isDirectory() || stat5.isSymbolicLink() || stat5.mode & 18 || process.getuid && stat5.uid !== process.getuid()) throw new Error("Model connection directory must be owned by the user and cannot be a symlink or writable by other users.");
   }
 }
 async function readKey(path2) {
   const file = await open3(path2, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0) | (constants5.O_NONBLOCK ?? 0));
   try {
-    const stat3 = await file.stat();
-    if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size !== 65 || process.platform !== "win32" && (stat3.mode & 511) !== 384 || process.getuid && stat3.uid !== process.getuid()) throw new Error("Model API key must be an owned, ordinary 0600 file.");
+    const stat5 = await file.stat();
+    if (!stat5.isFile() || stat5.nlink !== 1 || stat5.size !== 65 || process.platform !== "win32" && (stat5.mode & 511) !== 384 || process.getuid && stat5.uid !== process.getuid()) throw new Error("Model API key must be an owned, ordinary 0600 file.");
     const key = (await file.readFile("utf8")).trim();
     if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("Model API key file is invalid; it was preserved.");
     return key;
@@ -4428,8 +4428,8 @@ async function readModelConnection(id, options = {}) {
 async function ownedJson(path2) {
   const file = await open3(path2, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0) | (constants5.O_NONBLOCK ?? 0));
   try {
-    const stat3 = await file.stat();
-    if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size > 4096 || process.platform !== "win32" && (stat3.mode & 511) !== 384 || process.getuid && stat3.uid !== process.getuid()) throw new Error("Model runtime state must be an owned, ordinary 0600 file.");
+    const stat5 = await file.stat();
+    if (!stat5.isFile() || stat5.nlink !== 1 || stat5.size > 4096 || process.platform !== "win32" && (stat5.mode & 511) !== 384 || process.getuid && stat5.uid !== process.getuid()) throw new Error("Model runtime state must be an owned, ordinary 0600 file.");
     return JSON.parse(await file.readFile("utf8"));
   } finally {
     await file.close();
@@ -4804,8 +4804,8 @@ function ownedContent(path2, options) {
   let directory2 = dirname4(path2);
   for (; ; ) {
     try {
-      const stat3 = lstatSync3(directory2);
-      if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory2}`);
+      const stat5 = lstatSync3(directory2);
+      if (!stat5.isDirectory() || stat5.isSymbolicLink() || stat5.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory2}`);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -4816,17 +4816,17 @@ function ownedContent(path2, options) {
   }
   let fd;
   try {
-    const stat3 = lstatSync3(path2);
-    if (!stat3.isFile() || stat3.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
+    const stat5 = lstatSync3(path2);
+    if (!stat5.isFile() || stat5.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
     fd = openSync2(path2, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
   }
   try {
-    const stat3 = fstatSync(fd);
+    const stat5 = fstatSync(fd);
     const uid = options.uid ?? process.getuid?.();
-    if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size > 64 * 1024 || stat3.mode & 18 || uid !== void 0 && stat3.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
+    if (!stat5.isFile() || stat5.nlink !== 1 || stat5.size > 64 * 1024 || stat5.mode & 18 || uid !== void 0 && stat5.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
     const text = readFileSync4(fd, "utf8");
     const boundary = text.indexOf("\n");
     const body2 = text.slice(boundary + 1);
@@ -4846,8 +4846,8 @@ function prepareDirectory(path2, userHome) {
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
-    const stat3 = lstatSync3(current);
-    if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
+    const stat5 = lstatSync3(current);
+    if (!stat5.isDirectory() || stat5.isSymbolicLink() || stat5.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
   }
 }
 function run(options, command, timeoutMs = 15e3) {
@@ -5284,19 +5284,19 @@ async function prepareReinOS(options) {
   if (typeof pkg.version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?$/.test(pkg.version)) throw new Error("The Rein package version is invalid.");
   const payload = /* @__PURE__ */ new Map();
   for (const directory2 of ["src", "src/os", "src/os/assets", "src/os/assets/rain"]) {
-    const stat3 = await lstat3(join11(root2, directory2));
-    if (!stat3.isDirectory() || stat3.isSymbolicLink()) throw new Error("OS theme assets must be in ordinary payload directories without symlinks.");
+    const stat5 = await lstat3(join11(root2, directory2));
+    if (!stat5.isDirectory() || stat5.isSymbolicLink()) throw new Error("OS theme assets must be in ordinary payload directories without symlinks.");
   }
   for (const path2 of REQUIRED) payload.set(path2, await regularFile(join11(root2, path2)));
-  const visit = async (relative6) => {
-    const stat3 = await lstat3(join11(root2, relative6));
-    if (stat3.isSymbolicLink()) throw new Error("Symlinks are not allowed in the exported payload.");
-    if (stat3.isDirectory()) {
-      for (const name of (await readdir3(join11(root2, relative6))).sort()) {
+  const visit = async (relative7) => {
+    const stat5 = await lstat3(join11(root2, relative7));
+    if (stat5.isSymbolicLink()) throw new Error("Symlinks are not allowed in the exported payload.");
+    if (stat5.isDirectory()) {
+      for (const name of (await readdir3(join11(root2, relative7))).sort()) {
         if (name.startsWith(".") || name === "upstream" || name === "node_modules") continue;
-        await visit(`${relative6}/${name}`);
+        await visit(`${relative7}/${name}`);
       }
-    } else payload.set(relative6, await regularFile(join11(root2, relative6)));
+    } else payload.set(relative7, await regularFile(join11(root2, relative7)));
   };
   for (const name of VENDOR) {
     try {
@@ -5702,7 +5702,7 @@ async function previewRain(options = {}, io = {}) {
   }
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function" || env.TERM === "dumb") throw new Error("Rain animation needs an interactive terminal. Use rein os rain --static for pipes or reduced motion.");
   const wasRaw = input.isRaw, wasFlowing = input.readableFlowing === true;
-  await new Promise((resolve38, reject) => {
+  await new Promise((resolve43, reject) => {
     let timer, finished = false, entered = false, raw = false, frame = 0;
     const finish = (error) => {
       if (finished) return;
@@ -5728,7 +5728,7 @@ async function previewRain(options = {}, io = {}) {
       } catch (restoreError) {
         error ??= restoreError;
       }
-      error ? reject(error) : resolve38();
+      error ? reject(error) : resolve43();
     };
     const stop = () => finish();
     const fail = (error) => finish(error);
@@ -5875,7 +5875,7 @@ import { tmpdir as tmpdir2 } from "node:os";
 import { join as join12 } from "node:path";
 function runProgram(command, args, signal, timeoutMs) {
   signal.throwIfAborted();
-  return new Promise((resolve38, reject) => {
+  return new Promise((resolve43, reject) => {
     const child = spawn6(command, args, { shell: false, detached: true, stdio: "inherit" });
     let closed = false, settled = false, code = null, error;
     let escalation;
@@ -5892,7 +5892,7 @@ function runProgram(command, args, signal, timeoutMs) {
       signal.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (code !== 0) reject(new Error(`${command} exited ${code ?? "after a signal"}.`));
-      else resolve38();
+      else resolve43();
     };
     const stop = (reason2) => {
       if (error) return;
@@ -6094,11 +6094,11 @@ function sharedMemory(cwd, maxChars) {
   const path2 = join13(root2, ".pi", "notes", "MEMORY.md");
   try {
     for (const directory2 of [root2, join13(root2, ".pi"), join13(root2, ".pi", "notes")]) {
-      const stat4 = lstatSync4(directory2);
-      if (!stat4.isDirectory() || stat4.isSymbolicLink()) return void 0;
+      const stat6 = lstatSync4(directory2);
+      if (!stat6.isDirectory() || stat6.isSymbolicLink()) return void 0;
     }
-    const stat3 = lstatSync4(path2);
-    if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink > 1) return void 0;
+    const stat5 = lstatSync4(path2);
+    if (!stat5.isFile() || stat5.isSymbolicLink() || stat5.nlink > 1) return void 0;
     const text = readFileSync5(path2, "utf8").trim();
     return text ? text.slice(0, maxChars) : void 0;
   } catch {
@@ -6860,9 +6860,9 @@ function klaudShellPath(home) {
 }
 function checkPath(path2, directory2) {
   try {
-    const stat3 = lstatSync5(path2);
-    if (stat3.isSymbolicLink()) throw new Error("rein-kla\u028Ad storage must not be a symlink.");
-    if (directory2 ? !stat3.isDirectory() : !stat3.isFile()) throw new Error(`rein-kla\u028Ad storage must be an ordinary ${directory2 ? "directory" : "file"}.`);
+    const stat5 = lstatSync5(path2);
+    if (stat5.isSymbolicLink()) throw new Error("rein-kla\u028Ad storage must not be a symlink.");
+    if (directory2 ? !stat5.isDirectory() : !stat5.isFile()) throw new Error(`rein-kla\u028Ad storage must be an ordinary ${directory2 ? "directory" : "file"}.`);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -7584,7 +7584,7 @@ var init_tmux = __esm({
 import { spawn as spawn9 } from "node:child_process";
 async function runShell(command, cwd, timeout, signal) {
   if (signal?.aborted) return { stdout: "", stderr: "", code: 1, reason: "Operation aborted" };
-  return new Promise((resolve38) => {
+  return new Promise((resolve43) => {
     const child = spawn9("bash", ["-c", command], { cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, code = 1, reason2;
     let closed = false, settled = false, killTimer;
@@ -7600,7 +7600,7 @@ async function runShell(command, cwd, timeout, signal) {
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
-      resolve38({ stdout, stderr, code, reason: reason2 });
+      resolve43({ stdout, stderr, code, reason: reason2 });
     };
     const stop = (detail) => {
       if (reason2) return;
@@ -8185,7 +8185,7 @@ function browserEnvironment() {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => names.has(name))), RUST_LOG: "error", NO_COLOR: "1" };
 }
 function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
-  return new Promise((resolve38, reject) => {
+  return new Promise((resolve43, reject) => {
     const child = spawn10(executable2, args, { cwd, env: browserEnvironment(), detached: process.platform !== "win32", shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, closed = false, settled = false, exitCode = null, error;
     let escalation;
@@ -8203,7 +8203,7 @@ function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
       signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (exitCode !== 0) reject(new Error(`Obscura exited ${exitCode ?? "with a signal"}: ${cleanWebText(stderr).trim().slice(-1500) || "page navigation failed"}`));
-      else resolve38(stdout);
+      else resolve43(stdout);
     };
     const stop = (message) => {
       if (error) return;
@@ -8336,7 +8336,7 @@ var init_web = __esm({
   "src/harness/tools/web.ts"() {
     init_runtime2();
     init_extract();
-    matchesHost = (hostname, domain) => hostname === domain || hostname.endsWith(`.${domain}`);
+    matchesHost = (hostname2, domain) => hostname2 === domain || hostname2.endsWith(`.${domain}`);
     toolError = (name, error) => ({ content: `${name}: ${cleanWebText(error instanceof Error ? error.message : String(error))}`, isError: true });
     webSearchTool = {
       name: "web_search",
@@ -8641,7 +8641,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
   }
   postEvent(request5, { nodeterm_pending_id: pendingId });
   const deadline = Date.now() + wait * 1e3;
-  return new Promise((resolve38) => {
+  return new Promise((resolve43) => {
     let timer, settled = false;
     const finish = (answer, answered = false) => {
       if (settled) return;
@@ -8658,7 +8658,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
         { hook_event_name: "PostToolUse", tool_name: toolName, hookSpecificOutput: { hookEventName: "PostToolUse" } },
         { nodeterm_answered: answer }
       );
-      resolve38(answer);
+      resolve43(answer);
     };
     const abort = () => finish("deny");
     const tick = () => {
@@ -8973,9 +8973,9 @@ function safePath(root2, note, checkLeaf = true) {
   if (!rel || rel === ".." || rel.startsWith(`..${sep2}`) || isAbsolute5(rel)) throw new Error("Note path must stay inside .pi/notes.");
   for (const part of [dirname11(root2), root2, ...rel.split(sep2).slice(0, checkLeaf ? void 0 : -1).map((_, i, parts) => join24(root2, ...parts.slice(0, i + 1)))]) {
     try {
-      const stat3 = lstatSync7(part);
-      if (stat3.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
-      if (part === path2 ? !stat3.isFile() || stat3.nlink > 1 : !stat3.isDirectory()) throw new Error("Notes require regular files without hard links and ordinary directories.");
+      const stat5 = lstatSync7(part);
+      if (stat5.isSymbolicLink()) throw new Error("Symbolic links are not supported in .pi/notes.");
+      if (part === path2 ? !stat5.isFile() || stat5.nlink > 1 : !stat5.isDirectory()) throw new Error("Notes require regular files without hard links and ordinary directories.");
     } catch (err) {
       if (err.code !== "ENOENT") throw err;
     }
@@ -9040,11 +9040,11 @@ function contextTools(state, cwd) {
         } else {
           const fd = openSync4(path2, constants10.O_RDWR | constants10.O_APPEND | constants10.O_CREAT | (constants10.O_NOFOLLOW ?? 0), 384);
           try {
-            const stat3 = fstatSync2(fd);
-            if (!stat3.isFile() || stat3.nlink > 1) throw new Error("Notes require regular files without hard links.");
+            const stat5 = fstatSync2(fd);
+            if (!stat5.isFile() || stat5.nlink > 1) throw new Error("Notes require regular files without hard links.");
             const last = Buffer.alloc(1);
-            if (stat3.size) readSync(fd, last, 0, 1, stat3.size - 1);
-            writeFileSync12(fd, `${stat3.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
+            if (stat5.size) readSync(fd, last, 0, 1, stat5.size - 1);
+            writeFileSync12(fd, `${stat5.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
           } finally {
             closeSync4(fd);
           }
@@ -9338,8 +9338,8 @@ function privateDirectory() {
   return directory2;
 }
 function regularFile2(path2, lock = false) {
-  const stat3 = lstatSync8(path2);
-  if (!stat3.isFile() || stat3.isSymbolicLink() || !lock && stat3.nlink !== 1 || stat3.size > (lock ? 1024 : 4e6)) throw new Error("Autonomy state must be a bounded regular file without links.");
+  const stat5 = lstatSync8(path2);
+  if (!stat5.isFile() || stat5.isSymbolicLink() || !lock && stat5.nlink !== 1 || stat5.size > (lock ? 1024 : 4e6)) throw new Error("Autonomy state must be a bounded regular file without links.");
 }
 function readState() {
   if (existsSync10(autonomyDirectory()) && lstatSync8(autonomyDirectory()).isSymbolicLink()) throw new Error("Autonomy state directory cannot be a symbolic link.");
@@ -9436,7 +9436,7 @@ async function updateState(change) {
   let unlock;
   for (let attempt = 0; attempt < 50 && !unlock; attempt++) {
     unlock = acquireLock2("state");
-    if (!unlock) await new Promise((resolve38) => setTimeout(resolve38, 100));
+    if (!unlock) await new Promise((resolve43) => setTimeout(resolve43, 100));
   }
   if (!unlock) throw new Error("Autonomy state is busy. Try again shortly.");
   const temp = join25(autonomyDirectory(), `state-${randomUUID11()}.tmp`);
@@ -9512,26 +9512,26 @@ function inspectionTools(cwd) {
     aborted(signal);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || rootStat.dev !== originalRoot.dev || rootStat.ino !== originalRoot.ino) throw new Error("The enrolled workspace directory changed. Restart inspection before continuing.");
     let current = root2;
-    let stat3 = rootStat;
+    let stat5 = rootStat;
     for (const part of rel.split(sep4).filter(Boolean)) {
       if (privateName(part)) throw new Error("Hidden and private configuration paths are excluded from background inspection.");
       current = join26(current, part);
-      stat3 = await lstat4(current);
+      stat5 = await lstat4(current);
       aborted(signal);
-      if (stat3.isSymbolicLink() || !stat3.isDirectory() && (!stat3.isFile() || stat3.nlink !== 1)) throw new Error("Links and special files are excluded from background inspection.");
+      if (stat5.isSymbolicLink() || !stat5.isDirectory() && (!stat5.isFile() || stat5.nlink !== 1)) throw new Error("Links and special files are excluded from background inspection.");
     }
-    return { path: path2, stat: stat3 };
+    return { path: path2, stat: stat5 };
   }
   async function readOrdinary(input, maximum, signal) {
-    const { path: path2, stat: stat3 } = await scoped(input, signal);
+    const { path: path2, stat: stat5 } = await scoped(input, signal);
     aborted(signal);
-    if (!stat3.isFile() || stat3.size > maximum) throw new Error(`Read requires a regular file no larger than ${maximum} bytes.`);
+    if (!stat5.isFile() || stat5.size > maximum) throw new Error(`Read requires a regular file no larger than ${maximum} bytes.`);
     const handle = await open5(path2, constants11.O_RDONLY | (constants11.O_NOFOLLOW ?? 0) | (constants11.O_NONBLOCK ?? 0));
     try {
       aborted(signal);
       const opened = await handle.stat();
       aborted(signal);
-      if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== stat3.dev || opened.ino !== stat3.ino || opened.size > maximum) throw new Error("The inspected file changed or is not a bounded ordinary file.");
+      if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== stat5.dev || opened.ino !== stat5.ino || opened.size > maximum) throw new Error("The inspected file changed or is not a bounded ordinary file.");
       const buffer = Buffer.alloc(opened.size);
       let bytes = 0;
       while (bytes < buffer.length) {
@@ -9546,9 +9546,9 @@ function inspectionTools(cwd) {
     }
   }
   async function* entries(input, maximum, signal) {
-    const { path: path2, stat: stat3 } = await scoped(input, signal);
+    const { path: path2, stat: stat5 } = await scoped(input, signal);
     aborted(signal);
-    if (!stat3.isDirectory()) throw new Error("Inspection requires a directory.");
+    if (!stat5.isDirectory()) throw new Error("Inspection requires a directory.");
     const directory2 = await opendir(path2, { bufferSize: 32 });
     try {
       aborted(signal);
@@ -9984,7 +9984,7 @@ async function runDashboard(controller) {
   }
   const wasRaw = Boolean(input.isRaw);
   const wasPaused = input.isPaused();
-  await new Promise((resolve38, reject) => {
+  await new Promise((resolve43, reject) => {
     let state = { selected: 0, button: 0, details: false };
     let done = false;
     let busy = false;
@@ -10010,7 +10010,7 @@ async function runDashboard(controller) {
       } catch {
       }
       if (error) reject(error);
-      else resolve38();
+      else resolve43();
     };
     const draw = () => {
       if (done) return;
@@ -10164,8 +10164,8 @@ function readActivity(id) {
     throw error;
   }
   try {
-    const stat3 = fstatSync3(fd);
-    if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size > 4 * 1024 * 1024) throw new Error("Activity data is not a bounded ordinary file.");
+    const stat5 = fstatSync3(fd);
+    if (!stat5.isFile() || stat5.nlink !== 1 || stat5.size > 4 * 1024 * 1024) throw new Error("Activity data is not a bounded ordinary file.");
     const state = JSON.parse(readFileSync17(fd, "utf8"));
     if (state.id !== id || !Array.isArray(state.nodes) || state.nodes.length > 256) throw new Error("Invalid activity data.");
     return state;
@@ -10613,10 +10613,10 @@ function botHome(home) {
 }
 function checkPath2(path2, directory2) {
   try {
-    const stat3 = lstatSync10(path2);
-    if (stat3.isSymbolicLink()) throw new Error("rein-kla\u028Ad bot storage must not be a symlink.");
-    if (directory2 ? !stat3.isDirectory() : !stat3.isFile()) throw new Error(`rein-kla\u028Ad bot storage must be an ordinary ${directory2 ? "directory" : "file"}.`);
-    return stat3;
+    const stat5 = lstatSync10(path2);
+    if (stat5.isSymbolicLink()) throw new Error("rein-kla\u028Ad bot storage must not be a symlink.");
+    if (directory2 ? !stat5.isDirectory() : !stat5.isFile()) throw new Error(`rein-kla\u028Ad bot storage must be an ordinary ${directory2 ? "directory" : "file"}.`);
+    return stat5;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -10780,8 +10780,8 @@ function json(res, status2, value) {
 function checkStorage3(file) {
   for (const [path2, directory2] of [[dirname14(dirname14(file)), true], [dirname14(file), true], [file, false]]) {
     try {
-      const stat3 = lstatSync11(path2);
-      if (stat3.isSymbolicLink() || (directory2 ? !stat3.isDirectory() : !stat3.isFile())) throw new Error("rein-kla\u028Ad storage must use ordinary files and directories, never symlinks.");
+      const stat5 = lstatSync11(path2);
+      if (stat5.isSymbolicLink() || (directory2 ? !stat5.isDirectory() : !stat5.isFile())) throw new Error("rein-kla\u028Ad storage must use ordinary files and directories, never symlinks.");
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -10877,7 +10877,7 @@ function botMessages(bot, home, before) {
 }
 function body(req) {
   if (req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") return Promise.reject(new HttpError(415, "Use application/json."));
-  return new Promise((resolve38, reject) => {
+  return new Promise((resolve43, reject) => {
     let size = 0;
     const chunks = [];
     const cleanup = () => {
@@ -10904,7 +10904,7 @@ function body(req) {
       try {
         const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         if (!object(value)) invalid("Expected a JSON object.");
-        resolve38(value);
+        resolve43(value);
       } catch (error) {
         reject(error instanceof HttpError ? error : new HttpError(400, "Invalid JSON."));
       }
@@ -10938,10 +10938,10 @@ function validateFrontend(name, args) {
 }
 function abortable2(promise, signal) {
   if (signal.aborted) return Promise.reject(new Error("Run cancelled."));
-  return new Promise((resolve38, reject) => {
+  return new Promise((resolve43, reject) => {
     const abort = () => reject(new Error("Run cancelled."));
     signal.addEventListener("abort", abort, { once: true });
-    promise.then(resolve38, reject).finally(() => signal.removeEventListener("abort", abort));
+    promise.then(resolve43, reject).finally(() => signal.removeEventListener("abort", abort));
   });
 }
 async function startKlaudServe(opts = {}) {
@@ -10981,7 +10981,7 @@ async function startKlaudServe(opts = {}) {
   function waitFor(run4, id, kind, tool, args) {
     if (run4.controller.signal.aborted) return Promise.reject(new Error("Run cancelled."));
     if (run4.pending.has(id)) return Promise.reject(new Error("Duplicate pending tool call id."));
-    return new Promise((resolve38, reject) => {
+    return new Promise((resolve43, reject) => {
       const signal = run4.controller.signal;
       const cleanup = () => {
         clearTimeout(timer);
@@ -10994,7 +10994,7 @@ async function startKlaudServe(opts = {}) {
       };
       const settle = (value) => {
         cleanup();
-        resolve38(value);
+        resolve43(value);
       };
       const timer = setTimeout(() => {
         settle(kind === "approval" ? false : { content: "The renderer did not answer before the timeout.", isError: true });
@@ -11251,11 +11251,11 @@ Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, na
   });
   server.requestTimeout = 15e3;
   server.headersTimeout = 5e3;
-  await new Promise((resolve38, reject) => {
+  await new Promise((resolve43, reject) => {
     server.once("error", reject);
     server.listen(opts.port ?? 0, "127.0.0.1", () => {
       server.removeListener("error", reject);
-      resolve38();
+      resolve43();
     });
   });
   url = `http://127.0.0.1:${server.address().port}`;
@@ -11265,14 +11265,14 @@ Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, na
       privateWrite(tokenFile, token2 + "\n");
     }
   } catch (error) {
-    await new Promise((resolve38) => server.close(() => resolve38()));
+    await new Promise((resolve43) => server.close(() => resolve43()));
     throw error;
   }
   return { url, token: token2, close() {
     if (!closing) closing = (async () => {
       for (const run4 of active3.values()) run4.controller.abort();
-      await new Promise((resolve38, reject) => {
-        server.close((error) => error ? reject(error) : resolve38());
+      await new Promise((resolve43, reject) => {
+        server.close((error) => error ? reject(error) : resolve43());
         server.closeAllConnections?.();
       });
       await Promise.allSettled([...executions]);
@@ -11761,8 +11761,8 @@ function validateToken(token2) {
 function checkCredentialPath(file) {
   for (const [path2, directory2] of [[dirname15(dirname15(file)), true], [dirname15(file), true], [file, false]]) {
     try {
-      const stat3 = lstatSync12(path2);
-      if (stat3.isSymbolicLink() || (directory2 ? !stat3.isDirectory() : !stat3.isFile())) throw new Error("Mobile gateway credentials must use ordinary files and directories, never symlinks.");
+      const stat5 = lstatSync12(path2);
+      if (stat5.isSymbolicLink() || (directory2 ? !stat5.isDirectory() : !stat5.isFile())) throw new Error("Mobile gateway credentials must use ordinary files and directories, never symlinks.");
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -11778,9 +11778,9 @@ function readCredential(file) {
     throw error;
   }
   try {
-    const stat3 = fstatSync6(fd);
-    if (stat3.size > 1024) throw new Error("Mobile gateway credential file is too large.");
-    if ((stat3.mode & 63) !== 0) throw new Error("Mobile gateway credential file must not be accessible by group or other users.");
+    const stat5 = fstatSync6(fd);
+    if (stat5.size > 1024) throw new Error("Mobile gateway credential file is too large.");
+    if ((stat5.mode & 63) !== 0) throw new Error("Mobile gateway credential file must not be accessible by group or other users.");
     return readFileSync20(fd, "utf8").trim();
   } finally {
     closeSync8(fd);
@@ -12157,13 +12157,13 @@ data: ${JSON.stringify({ sequence: stored.sequence, event: stored.event })}
         json2(res, 200, accounts.cancel(loginRoute[1]));
         return;
       }
-      const relative6 = parsed.pathname.slice(API_ROOT.length) + parsed.search;
+      const relative7 = parsed.pathname.slice(API_ROOT.length) + parsed.search;
       if (req.method === "GET" && (parsed.pathname === `${API_ROOT}/state` || parsed.pathname === `${API_ROOT}/bots` || /^\/v1\/mobile\/bots\/[^/]+\/messages$/.test(parsed.pathname))) {
-        await proxy(res, "GET", relative6);
+        await proxy(res, "GET", relative7);
         return;
       }
       if (req.method === "POST" && [`${API_ROOT}/state`, `${API_ROOT}/bots`, `${API_ROOT}/prefs`].includes(parsed.pathname)) {
-        await proxy(res, "POST", relative6, await requestBody(req));
+        await proxy(res, "POST", relative7, await requestBody(req));
         return;
       }
       if (req.method === "POST" && parsed.pathname === `${API_ROOT}/runs`) {
@@ -12957,9 +12957,9 @@ function readBoundedSession(path2, allowed) {
     const before = lstatSync14(path2);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) return void 0;
     fd = openSync9(path2, constants18.O_RDONLY | (constants18.O_NOFOLLOW ?? 0));
-    const stat3 = fstatSync7(fd);
-    if (!stat3.isFile() || stat3.nlink !== 1 || stat3.ino !== before.ino || stat3.dev !== before.dev) return void 0;
-    const metadata = Buffer.alloc(Math.min(stat3.size, 8192));
+    const stat5 = fstatSync7(fd);
+    if (!stat5.isFile() || stat5.nlink !== 1 || stat5.ino !== before.ino || stat5.dev !== before.dev) return void 0;
+    const metadata = Buffer.alloc(Math.min(stat5.size, 8192));
     const metadataText = metadata.subarray(0, readSync2(fd, metadata, 0, metadata.length, 0)).toString("utf8");
     const headerLine = metadataText.split("\n").find((line) => line.trim());
     if (!headerLine || headerLine.length > 8192) return void 0;
@@ -12967,12 +12967,12 @@ function readBoundedSession(path2, allowed) {
     if (!header || header.type !== "header" || header.purpose === "autonomy") return void 0;
     const workspace = canonicalDirectory(header.cwd);
     if (!workspace || !allowed.has(workspace)) return void 0;
-    const prefix = Buffer.alloc(Math.min(stat3.size, PREFIX_BYTES));
+    const prefix = Buffer.alloc(Math.min(stat5.size, PREFIX_BYTES));
     const prefixText = prefix.subarray(0, readSync2(fd, prefix, 0, prefix.length, 0)).toString("utf8");
     const first = parsedLines(prefixText).filter((value) => value.type !== "header");
-    if (stat3.size <= PREFIX_BYTES) return { header, workspace, entries: first };
-    const tailStart = Math.max(PREFIX_BYTES, stat3.size - TAIL_BYTES);
-    const tail = Buffer.alloc(stat3.size - tailStart);
+    if (stat5.size <= PREFIX_BYTES) return { header, workspace, entries: first };
+    const tailStart = Math.max(PREFIX_BYTES, stat5.size - TAIL_BYTES);
+    const tail = Buffer.alloc(stat5.size - tailStart);
     const tailText = tail.subarray(0, readSync2(fd, tail, 0, tail.length, tailStart)).toString("utf8");
     const firstBreak = tailText.indexOf("\n");
     return { header, workspace, entries: [...first.slice(0, 40), ...parsedLines(firstBreak < 0 ? "" : tailText.slice(firstBreak + 1)).slice(-80)] };
@@ -13243,8 +13243,8 @@ function ownedContent2(path2, options) {
   let directory2 = dirname18(path2);
   for (; ; ) {
     try {
-      const stat3 = lstatSync15(directory2);
-      if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory2}`);
+      const stat5 = lstatSync15(directory2);
+      if (!stat5.isDirectory() || stat5.isSymbolicLink() || stat5.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${directory2}`);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -13255,17 +13255,17 @@ function ownedContent2(path2, options) {
   }
   let fd;
   try {
-    const stat3 = lstatSync15(path2);
-    if (!stat3.isFile() || stat3.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
+    const stat5 = lstatSync15(path2);
+    if (!stat5.isFile() || stat5.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
     fd = openSync10(path2, constants19.O_RDONLY | (constants19.O_NOFOLLOW ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
   }
   try {
-    const stat3 = fstatSync8(fd);
+    const stat5 = fstatSync8(fd);
     const uid = options.uid ?? process.getuid?.();
-    if (!stat3.isFile() || stat3.size > 64 * 1024 || stat3.mode & 18 || uid !== void 0 && stat3.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
+    if (!stat5.isFile() || stat5.size > 64 * 1024 || stat5.mode & 18 || uid !== void 0 && stat5.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
     const text = readFileSync22(fd, "utf8");
     const boundary = text.indexOf("\n");
     const body2 = text.slice(boundary + 1);
@@ -13285,8 +13285,8 @@ function prepareDirectory2(path2, userHome) {
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
-    const stat3 = lstatSync15(current);
-    if (!stat3.isDirectory() || stat3.isSymbolicLink() || stat3.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
+    const stat5 = lstatSync15(current);
+    if (!stat5.isDirectory() || stat5.isSymbolicLink() || stat5.mode & 18) throw new Error(`Service directory must be private and cannot be a symlink: ${current}`);
   }
 }
 function run3(options, command, timeoutMs = 15e3) {
@@ -13319,7 +13319,7 @@ async function waitForService(options, initial, polling = {}) {
   const deadline = Date.now() + timeout;
   let result = initial;
   while (result.installed && result.active !== true && Date.now() < deadline) {
-    await new Promise((resolve38) => setTimeout(resolve38, Math.min(interval, Math.max(0, deadline - Date.now()))));
+    await new Promise((resolve43) => setTimeout(resolve43, Math.min(interval, Math.max(0, deadline - Date.now()))));
     result = serviceStatus(options);
   }
   return result;
@@ -13450,22 +13450,22 @@ async function inspectTree(root2, signal, normalize = false) {
       if (path2 === MANIFEST) continue;
       safeName(path2);
       if (entries.length >= MAX_ENTRIES) throw new Error("Too many guardian runtime files.");
-      const stat3 = await lstat6(full);
-      if (!normalize && !stat3.isSymbolicLink() && (stat3.mode & 4095) !== (stat3.isDirectory() || stat3.mode & 73 ? 448 : 384)) throw new Error("Guardian runtime file permissions changed.");
-      if (stat3.isSymbolicLink()) {
+      const stat5 = await lstat6(full);
+      if (!normalize && !stat5.isSymbolicLink() && (stat5.mode & 4095) !== (stat5.isDirectory() || stat5.mode & 73 ? 448 : 384)) throw new Error("Guardian runtime file permissions changed.");
+      if (stat5.isSymbolicLink()) {
         const target = await readlink(full);
         if (!target || target.startsWith("/") || /[\\\x00-\x1f\x7f]/.test(target) || !inside(root2, resolve29(directory2, target)) || !inside(canonicalRoot, await realpath4(full))) throw new Error("Guardian runtime link escapes its private directory.");
         entries.push({ path: path2, kind: "link", target });
-      } else if (stat3.isDirectory()) {
+      } else if (stat5.isDirectory()) {
         entries.push({ path: path2, kind: "directory" });
         await visit(full);
-      } else if (stat3.isFile()) {
-        totalBytes += stat3.size;
+      } else if (stat5.isFile()) {
+        totalBytes += stat5.size;
         if (totalBytes > MAX_EXPANDED) throw new Error("Guardian runtime exceeds its extraction size limit.");
-        const key = `${stat3.dev}:${stat3.ino}`, inode = inodes.get(key) ?? { count: 0, links: stat3.nlink };
+        const key = `${stat5.dev}:${stat5.ino}`, inode = inodes.get(key) ?? { count: 0, links: stat5.nlink };
         inode.count++;
         inodes.set(key, inode);
-        entries.push({ path: path2, kind: "file", bytes: stat3.size, executable: !!(stat3.mode & 73) });
+        entries.push({ path: path2, kind: "file", bytes: stat5.size, executable: !!(stat5.mode & 73) });
       } else throw new Error("Guardian runtime contains a device, pipe, socket or unsupported entry.");
     }
   }
@@ -13490,8 +13490,8 @@ async function verify(root2, plan, signal) {
   try {
     const rootStat = await lstat6(root2);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("Runtime root must be an ordinary directory.");
-    const stat3 = await lstat6(join37(root2, MANIFEST));
-    if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size > 8 * 1024 ** 2 || (stat3.mode & 4095) !== 384) throw new Error("Invalid manifest file.");
+    const stat5 = await lstat6(join37(root2, MANIFEST));
+    if (!stat5.isFile() || stat5.nlink !== 1 || stat5.size > 8 * 1024 ** 2 || (stat5.mode & 4095) !== 384) throw new Error("Invalid manifest file.");
     const manifest3 = JSON.parse(await readFile5(join37(root2, MANIFEST), "utf8"));
     if (manifest3.version !== 1 || manifest3.asset !== plan.asset || manifest3.archiveSha256 !== plan.sha256 || manifest3.runtimeVersion !== plan.version) throw new Error("Unrecognized archive manifest.");
     const entries = await inspectTree(root2, signal);
@@ -13673,8 +13673,8 @@ function readGuardianConfig() {
   if (existsSync17(autonomyDirectory()) && lstatSync16(autonomyDirectory()).isSymbolicLink()) throw new Error("Guardian directory cannot be a symlink.");
   const path2 = configPath2();
   if (!existsSync17(path2)) return defaultGuardianConfig();
-  const stat3 = lstatSync16(path2);
-  if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink !== 1 || stat3.size > 4096) throw new Error("Guardian configuration must be a small private regular file.");
+  const stat5 = lstatSync16(path2);
+  if (!stat5.isFile() || stat5.isSymbolicLink() || stat5.nlink !== 1 || stat5.size > 4096) throw new Error("Guardian configuration must be a small private regular file.");
   return validated(JSON.parse(readFileSync23(path2, "utf8")));
 }
 function configureGuardian(options) {
@@ -13754,10 +13754,10 @@ function stopOwnedRuntimeAt(baseUrl) {
 }
 async function guardianPortAvailable(baseUrl) {
   const url = new URL(guardianBaseUrl(baseUrl));
-  return new Promise((resolve38) => {
+  return new Promise((resolve43) => {
     const server = createServer5();
-    server.once("error", () => resolve38(false));
-    server.listen({ host: url.hostname.replace(/^\[|\]$/g, ""), port: Number(url.port || 80), exclusive: true }, () => server.close(() => resolve38(true)));
+    server.once("error", () => resolve43(false));
+    server.listen({ host: url.hostname.replace(/^\[|\]$/g, ""), port: Number(url.port || 80), exclusive: true }, () => server.close(() => resolve43(true)));
   });
 }
 async function guardianStatus(options = {}, deps = {}) {
@@ -13850,7 +13850,7 @@ async function findRuntime(profile) {
 }
 async function runGuardianInstallCommand(command, args, opts) {
   opts.signal?.throwIfAborted();
-  return new Promise((resolve38, reject) => {
+  return new Promise((resolve43, reject) => {
     const child = spawn14(command, args, { shell: false, detached: process.platform !== "win32", stdio: "inherit", env: opts.env });
     let settled = false, closed = false, code = null, error, escalation;
     const kill = (signal) => {
@@ -13867,7 +13867,7 @@ async function runGuardianInstallCommand(command, args, opts) {
       opts.signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (code !== 0) reject(new Error(`Guardian installation command exited ${code}; rules-only mode remains available.`));
-      else resolve38();
+      else resolve43();
     };
     const stop = (reason2) => {
       if (error) return;
@@ -13907,8 +13907,8 @@ function stopGuardianRuntime() {
 function runtimeRecord() {
   const path2 = join38(autonomyDirectory(), "guardian-runtime.json");
   if (lstatSync16(autonomyDirectory()).isSymbolicLink()) throw new Error("Invalid guardian runtime directory.");
-  const stat3 = lstatSync16(path2);
-  if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink !== 1 || stat3.size > 4096) throw new Error("Invalid guardian runtime record.");
+  const stat5 = lstatSync16(path2);
+  if (!stat5.isFile() || stat5.isSymbolicLink() || stat5.nlink !== 1 || stat5.size > 4096) throw new Error("Invalid guardian runtime record.");
   const record3 = JSON.parse(readFileSync23(path2, "utf8"));
   if (record3?.version !== 1 || record3.kind !== "rein-headless-guardian" || typeof record3.executable !== "string" || !isAbsolute9(record3.executable) || /[\x00-\x1f\x7f]/.test(record3.executable)) throw new Error("Invalid guardian runtime record.");
   return { ...record3, baseUrl: guardianBaseUrl(record3.baseUrl) };
@@ -13922,8 +13922,8 @@ async function startOwnedRuntime(executable2, signal, baseUrl = readGuardianConf
   if (!isAbsolute9(executable2) || /[\x00-\x1f\x7f]/.test(executable2)) throw new Error("Ollama executable must be an absolute local path.");
   const path2 = join38(privateDirectory(), "guardian-runtime.json");
   if (existsSync17(path2)) {
-    const stat3 = lstatSync16(path2);
-    if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink !== 1 || stat3.size > 4096) throw new Error("Guardian runtime record must be a small private file.");
+    const stat5 = lstatSync16(path2);
+    if (!stat5.isFile() || stat5.isSymbolicLink() || stat5.nlink !== 1 || stat5.size > 4096) throw new Error("Guardian runtime record must be a small private file.");
   }
   const temporary = `${path2}.${randomUUID19()}.tmp`;
   try {
@@ -14015,7 +14015,7 @@ async function installGuardianModel(options = {}, deps = {}) {
         status2 = await guardianStatus({ probe: true, signal: options.signal, baseUrl: config.baseUrl }, deps);
         if (status2.runtimeAvailable) break;
         optsCheck(options);
-        if (attempt < 7) await new Promise((resolve38) => setTimeout(resolve38, 250));
+        if (attempt < 7) await new Promise((resolve43) => setTimeout(resolve43, 250));
       }
       if (!status2.runtimeAvailable) return { installed: false, detail: "The dedicated guardian service started but its runtime API is not ready. Rules-only coordination remains ready; no other server was used.", plan };
     }
@@ -14065,7 +14065,7 @@ var init_guardian = __esm({
     GUARDIAN_LIMITS = { contextTokens: 2048, outputTokens: 192, timeoutMs: 2e4, keepAliveSeconds: 30, maxCandidates: 3, maxInputChars: 4200 };
     defaultGuardianConfig = () => ({ version: 1, mode: "rules", baseUrl: "http://127.0.0.1:11435", model: GUARDIAN_MODEL.tag });
     configPath2 = () => join38(autonomyDirectory(), "guardian.json");
-    localGuardianRequest = (baseUrl, path2, opts = {}) => new Promise((resolve38, reject) => {
+    localGuardianRequest = (baseUrl, path2, opts = {}) => new Promise((resolve43, reject) => {
       const origin = guardianBaseUrl(baseUrl);
       if (!["/api/tags", "/api/show", "/api/chat", "/api/pull", "/api/version"].includes(path2)) return reject(new Error("Unsupported guardian API operation."));
       if (opts.signal?.aborted) return reject(new Error("Guardian request cancelled."));
@@ -14076,7 +14076,7 @@ var init_guardian = __esm({
         settled = true;
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abort);
-        error ? reject(error) : resolve38(value);
+        error ? reject(error) : resolve43(value);
       };
       const req = request4(new URL(path2, origin), {
         method: opts.method ?? "GET",
@@ -14374,11 +14374,11 @@ async function runDaemon(signal) {
         const due = state.proposals.find((p) => p.status === "enabled" && p.nextRun !== void 0 && p.nextRun <= Date.now());
         await runCycle(due ? "routine" : "scan", due?.id, { signal: controller.signal });
       }
-      if (!controller.signal.aborted) await new Promise((resolve38) => {
+      if (!controller.signal.aborted) await new Promise((resolve43) => {
         const done = () => {
           clearTimeout(timer);
           controller.signal.removeEventListener("abort", done);
-          resolve38();
+          resolve43();
         };
         const timer = setTimeout(done, 15e3);
         controller.signal.addEventListener("abort", done, { once: true });
@@ -15303,13 +15303,13 @@ async function startCanvas(id) {
   });
   server.requestTimeout = 5e3;
   server.headersTimeout = 5e3;
-  await new Promise((resolve38, reject) => {
+  await new Promise((resolve43, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve38);
+    server.listen(0, "127.0.0.1", resolve43);
   });
   origin = `http://127.0.0.1:${server.address().port}`;
-  return { url: `${origin}/#${token2}`, close: () => new Promise((resolve38, reject) => {
-    server.close((error) => error ? reject(error) : resolve38());
+  return { url: `${origin}/#${token2}`, close: () => new Promise((resolve43, reject) => {
+    server.close((error) => error ? reject(error) : resolve43());
     server.closeAllConnections();
   }) };
 }
@@ -15451,17 +15451,17 @@ async function readExport(folder) {
     const counts = emptyCounts();
     let repeatState = initialDoomLoopState, turns = 0;
     try {
-      const stat3 = await handle.stat();
-      totalBytes += stat3.size;
-      if (!stat3.isFile() || stat3.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
-      const bytes = Buffer.alloc(stat3.size + 1);
+      const stat5 = await handle.stat();
+      totalBytes += stat5.size;
+      if (!stat5.isFile() || stat5.size > 32 * 1024 * 1024 || totalBytes > 256 * 1024 * 1024) throw new DebugInputError("Export exceeds the analysis size limit (32 MB per file, 256 MB total).");
+      const bytes = Buffer.alloc(stat5.size + 1);
       let read2 = 0;
       while (read2 < bytes.length) {
         const chunk = await handle.read(bytes, read2, bytes.length - read2, read2);
         if (!chunk.bytesRead) break;
         read2 += chunk.bytesRead;
       }
-      if (read2 > stat3.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
+      if (read2 > stat5.size) throw new DebugInputError("A session changed during analysis. Use a stable export and try again.");
       for (const line of bytes.subarray(0, read2).toString("utf8").split("\n")) {
         if (!line.trim()) continue;
         if (Buffer.byteLength(line) > 8 * 1024 * 1024) {
@@ -15575,6 +15575,879 @@ var init_debug = __esm({
   }
 });
 
+// src/learn/profile.ts
+import { execFile as execFile12 } from "node:child_process";
+import * as os3 from "node:os";
+import { readFile as readFile6 } from "node:fs/promises";
+import { promisify as promisify10 } from "node:util";
+async function defaultRun(command, args) {
+  try {
+    const { stdout, stderr } = await execFileP2(command, args, { timeout: 15e3, maxBuffer: 64 * 1024 });
+    return { ok: true, exitCode: 0, stdout: trim(stdout), stderr: trim(stderr) };
+  } catch (err) {
+    const e = err;
+    return { ok: false, exitCode: typeof e.code === "number" ? e.code : 1, stdout: trim(String(e.stdout ?? "")), stderr: trim(String(e.stderr ?? e.message ?? "")) };
+  }
+}
+async function defaultRead(path2) {
+  try {
+    return trim(await readFile6(path2, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+async function learnMachine(deps = {}) {
+  const platform2 = deps.platform ?? process.platform;
+  const run4 = deps.run ?? defaultRun, read2 = deps.read ?? defaultRead;
+  const now = deps.now ?? (() => /* @__PURE__ */ new Date());
+  const name = (deps.hostname ?? osHostname)();
+  const osId = platform2 === "darwin" ? "macos" : platform2 === "win32" ? "windows" : platform2 === "linux" ? "linux" : `unknown-${platform2}`;
+  const probes = [];
+  const notes = [];
+  const record3 = (id, command, result) => {
+    const detail = result.ok ? firstLine(result.stdout) || "ok" : firstLine(result.stderr) || `exit ${result.exitCode}`;
+    probes.push({ id, command, ok: result.ok, detail });
+    if (!result.ok) notes.push(`probe ${id} unavailable: ${detail}`);
+    return result;
+  };
+  const machine = {
+    os: osId,
+    release: "",
+    arch: process.arch,
+    hostname: name,
+    model: "unknown",
+    cpu: "unknown"
+  };
+  const gates = [];
+  const bootChain = [];
+  const out = async (id, command, args) => record3(id, [command, ...args].join(" "), await run4(command, args));
+  if (platform2 === "darwin") {
+    const [sw, hw, kernel, sip, spctl, fde, bless, nvram, bootvar, vmm] = await Promise.all([
+      out("sw_vers", "sw_vers", []),
+      out("hw", "sysctl", ["-n", "hw.model", "hw.memsize", "hw.ncpu"]),
+      out("kernel", "sysctl", ["-n", "kern.osrelease"]),
+      out("sip", "csrutil", ["status"]),
+      out("gatekeeper", "spctl", ["--status"]),
+      out("filevault", "fdesetup", ["status"]),
+      out("boot-entry", "bless", ["--info"]),
+      out("nvram", "nvram", ["-p"]),
+      out("boot-var", "nvram", ["boot"]),
+      out("vmm", "sysctl", ["-n", "kern.hv_vmm_present"])
+    ]);
+    const versionLine = (sw.stdout.split("\n").find((l) => l.includes("ProductVersion")) ?? "").split("	").pop()?.trim();
+    machine.release = versionLine ?? firstLine(sw.stdout) ?? "unknown";
+    const hwLines = hw.stdout.split("\n").map((line) => line.trim());
+    machine.model = hwLines[0] || "unknown";
+    machine.ramBytes = Number.parseInt(hwLines[1] ?? "", 10) || void 0;
+    machine.cpu = `${hwLines[2] ?? "?"} cores, Apple Silicon`;
+    machine.kernel = firstLine(kernel.stdout);
+    machine.virtualized = vmm.stdout.trim() === "1" ? "vm" : "physical";
+    const bootEntryOk = bless.ok || bootvar.ok;
+    const sipOn = /enabled/i.test(sip.stdout);
+    const gatekeeperOn = /enabled/i.test(spctl.stdout);
+    const filevaultOn = /On/i.test(fde.stdout);
+    bootChain.push(
+      { stage: "bootrom", trust: "immutable", notes: "Apple per-board ROM; not updatable through the OS." },
+      { stage: "firmware", trust: "apple-signed", evidence: nvram.ok ? "nvram" : void 0, notes: "Apple firmware; updates arrive through softwareupdate." },
+      { stage: "secure-boot", trust: sipOn ? "SIP enabled" : "SIP disabled", evidence: "csrutil", notes: `Gatekeeper ${gatekeeperOn ? "on" : "off"}, FileVault ${filevaultOn ? "on" : "off"}.` },
+      { stage: "boot-entry", trust: "bless/nvram", evidence: bless.ok ? "bless" : bootvar.ok ? "nvram boot" : void 0, notes: bootEntryOk ? "Active boot entry recorded." : "Active boot entry not read." },
+      { stage: "kernel", trust: "amfi-signed", evidence: "sysctl", notes: machine.kernel ?? "release unknown." }
+    );
+    gates.push(
+      { id: "secure-boot", status: sip.ok ? "verified" : "required", detail: `SIP ${sipOn ? "enabled" : "disabled"}; ${sip.ok ? "state read" : "csrutil unavailable"}.` },
+      { id: "boot-entry", status: bootEntryOk ? "verified" : "required", detail: bootEntryOk ? "Active boot entry readable; injection path C is testable." : "bless and nvram boot both unavailable; boot entry state unknown." }
+    );
+  } else if (platform2 === "linux") {
+    const osrelText = await read2("/etc/os-release");
+    probes.push({ id: "os-release", command: "/etc/os-release", ok: osrelText !== void 0, detail: osrelText ? firstLine(osrelText) : "missing" });
+    const chromeos = /ID=chromeos/i.test(osrelText ?? "") || /CROS_RELEASE/i.test(osrelText ?? "");
+    if (chromeos) {
+      const [uname, meminfo, dmi, dts, chrome, crosh, arc, verity, ab, efi, virt] = await Promise.all([
+        out("uname", "uname", ["-sr"]),
+        (async () => {
+          const text = await read2("/proc/meminfo");
+          probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
+          return text;
+        })(),
+        (async () => {
+          const text = await read2("/sys/class/dmi/id/product_name");
+          probes.push({ id: "dmi", command: "/sys/class/dmi/id", ok: text !== void 0, detail: text ? text.trim() : "not present" });
+          return text;
+        })(),
+        (async () => {
+          const text = await read2("/proc/device-tree/model");
+          probes.push({ id: "dtb-model", command: "/proc/device-tree/model", ok: text !== void 0, detail: text ? text.trim() : "not present" });
+          return text;
+        })(),
+        out("chrome", "ls", ["/opt/google/chrome"]),
+        out("crosh", "ls", ["/usr/bin/crosh"]),
+        out("arc", "arc", ["--version"]),
+        out("verity", "ls", ["/sys/block"]),
+        out("ab-labels", "ls", ["/dev/disk/by-label"]),
+        (async () => {
+          const text = await read2("/sys/firmware/efi/fw_platform_size");
+          probes.push({ id: "efi", command: "/sys/firmware/efi", ok: text !== void 0, detail: text ? "UEFI (CoreBoot build)" : "not present" });
+          return text;
+        })(),
+        out("virt", "systemd-detect-virt", [])
+      ]);
+      machine.os = "chromeos";
+      machine.release = /CROS_RELEASE=([^\s]+)/i.exec(osrelText ?? "")?.[1] ?? firstLine(osrelText) ?? "chromeos";
+      machine.model = (dmi ?? dts ?? "").trim() || "unknown";
+      const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
+      machine.ramBytes = mem ? Number(mem) * 1024 : void 0;
+      machine.kernel = uname.stdout.trim().split(" ").slice(-1)[0] ?? void 0;
+      machine.virtualized = virt.ok && virt.stdout.trim() && virt.stdout.trim() !== "none" ? virt.stdout.trim() : "physical";
+      const isUefi = efi !== void 0;
+      const verityOn = /dm-\d+/.test(verity.stdout);
+      const abOk = /ROOT-[AB]/.test(ab.stdout);
+      bootChain.push(
+        { stage: "bootrom", trust: "immutable", notes: "Per-board ROM; not updatable through the OS." },
+        { stage: "firmware", trust: isUefi ? "CoreBoot/UEFI" : "coreboot", evidence: isUefi ? "/sys/firmware/efi" : "chromeos-firmware", notes: "ChromeOS firmware; updates arrive through the OS." },
+        { stage: "verified-boot", trust: verity.ok ? verityOn ? "dm-verity on" : "not seen" : "not read", evidence: verity.ok ? "/sys/block" : void 0, notes: verityOn ? "Verified root filesystems are present." : "dm-verity devices not listed; state unknown." },
+        { stage: "boot-ab", trust: abOk ? "A/B partitions" : "not read", evidence: ab.ok ? "/dev/disk/by-label" : void 0, notes: "ChromeOS boots ROOT-A or ROOT-B; the other stays as the fallback." },
+        { stage: "kernel", trust: "signed", evidence: "uname", notes: machine.kernel ?? "release unknown." },
+        { stage: "userland", trust: "chromium", evidence: chrome.ok ? "/opt/google/chrome" : void 0, notes: `crosh ${crosh.ok ? "present" : "not read"}, arc ${arc.ok ? "present" : "not read"}.` }
+      );
+      gates.push(
+        { id: "chromeos-tooling", status: crosh.ok || arc.ok ? "verified" : "required", detail: crosh.ok || arc.ok ? "crosh or arc present; shell and remote injection are reachable." : "Neither crosh nor arc read; shell access path unknown." },
+        { id: "verified-boot", status: verity.ok ? "verified" : "required", detail: verity.ok ? verityOn ? "dm-verity devices listed." : "dm-verity state not read." : "dm-verity state unknown." },
+        { id: "ab-partitions", status: ab.ok && abOk ? "verified" : "required", detail: abOk ? "ROOT-A/ROOT-B labels visible; the A/B rollback path is confirmed." : "A/B labels not read." },
+        { id: "backup", status: "required", detail: "Run rein export presets (or rein export browse) first; ChromeOS user data lives under /home/chronos/user." }
+      );
+    } else {
+      const [osrel, uname, meminfo, cpuinfo, efi, efibootmgr, mokutil, bootdir, virt] = await Promise.all([
+        (async () => {
+          return osrelText;
+        })(),
+        out("uname", "uname", ["-sr"]),
+        (async () => {
+          const text = await read2("/proc/meminfo");
+          probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
+          return text;
+        })(),
+        (async () => {
+          const text = await read2("/proc/cpuinfo");
+          probes.push({ id: "cpuinfo", command: "/proc/cpuinfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
+          return text;
+        })(),
+        (async () => {
+          const text = await read2("/sys/firmware/efi/fw_platform_size");
+          probes.push({ id: "efi", command: "/sys/firmware/efi", ok: text !== void 0, detail: text ? "UEFI" : "not present" });
+          return text;
+        })(),
+        out("efibootmgr", "efibootmgr", ["-v"]),
+        out("mokutil", "mokutil", ["--sb-state"]),
+        out("boot-dir", "ls", ["/boot"]),
+        out("virt", "systemd-detect-virt", [])
+      ]);
+      machine.release = firstLine(osrel) ?? "linux";
+      machine.model = (cpuinfo ?? "").split("\n").map((l) => l.trim()).find((l) => l.startsWith("model name"))?.split(":").slice(1).join(" ").trim() ?? "unknown";
+      const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
+      machine.ramBytes = mem ? Number(mem) * 1024 : void 0;
+      machine.kernel = uname.stdout.trim().split(" ").slice(-1)[0] ?? void 0;
+      machine.virtualized = virt.ok && virt.stdout.trim() && virt.stdout.trim() !== "none" ? virt.stdout.trim() : "physical";
+      const isUefi = efi !== void 0;
+      const sb = /enabled/i.test(mokutil.stdout) ? "enabled" : /disabled/i.test(mokutil.stdout) ? "disabled" : "unknown";
+      bootChain.push(
+        { stage: "firmware", trust: isUefi ? "UEFI" : "legacy BIOS", evidence: isUefi ? "/sys/firmware/efi" : "absence", notes: isUefi ? "UEFI platform." : "No EFI runtime visible; treat as legacy BIOS." },
+        { stage: "secure-boot", trust: sb, evidence: mokutil.ok ? "mokutil" : void 0, notes: sb === "unknown" ? "Secure Boot state not read." : "State read." },
+        { stage: "boot-manager", trust: "efibootmgr", evidence: efibootmgr.ok ? "efibootmgr" : void 0, notes: efibootmgr.ok ? "Boot entries recorded." : "Boot entries not read." },
+        { stage: "bootloader", trust: "distro", evidence: bootdir.ok ? "ls /boot" : void 0, notes: bootdir.ok ? "/boot contents recorded." : "/boot not listed." },
+        { stage: "kernel", trust: "signed-by-distro", evidence: "uname", notes: machine.kernel ?? "release unknown." }
+      );
+      gates.push(
+        { id: "secure-boot", status: mokutil.ok && sb !== "unknown" ? "verified" : "required", detail: `Secure Boot ${sb}.` },
+        { id: "boot-manager", status: efibootmgr.ok ? "verified" : "required", detail: efibootmgr.ok ? "Boot entries readable." : "efibootmgr unavailable." }
+      );
+    }
+  } else if (platform2 === "win32") {
+    const [ver, systeminfo, bios, secureboot, legacy, cpu, ram, hypervisor, tpm] = await Promise.all([
+      out("ver", "ver", []),
+      out("systeminfo", "systeminfo", []),
+      out("bios", "powershell", ["-NoProfile", "-Command", "(Get-CimInstance Win32_BIOS).SMBIOSBIOSVersion"]),
+      out("secure-boot", "powershell", ["-NoProfile", "-Command", "Confirm-SecureBootUEFI"]),
+      out("legacy-boot", "powershell", ["-NoProfile", "-Command", "Test-Path $env:SystemRoot\\System32"]),
+      out("cpu", "powershell", ["-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"]),
+      out("ram", "powershell", ["-NoProfile", "-Command", "[int64](Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"]),
+      out("hypervisor", "powershell", ["-NoProfile", "-Command", "[bool](Get-CimInstance Win32_ComputerSystem).HypervisorPresent"]),
+      out("tpm", "powershell", ["-NoProfile", "-Command", "(Get-Tpm).TpmStatus"])
+    ]);
+    machine.release = firstLine(ver.stdout) ?? firstLine(systeminfo.stdout) ?? "unknown";
+    machine.cpu = firstLine(cpu.stdout) ?? "unknown";
+    machine.ramBytes = Number.parseInt(firstLine(ram.stdout) ?? "", 10) || void 0;
+    machine.kernel = firstLine(systeminfo.stdout) ?? void 0;
+    const isLegacy = legacy.stdout.trim() === "True";
+    const sbOn = secureboot.stdout.trim() === "True";
+    machine.virtualized = hypervisor.stdout.trim() === "True" ? "vm" : "physical";
+    bootChain.push(
+      { stage: "firmware", trust: isLegacy ? "legacy BIOS" : "UEFI", evidence: "Win32_BIOS", notes: `BIOS ${firstLine(bios.stdout) ?? "version unknown"}.` },
+      { stage: "secure-boot", trust: secureboot.ok ? sbOn ? "enabled" : "disabled" : "unknown", evidence: secureboot.ok ? "Confirm-SecureBootUEFI" : void 0, notes: secureboot.ok ? "State read." : "Secure Boot state not read." },
+      { stage: "boot-manager", trust: "bcd", notes: "bcdedit entries need elevation; not read in this pass." },
+      { stage: "kernel", trust: "windows-loader", evidence: "ver", notes: machine.release || "release unknown." }
+    );
+    gates.push(
+      { id: "secure-boot", status: secureboot.ok ? "verified" : "required", detail: `Secure Boot ${secureboot.ok ? sbOn ? "enabled" : "disabled" : "unknown"}.` },
+      { id: "tpm", status: tpm.ok ? "verified" : "required", detail: `TPM ${tpm.ok ? firstLine(tpm.stdout) : "state unknown"}.` }
+    );
+  } else {
+    notes.push(`No learn pass is defined for platform "${platform2}"; structure only.`);
+    gates.push({ id: "platform", status: "blocked", detail: `No Dareecho learn adapter for "${platform2}".` });
+  }
+  const okCount = probes.filter((p) => p.ok).length;
+  gates.unshift({
+    id: "evidence-core",
+    status: probes.length >= 3 && okCount / probes.length >= 0.5 ? "verified" : "required",
+    detail: `${okCount}/${probes.length} probes succeeded on ${machine.os}/${machine.arch}.`
+  });
+  notes.push("Probes are read-only. This pass changed nothing on the machine.");
+  const learn = { schemaVersion: 1, learnedAt: now().toISOString(), kind: "host", machine, bootChain, probes, gates, notes };
+  return { learn };
+}
+function firstLine(text) {
+  const line = text.split("\n").map((s) => s.trim()).find(Boolean);
+  return line;
+}
+function osHostname() {
+  try {
+    return os3.hostname();
+  } catch {
+    return "unknown";
+  }
+}
+var execFileP2, LIMIT, trim;
+var init_profile2 = __esm({
+  "src/learn/profile.ts"() {
+    execFileP2 = promisify10(execFile12);
+    LIMIT = 4e3;
+    trim = (text) => text.length > LIMIT ? text.slice(0, LIMIT) + "\u2026[trimmed]" : text;
+  }
+});
+
+// src/learn/ios.ts
+async function learnIos(deps = {}) {
+  const run4 = deps.run ?? defaultRun;
+  const now = deps.now ?? (() => /* @__PURE__ */ new Date());
+  const probes = [];
+  const notes = [];
+  const record3 = (id, command, result) => {
+    const detail = result.ok ? firstLine2(result.stdout) || "ok" : firstLine2(result.stderr) || `exit ${result.exitCode}`;
+    probes.push({ id, command, ok: result.ok, detail });
+    if (!result.ok) notes.push(`probe ${id} unavailable: ${detail}`);
+    return result;
+  };
+  const list = record3("device-list", "idevice_id -l", await run4("idevice_id", ["-l"]));
+  if (!list.ok || !list.stdout.trim()) {
+    return { learn: frame({
+      notes: [...notes, "No iOS device attached (or libimobiledevice missing). On macOS: brew install libimobiledevice, then unlock the device and trust this computer."],
+      gates: [{ id: "ios-tooling", status: "blocked", detail: list.ok ? "No device listed by idevice_id." : "idevice_id not on PATH; install libimobiledevice." }]
+    }) };
+  }
+  const udids = list.stdout.trim().split("\n").map((u) => u.trim()).filter(Boolean);
+  const udid = deps.udid ? udids.find((u) => u === deps.udid) ?? udids[0] : udids[0];
+  const info = record3(`ideviceinfo:${udid}`, `ideviceinfo -u ${udid}`, await run4("ideviceinfo", ["-u", udid]));
+  const kv = parseInfo(info.stdout);
+  const machine = {
+    os: "ios",
+    release: kv["ProductVersion"] ?? kv["ProductType"] ?? "unknown",
+    arch: kv["HardwarePlatform"] ?? kv["CPUArchitecture"] ?? (kv["HardwareModel"] ? guessArch(kv["HardwareModel"]) : "unknown"),
+    hostname: kv["DeviceName"] ?? udid,
+    model: kv["HardwareModel"] ?? kv["ProductType"] ?? "unknown",
+    cpu: kv["DeviceClass"] ?? "iOS device",
+    virtualized: "physical"
+  };
+  const jailbroken = kv["Jailbreak"] === "yes" || kv["JailbreakStatus"] === "jailed";
+  const bootChain = [
+    { stage: "bootrom", trust: "immutable", notes: "Apple per-board ROM; the root of the iOS trust chain." },
+    { stage: "recovery", trust: "iBSS/iBEC", notes: "Recovery/DFU payload path; requires Apple host trust." },
+    { stage: "low-level-bootloader", trust: "apple-signed", notes: "AppleLL/LLB; validated against the secure boot chain." },
+    { stage: "kernel", trust: "apple-signed", evidence: "ideviceinfo", notes: `KernelCache for ${kv["ProductVersion"] ?? "unknown"} (${kv["BuildVersion"] ?? "build unknown"}).` },
+    { stage: "userland", trust: "launchd", evidence: "ideviceinfo", notes: jailbroken ? "Jailbreak indicators present." : "Jailbreak state not confirmed from the host; on-device probe needed." }
+  ];
+  const gates = [
+    { id: "ios-tooling", status: "verified", detail: `libimobiledevice enumerated ${udids.length} device(s).` },
+    { id: "jailbreak-state", status: jailbroken ? "verified" : "required", detail: jailbroken ? "Jailbreak indicators present." : "Unknown from the host; use an on-device pass (Frida/Objection or the CyberStrike mobile agent)." },
+    { id: "backup", status: "required", detail: "Take a backup and prepare recovery media before any injection or restore." }
+  ];
+  notes.push("Probes are read-only. This pass changed nothing on the device.");
+  const learn = frame({ machine, bootChain, probes, gates, notes });
+  return { learn };
+  function frame(extra) {
+    return {
+      schemaVersion: 1,
+      learnedAt: now().toISOString(),
+      kind: "ios",
+      machine: extra.machine ?? { os: "ios", release: "unknown", arch: "unknown", hostname: "ios-device", model: "unknown", cpu: "unknown", virtualized: "physical" },
+      bootChain: extra.bootChain ?? [],
+      probes: extra.probes ?? [],
+      gates: extra.gates,
+      notes: extra.notes
+    };
+  }
+}
+function parseInfo(text) {
+  const out = {};
+  for (const line of text.split("\n")) {
+    const idx = line.indexOf("	");
+    if (idx < 0) continue;
+    const key = line.slice(0, idx).trim(), value = line.slice(idx + 1).trim();
+    if (key && value) out[key] = value;
+  }
+  return out;
+}
+function guessArch(model) {
+  return model.startsWith("iPhone") || model.startsWith("iPad") || model.startsWith("iPod") ? "arm64" : "unknown";
+}
+function firstLine2(text) {
+  return text.split("\n").map((s) => s.trim()).find(Boolean);
+}
+var init_ios = __esm({
+  "src/learn/ios.ts"() {
+    init_profile2();
+  }
+});
+
+// src/learn/dossier.ts
+import { mkdir as mkdir7, writeFile as writeFile5, stat as stat3 } from "node:fs/promises";
+import { join as join40, resolve as resolve35 } from "node:path";
+async function dirExists(dir) {
+  try {
+    await stat3(dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function freshDossierDir(base, host, now = /* @__PURE__ */ new Date()) {
+  const stamp = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const safe = host.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  for (let i = 0; i < 60; i++) {
+    const dir = join40(resolve35(base), `${safe}-${stamp}${i === 0 ? "" : `-${i}`}`);
+    if (!await dirExists(dir)) return dir;
+  }
+  throw new Error(`Could not find a free directory under ${base}.`);
+}
+function renderDossierMarkdown(learn) {
+  const m = learn.machine;
+  const lines = [
+    `# Machine dossier \u2014 ${m.hostname}`,
+    "",
+    `Learned ${learn.learnedAt} \xB7 ${m.os}/${m.arch} \xB7 ${m.release} \xB7 ${m.model}`,
+    m.ramBytes ? `RAM: ${(m.ramBytes / 2 ** 30).toFixed(1)} GiB \xB7 ${m.cpu}` : `CPU: ${m.cpu}`,
+    m.virtualized ? `Virtualization: ${m.virtualized}` : "",
+    "",
+    "## Boot chain (the Colonel structure)",
+    ""
+  ];
+  for (const [i, stage] of learn.bootChain.entries()) {
+    lines.push(`${i + 1}. **${stage.stage}** \u2014 ${stage.trust}${stage.evidence ? ` _(evidence: ${stage.evidence})_` : ""}${stage.notes ? ` \u2014 ${stage.notes}` : ""}`);
+  }
+  lines.push("", "## Gates", "");
+  for (const gate of learn.gates) lines.push(`- [${gate.status}] **${gate.id}**: ${gate.detail}`);
+  lines.push("", "## Probes", "");
+  for (const probe of learn.probes) lines.push(`- ${probe.ok ? "ok" : "MISSING"} **${probe.id}** \u2014 \`${probe.command}\` \u2014 ${probe.detail}`);
+  if (learn.notes.length) {
+    lines.push("", "## Notes", "");
+    for (const note of learn.notes) lines.push(`- ${note}`);
+  }
+  lines.push("", "This dossier was produced by a read-only pass. It changed nothing on the machine.");
+  return lines.filter((line) => line !== "").join("\n") + "\n";
+}
+async function writeDossier(dir, learn, evidence = {}) {
+  if (await dirExists(dir)) throw new Error(`Output directory already exists: ${dir}. Choose a new one; nothing is deleted.`);
+  await mkdir7(dir, { recursive: true });
+  const jsonPath = join40(dir, "dossier.json");
+  await writeFile5(jsonPath, JSON.stringify(learn, null, 2) + "\n");
+  const markdownPath = join40(dir, "dossier.md");
+  await writeFile5(markdownPath, renderDossierMarkdown(learn));
+  const evidencePaths = [];
+  for (const [id, text] of Object.entries(evidence)) {
+    if (!/^[a-z0-9-]+$/i.test(id)) throw new Error(`Evidence id is not a safe filename: ${id}`);
+    const path2 = join40(dir, "evidence", `${id}.txt`);
+    await mkdir7(join40(dir, "evidence"), { recursive: true });
+    await writeFile5(path2, text.endsWith("\n") ? text : text + "\n");
+    evidencePaths.push(path2);
+  }
+  return { dir, json: jsonPath, markdown: markdownPath, evidence: evidencePaths };
+}
+var init_dossier = __esm({
+  "src/learn/dossier.ts"() {
+  }
+});
+
+// src/learn/command.ts
+var command_exports4 = {};
+__export(command_exports4, {
+  runLearnCommand: () => runLearnCommand
+});
+import * as os4 from "node:os";
+import { join as join41, resolve as resolve36 } from "node:path";
+async function runLearnCommand(args, flags = {}, deps = {}) {
+  const log = deps.log ?? console.log;
+  const action = args[0] ?? "host";
+  if (args.length > 1) throw new Error("Usage: rein learn [--json] | rein learn ios [--udid U] [--json]");
+  const allowed = action === "host" ? ["json", "output"] : ["json", "output", "udid"];
+  for (const key of Object.keys(flags)) if (!allowed.includes(key)) throw new Error(`Unsupported learn option --${key}.`);
+  if (action !== "host" && action !== "ios") throw new Error(`Unknown learn target "${action}". Use rein learn or rein learn ios.`);
+  const base = typeof flags.output === "string" && flags.output.trim() ? resolve36(String(flags.output)) : join41((deps.home ?? os4.homedir)(), ".rein", "redteam");
+  const hostKey = action === "ios" ? "ios-device" : "host";
+  const dir = typeof flags.output === "string" && flags.output.trim() ? base : await freshDossierDir(base, hostKey, deps.now ? deps.now() : /* @__PURE__ */ new Date());
+  if (await dirExists(dir)) throw new Error(`Output directory already exists: ${dir}. Choose a new one; nothing is deleted.`);
+  const evidence = {};
+  const baseRun = deps.run ?? defaultRun;
+  const learnDeps = {
+    platform: action === "ios" ? void 0 : deps.platform,
+    udid: action === "ios" ? typeof flags.udid === "string" ? flags.udid : deps.udid : void 0,
+    hostname: deps.hostname,
+    now: deps.now,
+    read: deps.read,
+    run: async (command, args2) => {
+      const result = await baseRun(command, args2);
+      evidence[`${command.replace(/[^a-z0-9-]+/gi, "-").slice(0, 40)}-${Object.keys(evidence).length}`] = result.ok ? result.stdout : result.stderr;
+      return result;
+    }
+  };
+  const { learn } = action === "ios" ? await learnIos(learnDeps) : await learnMachine(learnDeps);
+  const files = await writeDossier(dir, learn, evidence);
+  if (flags.json === true) {
+    log(JSON.stringify({ dossier: files.dir, learn }, null, 2));
+  } else {
+    const m = learn.machine;
+    log(`Dareecho learn \u2014 ${m.hostname} (${m.os}/${m.arch})`);
+    log(`  ${m.release} \xB7 ${m.model}${m.ramBytes ? ` \xB7 ${(m.ramBytes / 2 ** 30).toFixed(1)} GiB RAM` : ""} \xB7 ${m.virtualized ?? "physical"}`);
+    log("");
+    log("  Boot chain (the Colonel structure):");
+    learn.bootChain.forEach((stage, i) => log(`    ${i + 1}. ${stage.stage} \u2014 ${stage.trust}${stage.notes ? ` \u2014 ${stage.notes}` : ""}`));
+    log("");
+    for (const gate of learn.gates) log(`  [${gate.status}] ${gate.id}: ${gate.detail}`);
+    for (const note of learn.notes) log(`  note: ${note}`);
+    log("");
+    log(`Dossier: ${files.dir}`);
+    log("Read-only pass. Nothing on the machine was changed or deleted.");
+  }
+  return 0;
+}
+var init_command4 = __esm({
+  "src/learn/command.ts"() {
+    init_profile2();
+    init_ios();
+    init_dossier();
+  }
+});
+
+// src/export/copy.ts
+import { copyFile, lstat as lstat8, mkdir as mkdir8, readdir as readdir6, stat as stat4, utimes } from "node:fs/promises";
+import { basename as basename3, dirname as dirname19, isAbsolute as isAbsolute10, join as join42, relative as relative6, resolve as resolve37 } from "node:path";
+function isInside(child, parent) {
+  const rel = relative6(resolve37(parent), resolve37(child));
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute10(rel);
+}
+async function assertSafeTarget(sources, target) {
+  const t = resolve37(target);
+  for (const raw of sources) {
+    if (!raw) continue;
+    const s = resolve37(raw);
+    if (isInside(t, s)) throw new Error(`Export target ${t} is inside source ${s}; choose a different destination.`);
+    if (isInside(s, t)) throw new Error(`Source ${s} is inside the export target ${t}; choose a different destination.`);
+  }
+}
+async function exportFiles(sources, target) {
+  const resolved = [];
+  for (const raw of sources) {
+    const s = resolve37(raw);
+    await stat4(s);
+    resolved.push(s);
+  }
+  if (resolved.length === 0) throw new Error("Choose at least one file or folder to export.");
+  await assertSafeTarget(resolved, target);
+  await mkdir8(target, { recursive: true });
+  const summary = { files: 0, bytes: 0, skipped: [] };
+  for (const source of resolved) {
+    await copyEntry(source, target, basename3(source), summary);
+  }
+  return summary;
+}
+async function copyEntry(source, target, destRel, summary) {
+  const info = await lstat8(source);
+  const dest = join42(target, destRel);
+  if (info.isSymbolicLink()) {
+    summary.skipped.push(`${destRel} (symlink, not followed)`);
+    return;
+  }
+  if (info.isDirectory()) {
+    await mkdir8(dest, { recursive: true });
+    const entries = await readdir6(source, { withFileTypes: true });
+    for (const entry of entries) await copyEntry(join42(source, entry.name), target, join42(destRel, entry.name), summary);
+    await utimes(dest, info.atime, info.mtime);
+    return;
+  }
+  if (info.isFile()) {
+    await mkdir8(dirname19(dest), { recursive: true });
+    await copyFile(source, dest);
+    await utimes(dest, info.atime, info.mtime);
+    summary.files += 1;
+    summary.bytes += info.size;
+    return;
+  }
+  summary.skipped.push(`${destRel} (${info.isSocket() ? "socket" : "special file"})`);
+}
+function formatBytes(bytes) {
+  if (bytes >= 2 ** 30) return `${(bytes / 2 ** 30).toFixed(1)} GiB`;
+  if (bytes >= 2 ** 20) return `${(bytes / 2 ** 20).toFixed(1)} MiB`;
+  if (bytes >= 2 ** 10) return `${(bytes / 2 ** 10).toFixed(1)} KiB`;
+  return `${bytes} B`;
+}
+var init_copy = __esm({
+  "src/export/copy.ts"() {
+  }
+});
+
+// src/export/presets.ts
+import { existsSync as existsSync18 } from "node:fs";
+import { join as join43 } from "node:path";
+function personalPresets(home, platform2) {
+  const p = (...sub) => join43(home, ...sub);
+  const presets = [
+    { id: "documents", label: "Documents", paths: [p("Documents")] },
+    { id: "desktop", label: "Desktop", paths: [p("Desktop")] },
+    { id: "downloads", label: "Downloads", paths: [p("Downloads")] },
+    { id: "pictures", label: "Pictures", paths: [p("Pictures")] },
+    { id: "movies", label: "Movies and videos", paths: [p("Movies"), p("Videos")] },
+    { id: "music", label: "Music", paths: [p("Music")] }
+  ];
+  if (platform2 === "darwin") {
+    presets.push(
+      { id: "mail", label: "Mail", paths: [p("Library", "Mail"), p("Library", "Mailboxes")] },
+      { id: "keychains", label: "Keychains", paths: [p("Library", "Keychains")] },
+      { id: "browser-profiles", label: "Browser profiles", paths: [
+        p("Library", "Application Support", "Google", "Chrome"),
+        p("Library", "Application Support", "Firefox"),
+        p("Library", "Safari")
+      ] },
+      { id: "keys", label: "SSH and GPG keys", paths: [p(".ssh"), p(".gnupg")] }
+    );
+  }
+  if (platform2 === "win32") {
+    presets.push(
+      { id: "browser-profiles", label: "Browser profiles", paths: [
+        p("AppData", "Local", "Google", "Chrome", "User Data"),
+        p("AppData", "Roaming", "Mozilla", "Profiles"),
+        p("AppData", "Roaming", "Microsoft", "Edge", "User Data")
+      ] },
+      { id: "keys", label: "SSH and GPG keys", paths: [p(".ssh"), p(".gnupg")] }
+    );
+  }
+  if (platform2 === "linux") {
+    presets.push(
+      { id: "browser-profiles", label: "Browser profiles", paths: [p(".config", "google-chrome"), p(".mozilla")] },
+      { id: "keys", label: "SSH and GPG keys", paths: [p(".ssh"), p(".gnupg")] },
+      { id: "dotfiles", label: "Shell and app config", paths: [p(".config"), p(".zshrc"), p(".bashrc"), p(".vimrc")] }
+    );
+  }
+  return presets;
+}
+function isChromeOS(osRelease) {
+  return /ID=chromeos/i.test(osRelease ?? "") || /CROS_RELEASE/i.test(osRelease ?? "");
+}
+function chromeosPresets(home) {
+  const p = (...sub) => join43(home, ...sub);
+  return [
+    { id: "downloads", label: "Downloads", paths: [p("Downloads")] },
+    { id: "documents", label: "Documents", paths: [p("Documents")] },
+    { id: "pictures", label: "Pictures", paths: [p("Pictures")] },
+    { id: "music", label: "Music", paths: [p("Music")] },
+    { id: "movies", label: "Videos", paths: [p("Videos")] },
+    { id: "chrome-profile", label: "Chrome profile", paths: [p(".config", "chromium")] },
+    { id: "keys", label: "SSH and GPG keys", paths: [p(".ssh"), p(".gnupg")] }
+  ];
+}
+function filterExisting(presets) {
+  const missing2 = [];
+  const kept = presets.map((preset) => ({
+    ...preset,
+    paths: preset.paths.filter((path2) => {
+      if (existsSync18(path2)) return true;
+      missing2.push(path2);
+      return false;
+    })
+  })).filter((preset) => preset.paths.length > 0);
+  return { presets: kept, missing: missing2 };
+}
+function existingPresets(home, platform2) {
+  return filterExisting(personalPresets(home, platform2));
+}
+var init_presets = __esm({
+  "src/export/presets.ts"() {
+  }
+});
+
+// src/export/tui.ts
+import { lstat as lstat9, readdir as readdir7 } from "node:fs/promises";
+import { homedir as homedir28 } from "node:os";
+import { dirname as dirname20, join as join44, resolve as resolve38 } from "node:path";
+import { stripVTControlCharacters as stripVTControlCharacters3 } from "node:util";
+function terminalText2(value, width = 60) {
+  const text = stripVTControlCharacters3(String(value ?? "")).replace(/[\x00-\x1f\x7f-\x9f]/g, " ").trim();
+  return text.length > width ? text.slice(0, width - 1) + "\u2026" : text;
+}
+async function loadDir(dir) {
+  const names = await readdir7(dir, { withFileTypes: true });
+  const entries = [];
+  for (const name of names) {
+    const path2 = join44(dir, name.name);
+    try {
+      const info = await lstat9(path2);
+      entries.push({ name: name.name, path: path2, dir: info.isDirectory(), bytes: info.isDirectory() ? 0 : info.size });
+    } catch {
+      entries.push({ name: name.name, path: path2, dir: name.isDirectory(), bytes: 0 });
+    }
+  }
+  return entries.sort((a, b) => a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1);
+}
+function toggle(list, path2) {
+  return list.includes(path2) ? list.filter((p) => p !== path2) : [...list, path2];
+}
+function merge(list, more) {
+  const out = [...list];
+  for (const m of more) if (!out.includes(m)) out.push(m);
+  return out;
+}
+function browserTransition(state, key) {
+  if (key === "q" || key === "") return { state, action: { type: "quit" } };
+  if (key === "e" || key === "E") return { state, action: { type: "export" } };
+  if (key === "\x1B[A" || key === "k" || key === "p") {
+    if (state.entries.length === 0) return { state, action: { type: "none" } };
+    return { state: { ...state, cursor: (state.cursor - 1 + state.entries.length) % state.entries.length }, action: { type: "none" } };
+  }
+  if (key === "\x1B[B" || key === "j" || key === "n") {
+    if (state.entries.length === 0) return { state, action: { type: "none" } };
+    return { state: { ...state, cursor: (state.cursor + 1) % state.entries.length }, action: { type: "none" } };
+  }
+  if (key === "g" || key === "G") return { state, action: { type: "none" }, nav: "home" };
+  if (key === "h" || key === "\x7F" || key === "\x1B") return { state, action: { type: "none" }, nav: state.dir === state.home ? void 0 : "back" };
+  if (key === "\r" || key === "\n" || key === "l" || key === "	") {
+    const entry = state.entries[state.cursor];
+    if (!entry) return { state, action: { type: "none" } };
+    if (entry.dir) return { state, action: { type: "none" }, nav: "enter" };
+    return { state: { ...state, selected: toggle(state.selected, entry.path) }, action: { type: "none" } };
+  }
+  if (key === " ") {
+    const entry = state.entries[state.cursor];
+    if (!entry) return { state, action: { type: "none" } };
+    return { state: { ...state, selected: toggle(state.selected, entry.path), notice: entry.dir ? `Selected whole folder ${terminalText2(entry.name, 30)}.` : `Selected ${terminalText2(entry.name, 30)}.` }, action: { type: "none" } };
+  }
+  if (key === "a" || key === "A") {
+    const all = state.entries.map((e) => e.path);
+    return { state: { ...state, selected: merge(state.selected, all), notice: `Selected all ${all.length} items here.` }, action: { type: "none" } };
+  }
+  if (key === "c" || key === "C") return { state: { ...state, selected: [], notice: "Selection cleared." }, action: { type: "none" } };
+  return { state, action: { type: "none" } };
+}
+function renderBrowser(state, target) {
+  const lines = [
+    "Dareecho export \u2014 choose personal files to keep before the OS is replaced",
+    `Browse: ${terminalText2(state.dir, 70)}`,
+    ""
+  ];
+  if (state.entries.length === 0) lines.push("  (empty)");
+  for (const [i, entry] of state.entries.entries()) {
+    const marker = i === state.cursor ? ">" : " ";
+    const check = state.selected.includes(entry.path) ? "[x]" : "[ ]";
+    const name = terminalText2(entry.name, 36) + (entry.dir ? "/" : "");
+    const size = entry.dir ? "" : formatBytes(entry.bytes).padStart(10);
+    lines.push(` ${marker} ${check} ${name.padEnd(38)}${size}`);
+  }
+  lines.push("");
+  lines.push(`Export to: ${terminalText2(target, 70)}`);
+  lines.push(state.notice ? `Notice: ${terminalText2(state.notice, 70)}` : " ");
+  lines.push("[j/k] move  [enter] open or select  [space] select  [a] all here  [c] clear  [h] up  [g] home");
+  lines.push("[e] export selection (copies, never deletes)  [q] quit");
+  return lines.join("\n");
+}
+function runBrowser(input, output, options) {
+  return new Promise((resolvePromise, reject) => {
+    const home = resolve38(homedir28());
+    const start = options.start ? resolve38(options.start) : home;
+    const load = options.load ?? loadDir;
+    const exportFn = options.export ?? exportFiles;
+    const state = { dir: start, home, entries: [], cursor: 0, selected: [], notice: "" };
+    const result = { lastNotice: "" };
+    let done = false, lastDisplay = "", wasRaw = false, wasPaused = false;
+    const finish = (error) => {
+      if (done) return;
+      done = true;
+      input.off("data", onData);
+      try {
+        if (wasRaw && input.isTTY) input.setRawMode(false);
+      } catch {
+      }
+      if (wasPaused) input.pause();
+      try {
+        output.write("\x1B[?25h\n");
+      } catch {
+      }
+      if (error) reject(error instanceof Error ? error : new Error(String(error)));
+      else resolvePromise(result);
+    };
+    const draw = () => {
+      if (done) return;
+      const display = renderBrowser(state, options.target);
+      if (display !== lastDisplay) {
+        try {
+          output.write("\x1B[2J\x1B[H" + display + "\n");
+        } catch {
+        }
+        lastDisplay = display;
+      }
+    };
+    const step = async (key) => {
+      if (done) return;
+      const transition = browserTransition(state, key);
+      state.notice = transition.state.notice;
+      if (transition.nav) {
+        try {
+          state.dir = transition.nav === "home" ? home : transition.nav === "back" ? dirname20(state.dir) : state.entries[state.cursor].path;
+          state.entries = await load(state.dir);
+          state.cursor = 0;
+          state.notice = "";
+        } catch {
+          state.notice = `Cannot open ${state.dir}.`;
+        }
+        draw();
+        return;
+      }
+      state.selected = transition.state.selected;
+      draw();
+      if (transition.action.type === "quit") return finish();
+      if (transition.action.type === "export") {
+        if (state.selected.length === 0) {
+          state.notice = "Nothing selected. Space or a to choose files first.";
+          draw();
+          return;
+        }
+        try {
+          result.exported = await exportFn(state.selected, options.target);
+          state.notice = `Exported ${result.exported.files} files (${formatBytes(result.exported.bytes)}) to ${options.target}. Sources are untouched.`;
+          result.lastNotice = state.notice;
+          draw();
+        } catch (error) {
+          state.notice = error.message;
+          result.lastNotice = state.notice;
+          draw();
+        }
+      }
+    };
+    const onData = (chunk) => {
+      void step(String(chunk));
+    };
+    try {
+      input.setEncoding("utf8");
+      input.on("data", onData);
+      if (input.isTTY) {
+        input.setRawMode(true);
+        input.resume();
+        output.write("\x1B[?25l");
+        wasRaw = true;
+      } else {
+        input.resume();
+        wasPaused = true;
+      }
+      draw();
+      void load(start).then((entries) => {
+        state.entries = entries;
+        draw();
+      }).catch((error) => finish(error));
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+var init_tui2 = __esm({
+  "src/export/tui.ts"() {
+    init_copy();
+  }
+});
+
+// src/export/command.ts
+var command_exports5 = {};
+__export(command_exports5, {
+  runExportCommand: () => runExportCommand
+});
+import { readFile as readFile7 } from "node:fs/promises";
+import * as os5 from "node:os";
+import { join as join45, resolve as resolve39 } from "node:path";
+async function defaultOsRelease() {
+  try {
+    return await readFile7("/etc/os-release", "utf8");
+  } catch {
+    return void 0;
+  }
+}
+function defaultTarget(home, now) {
+  const date = now.toISOString().slice(0, 10);
+  return join45(home, `Dareecho-Export-${date}`);
+}
+async function runExportCommand(args, flags = {}, deps = {}) {
+  const log = deps.log ?? console.log;
+  let home = (deps.home ?? os5.homedir)();
+  const platform2 = deps.platform ?? process.platform;
+  const osReleaseText = await (deps.osRelease ?? defaultOsRelease)();
+  const chromeos = platform2 === "linux" && isChromeOS(osReleaseText);
+  if (chromeos && !home.startsWith("/home/chronos")) home = deps.chromeosHome ?? "/home/chronos/user/1000";
+  const action = args[0] ?? "browse";
+  if (action === "browse" || action === "presets") {
+    if (args.length > 1) throw new Error("Usage: rein export browse [--to DIR] | rein export <paths...> --to DIR | rein export presets [--to DIR] [--list]");
+  } else if (args.length === 0) {
+    throw new Error("Usage: rein export browse [--to DIR] | rein export <paths...> --to DIR | rein export presets [--to DIR] [--list]");
+  }
+  const allowed = action === "browse" ? ["to", "start", "json"] : ["to", "list", "json"];
+  for (const key of Object.keys(flags)) if (!allowed.includes(key)) throw new Error(`Unsupported export option --${key}.`);
+  if (action === "browse") {
+    if (deps.tty === false && !deps.browse) throw new Error("Browse needs an interactive terminal. Use: rein export <paths...> --to <dir>");
+    const target2 = typeof flags.to === "string" && flags.to.trim() ? resolve39(flags.to) : defaultTarget(home, deps.now ? deps.now() : /* @__PURE__ */ new Date());
+    if (deps.browse) return deps.browse({ start: typeof flags.start === "string" ? flags.start : void 0, target: target2 });
+    const result = await runBrowser(process.stdin, process.stdout, { start: typeof flags.start === "string" ? flags.start : void 0, target: target2 });
+    log(result.lastNotice || "Browser closed. Nothing was exported or deleted.");
+    return 0;
+  }
+  if (action === "presets") {
+    const { presets, missing: missing2 } = chromeos ? filterExisting(chromeosPresets(home)) : existingPresets(home, platform2);
+    if (flags.list === true || flags.json === true) {
+      for (const preset of presets) log(`${preset.id}: ${preset.paths.join(", ")}`);
+      if (missing2.length) log(`not present, skipped: ${missing2.join(", ")}`);
+      return 0;
+    }
+    const target2 = typeof flags.to === "string" && flags.to.trim() ? resolve39(flags.to) : defaultTarget(home, deps.now ? deps.now() : /* @__PURE__ */ new Date());
+    const sources2 = presets.flatMap((p) => p.paths);
+    if (sources2.length === 0) {
+      log("No personal data folders found in this home directory. Nothing to export.");
+      return 0;
+    }
+    log(`Exporting ${presets.length} preset groups (${sources2.length} folders) to ${target2}`);
+    const summary2 = await exportFiles(sources2, target2);
+    log(`Exported ${summary2.files} files (${formatBytes(summary2.bytes)}) to ${target2}. Sources are untouched \u2014 export copies, it never deletes.`);
+    for (const skipped of summary2.skipped) log(`  skipped: ${skipped}`);
+    if (missing2.length) log(`  not present, skipped: ${missing2.join(", ")}`);
+    return 0;
+  }
+  const sources = args;
+  if (sources.length === 0) throw new Error("Choose at least one file or folder: rein export <paths...> --to <dir>");
+  if (typeof flags.to !== "string" || !flags.to.trim()) throw new Error("--to <dir> is required (or use: rein export presets / rein export browse).");
+  const target = resolve39(flags.to);
+  log(`Exporting ${sources.length} item(s) to ${target}`);
+  const summary = await exportFiles(sources, target);
+  log(`Exported ${summary.files} files (${formatBytes(summary.bytes)}) to ${target}. Sources are untouched \u2014 export copies, it never deletes.`);
+  for (const skipped of summary.skipped) log(`  skipped: ${skipped}`);
+  return 0;
+}
+var init_command5 = __esm({
+  "src/export/command.ts"() {
+    init_copy();
+    init_presets();
+    init_tui2();
+  }
+});
+
 // src/harness/doctor.ts
 var doctor_exports = {};
 __export(doctor_exports, {
@@ -15586,9 +16459,9 @@ __export(doctor_exports, {
   usesLocalHardware: () => usesLocalHardware
 });
 import { execFileSync as execFileSync4 } from "node:child_process";
-import { existsSync as existsSync18, lstatSync as lstatSync17, readFileSync as readFileSync24, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
-import { homedir as homedir27 } from "node:os";
-import { dirname as dirname19, join as join40 } from "node:path";
+import { existsSync as existsSync19, lstatSync as lstatSync17, readFileSync as readFileSync24, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { homedir as homedir30 } from "node:os";
+import { dirname as dirname21, join as join46 } from "node:path";
 function checkNodeRuntime(version = process.versions.node) {
   const major = Number(version.split(".")[0]);
   const supported = Number.isSafeInteger(major) && major >= 18;
@@ -15637,10 +16510,10 @@ function sh2(cmd, opts = {}) {
   }
 }
 function gitRootOf(file, maxDepth = 4) {
-  let dir = existsSync18(file) && statSync8(file).isFile() ? dirname19(file) : file;
+  let dir = existsSync19(file) && statSync8(file).isFile() ? dirname21(file) : file;
   for (let i = 0; i < maxDepth; i++) {
-    if (existsSync18(join40(dir, ".git"))) return dir;
-    const up = dirname19(dir);
+    if (existsSync19(join46(dir, ".git"))) return dir;
+    const up = dirname21(dir);
     if (up === dir) return void 0;
     dir = up;
   }
@@ -15651,7 +16524,7 @@ function newestMtime(dir) {
   const walk = (d) => {
     for (const entry of readdirSync6(d, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name === ".git") continue;
-      const p = join40(d, entry.name);
+      const p = join46(d, entry.name);
       if (entry.isDirectory()) walk(p);
       else newest = Math.max(newest, statSync8(p).mtimeMs);
     }
@@ -15731,11 +16604,11 @@ async function runDoctor(opts = {}) {
       repo = gitRootOf(real);
       let installedPackage = false;
       try {
-        const packageRoot = dirname19(dirname19(real));
-        installedPackage = JSON.parse(readFileSync24(join40(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join40(packageRoot, "dist", "rein.js");
+        const packageRoot = dirname21(dirname21(real));
+        installedPackage = JSON.parse(readFileSync24(join46(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join46(packageRoot, "dist", "rein.js");
       } catch {
       }
-      const distOk = installedPackage || repo && existsSync18(join40(repo, "dist", "rein.js"));
+      const distOk = installedPackage || repo && existsSync19(join46(repo, "dist", "rein.js"));
       checks.push({
         name: "bin",
         status: distOk ? "ok" : "fail",
@@ -15765,8 +16638,8 @@ async function runDoctor(opts = {}) {
     }
   }
   if (repo) {
-    const bundle = join40(repo, "dist", "rein.js");
-    if (!existsSync18(bundle)) {
+    const bundle = join46(repo, "dist", "rein.js");
+    if (!existsSync19(bundle)) {
       checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => {
         const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
         if (r.err) throw new Error(r.err);
@@ -15774,7 +16647,7 @@ async function runDoctor(opts = {}) {
       } });
     } else {
       const bundleMtime = statSync8(bundle).mtimeMs;
-      const srcMtime = newestMtime(join40(repo, "src"));
+      const srcMtime = newestMtime(join46(repo, "src"));
       const fresh = bundleMtime >= srcMtime;
       checks.push({
         name: "bundle",
@@ -15830,7 +16703,7 @@ async function runDoctor(opts = {}) {
     }
   }
   const cfgPath = configPath();
-  if (!configError && existsSync18(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
+  if (!configError && existsSync19(cfgPath) && (config.apiKey || apiKeyFor(config.provider, config.baseUrl, config.sshHost))) {
     const mode = lstatSync17(cfgPath).mode & 511;
     checks.push({
       name: "perms",
@@ -15846,7 +16719,7 @@ async function runDoctor(opts = {}) {
   }
   try {
     const { statfsSync: statfsSync3 } = await import("node:fs");
-    const free = statfsSync3(homedir27()).bavail * statfsSync3(homedir27()).bsize;
+    const free = statfsSync3(homedir30()).bavail * statfsSync3(homedir30()).bsize;
     const GiB4 = free / 2 ** 30;
     checks.push({ name: "disk", status: GiB4 >= 1 ? "ok" : "warn", detail: `${GiB4.toFixed(1)} GiB free in $HOME` });
   } catch {
@@ -15913,8 +16786,8 @@ __export(loop_exports, {
   runExperimentLoop: () => runExperimentLoop
 });
 import { execFileSync as execFileSync5 } from "node:child_process";
-import { existsSync as existsSync19, readFileSync as readFileSync25, appendFileSync as appendFileSync2, realpathSync as realpathSync10 } from "node:fs";
-import { join as join41, resolve as resolve35 } from "node:path";
+import { existsSync as existsSync20, readFileSync as readFileSync25, appendFileSync as appendFileSync2, realpathSync as realpathSync10 } from "node:fs";
+import { join as join47, resolve as resolve40 } from "node:path";
 import { randomUUID as randomUUID21 } from "node:crypto";
 function incompleteRunReason(messages) {
   const last = messages.filter((message) => message.role === "assistant").at(-1);
@@ -15962,7 +16835,7 @@ function requireCleanGit(cwd) {
   } catch {
     throw new Error("Autonomous keep/discard requires a Git repository with an initial commit");
   }
-  if (realpathSync10(root2) !== realpathSync10(resolve35(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
+  if (realpathSync10(root2) !== realpathSync10(resolve40(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
   if (execFileSync5("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf8" }).trim()) {
     throw new Error("Working tree is dirty; commit or stash existing work before autonomous keep/discard");
   }
@@ -15973,7 +16846,7 @@ function discardIteration(cwd, expectedHead) {
   execFileSync5("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
 }
 function recordLesson(cwd, text, commitMessage) {
-  appendFileSync2(join41(cwd, "LESSONS.md"), `
+  appendFileSync2(join47(cwd, "LESSONS.md"), `
 ${text}
 `);
   execFileSync5("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
@@ -15984,12 +16857,12 @@ async function runExperimentLoop(opts, dependencies = {}) {
   const { maxTurns, maxIterations: maxIters } = resolveRunBudgets(loadConfig(), opts);
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join41(cwd, taskFile);
-  const metricPath = join41(cwd, metricFile);
-  if (!existsSync19(taskPath)) {
+  const taskPath = join47(cwd, taskFile);
+  const metricPath = join47(cwd, metricFile);
+  if (!existsSync20(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
-  if (!existsSync19(metricPath)) {
+  if (!existsSync20(metricPath)) {
     throw new Error(`No ${metricFile} in ${cwd} \u2014 put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
   }
   const task = readFileSync25(taskPath, "utf8");
@@ -16108,19 +16981,19 @@ __export(improve_exports, {
   runImproveLoop: () => runImproveLoop
 });
 import { execFileSync as execFileSync6 } from "node:child_process";
-import { cpSync, existsSync as existsSync20, mkdtempSync as mkdtempSync2, readFileSync as readFileSync26, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
+import { cpSync, existsSync as existsSync21, mkdtempSync as mkdtempSync2, readFileSync as readFileSync26, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
-import { join as join42, dirname as dirname20, resolve as resolve36 } from "node:path";
+import { join as join48, dirname as dirname22, resolve as resolve41 } from "node:path";
 import { fileURLToPath as fileURLToPath8 } from "node:url";
 import { randomUUID as randomUUID22 } from "node:crypto";
 function sh4(cmd, cwd) {
   return execFileSync6("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function runHarnessTests(repoDir) {
-  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join42(tmpdir5(), "rein-validation-")) : repoDir;
+  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join48(tmpdir5(), "rein-validation-")) : repoDir;
   try {
     if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
-      if (existsSync20(join42(repoDir, name))) cpSync(join42(repoDir, name), join42(dir, name), { recursive: true });
+      if (existsSync21(join48(repoDir, name))) cpSync(join48(repoDir, name), join48(dir, name), { recursive: true });
     }
     const output = execFileSync6(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
       cwd: dir,
@@ -16136,8 +17009,8 @@ function runHarnessTests(repoDir) {
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join42(repoDir, "LESSONS.md");
-  if (!existsSync20(path2)) return "";
+  const path2 = join48(repoDir, "LESSONS.md");
+  if (!existsSync21(path2)) return "";
   const text = readFileSync26(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
   return m?.[1]?.trim() ?? "";
@@ -16205,8 +17078,8 @@ Continue: pick the next concrete weakness. Inspect current files; discarded edit
         const test = (dependencies.runTests ?? runHarnessTests)(repoDir);
         if (sh4("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
         if (test.pass) {
-          appendFileSync3(join42(repoDir, "LESSONS.md"), `
-- [improve ${tag}] fixed: ${firstLine(report)}
+          appendFileSync3(join48(repoDir, "LESSONS.md"), `
+- [improve ${tag}] fixed: ${firstLine3(report)}
 `);
           if (useGit) sh4(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
           improved++;
@@ -16217,7 +17090,7 @@ Continue: pick the next concrete weakness. Inspect current files; discarded edit
           if (useGit) discardIteration(repoDir, head);
           console.log(red(`discarded ${dim(tag)} \u2014 test suite failed`));
           console.log(dim(test.output.slice(-600)));
-          recordLesson(repoDir, `- [improve ${tag}] tried and failed: ${firstLine(report)}`, `rein improve: ${tag} failed experiment lesson`);
+          recordLesson(repoDir, `- [improve ${tag}] tried and failed: ${firstLine3(report)}`, `rein improve: ${tag} failed experiment lesson`);
         }
       } else {
         console.log(yellow(`${dim(tag)} claimed improved but the tree is clean \u2014 counting as no-change`));
@@ -16226,11 +17099,11 @@ Continue: pick the next concrete weakness. Inspect current files; discarded edit
     } else if (outcome === "no-change") {
       feedback = "Harness verification: no change was kept.";
       if (useGit && dirty) discardIteration(repoDir, head);
-      console.log(gray(`${dim(tag)}: no change worth making \u2014 ${firstLine(report) || "no report"}`));
+      console.log(gray(`${dim(tag)}: no change worth making \u2014 ${firstLine3(report) || "no report"}`));
     } else {
       feedback = "Harness verification: the previous experiment failed and was discarded; its edits are absent.";
       if (useGit) discardIteration(repoDir, head);
-      console.log(red(`${dim(tag)}: failed \u2014 ${firstLine(report) || (report ? report.slice(0, 120) : "no report")}`));
+      console.log(red(`${dim(tag)}: failed \u2014 ${firstLine3(report) || (report ? report.slice(0, 120) : "no report")}`));
     }
     if (outcome === "no-change") {
       console.log(gray("agent found nothing more to improve \u2014 stopping"));
@@ -16241,7 +17114,7 @@ Continue: pick the next concrete weakness. Inspect current files; discarded edit
   console.log(`
 ${bold("improve stopped")}: ${stop}; ${improved} improvement(s) kept out of ${iterations} iteration(s)`);
 }
-function firstLine(text) {
+function firstLine3(text) {
   return (text.split("\n").find((l) => l.trim().length > 0) ?? "").trim().slice(0, 160);
 }
 var here4, REIN_REPO;
@@ -16253,8 +17126,8 @@ var init_improve = __esm({
     init_system_prompt();
     init_models();
     init_run_budgets();
-    here4 = dirname20(fileURLToPath8(import.meta.url));
-    REIN_REPO = [here4, resolve36(here4, ".."), resolve36(here4, "..", "..")].find((dir) => existsSync20(join42(dir, "test", "smoke.ts"))) ?? resolve36(here4, "..", "..");
+    here4 = dirname22(fileURLToPath8(import.meta.url));
+    REIN_REPO = [here4, resolve41(here4, ".."), resolve41(here4, "..", "..")].find((dir) => existsSync21(join48(dir, "test", "smoke.ts"))) ?? resolve41(here4, "..", "..");
   }
 });
 
@@ -16265,9 +17138,9 @@ __export(heartbeat_exports, {
   parseHeartbeat: () => parseHeartbeat,
   runHeartbeat: () => runHeartbeat
 });
-import { appendFileSync as appendFileSync4, existsSync as existsSync21, mkdirSync as mkdirSync21, readFileSync as readFileSync27, writeFileSync as writeFileSync21 } from "node:fs";
-import { homedir as homedir28 } from "node:os";
-import { isAbsolute as isAbsolute10, join as join43, resolve as resolve37 } from "node:path";
+import { appendFileSync as appendFileSync4, existsSync as existsSync22, mkdirSync as mkdirSync21, readFileSync as readFileSync27, writeFileSync as writeFileSync21 } from "node:fs";
+import { homedir as homedir31 } from "node:os";
+import { isAbsolute as isAbsolute12, join as join49, resolve as resolve42 } from "node:path";
 function parseHeartbeat(text) {
   const tasks = [];
   let improveGoal;
@@ -16284,15 +17157,15 @@ function parseHeartbeat(text) {
   return { tasks, improveGoal };
 }
 function resolveHeartbeatFile(explicit) {
-  if (explicit) return isAbsolute10(explicit) ? explicit : resolve37(explicit);
-  const local = resolve37(process.cwd(), "HEARTBEAT.md");
-  if (existsSync21(local)) return local;
-  return join43(process.env.REIN_HOME || join43(homedir28(), ".rein"), "HEARTBEAT.md");
+  if (explicit) return isAbsolute12(explicit) ? explicit : resolve42(explicit);
+  const local = resolve42(process.cwd(), "HEARTBEAT.md");
+  if (existsSync22(local)) return local;
+  return join49(process.env.REIN_HOME || join49(homedir31(), ".rein"), "HEARTBEAT.md");
 }
 function logBeat(result) {
-  const dir = process.env.REIN_HOME || join43(homedir28(), ".rein");
+  const dir = process.env.REIN_HOME || join49(homedir31(), ".rein");
   mkdirSync21(dir, { recursive: true });
-  const path2 = join43(dir, "heartbeat.log");
+  const path2 = join49(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     file: result.file,
@@ -16310,13 +17183,13 @@ async function runHeartbeat(opts = {}, dependencies = {}) {
     if (!opts.quiet) console.log(s);
   };
   if (opts.init) {
-    const path2 = opts.file ? isAbsolute10(opts.file) ? opts.file : resolve37(opts.file) : resolve37(process.cwd(), "HEARTBEAT.md");
+    const path2 = opts.file ? isAbsolute12(opts.file) ? opts.file : resolve42(opts.file) : resolve42(process.cwd(), "HEARTBEAT.md");
     writeFileSync21(path2, HEARTBEAT_TEMPLATE);
     say(green(`wrote ${path2} \u2014 edit it, then run: rein heartbeat`));
     return 0;
   }
   const file = resolveHeartbeatFile(opts.file);
-  if (!existsSync21(file)) {
+  if (!existsSync22(file)) {
     say(red(`no HEARTBEAT.md (looked in cwd and ~/.rein)`));
     say(dim(`create one: rein heartbeat --init --file ${file}`));
     return 1;
@@ -16332,7 +17205,7 @@ ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync21(join43(process.env.REIN_HOME || join43(homedir28(), ".rein"), "config.json"))) {
+  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync22(join49(process.env.REIN_HOME || join49(homedir31(), ".rein"), "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -16939,8 +17812,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     if (!busy || approvalAnswer || typing || !text || key.ctrl || key.meta || ["return", "enter"].includes(key.name ?? "")) return;
     presentation.pauseForInput();
     typing = true;
-    typingDone = new Promise((resolve38) => {
-      resolveTyping = resolve38;
+    typingDone = new Promise((resolve43) => {
+      resolveTyping = resolve43;
     });
     rl.setPrompt(presentation.prompt());
     promptVisible = true;
@@ -17044,8 +17917,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
       presentation.flush();
       process.stdout.write(`
 [APPROVAL \xB7 TOOL ${toolActionType(name, args)}] approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} [y/N] `);
-      const line = await new Promise((resolve38) => {
-        approvalAnswer = resolve38;
+      const line = await new Promise((resolve43) => {
+        approvalAnswer = resolve43;
       });
       return /^y(es)?$/i.test(line.trim());
     });
@@ -17055,8 +17928,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
   const ask = () => {
     if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift());
     if (inputClosed) return Promise.resolve(null);
-    return new Promise((resolve38) => {
-      resolveLine = (line) => resolve38(line);
+    return new Promise((resolve43) => {
+      resolveLine = (line) => resolve43(line);
       if (!rl.closed && process.stdin.isTTY && process.stdout.isTTY) {
         rl.setPrompt(presentation.prompt());
         promptVisible = true;
@@ -17200,6 +18073,13 @@ Usage:
   rein hardware [--json]        model fit and serving recipes for this machine
     --context <tokens>          plan the recipe's context memory
     --focus everyday|coding|ops|research|creative   choose task-oriented recommendations
+  rein learn [--json]           read-only learn pass on this machine (macOS/Windows/Linux, any arch)
+                                writes a new dossier directory under ~/.rein/redteam/
+  rein learn ios [--udid U]     learn an attached iOS device via libimobiledevice
+    --output <new-directory>    write the dossier to a new directory of your choice
+  rein export browse            Finder-style TUI: choose personal files, export before an OS replace
+  rein export presets [--to D]  copy standard personal data groups (Documents, Mail, keys, \u2026)
+  rein export <paths\u2026> --to D   copy chosen files/folders to a new directory; never deletes sources
   rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal \u2192 HEARTBEAT.md tasks \u2192 self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
@@ -17374,11 +18254,11 @@ async function main(argv = process.argv.slice(2)) {
     console.log(`${mobile ? "rein-kla\u028Ad mobile gateway" : "rein-kla\u028Ad"} is listening at ${handle.url}`);
     console.log(mobile && "tokenFile" in handle && handle.tokenFile ? `The reusable mobile bearer token is stored at ${handle.tokenFile}.` : "The bearer token is in $REIN_HOME/klaud/serve-<port>.token, default ~/.rein.");
     if (mobile && "trustedOrigin" in handle && handle.trustedOrigin) console.log(`The configured private-mesh origin is ${handle.trustedOrigin}.`);
-    await new Promise((resolve38, reject) => {
+    await new Promise((resolve43, reject) => {
       const stop = () => {
         process.removeListener("SIGINT", stop);
         process.removeListener("SIGTERM", stop);
-        handle.close().then(resolve38, reject);
+        handle.close().then(resolve43, reject);
       };
       process.once("SIGINT", stop);
       process.once("SIGTERM", stop);
@@ -17450,11 +18330,11 @@ async function main(argv = process.argv.slice(2)) {
     const canvas = await startCanvas2(_[1]);
     console.log(canvas.url);
     if (flags.browser === true && flags["no-browser"] !== true) openCanvas2(canvas.url);
-    await new Promise((resolve38) => {
+    await new Promise((resolve43) => {
       const stop = () => {
         process.off("SIGINT", stop);
         process.off("SIGTERM", stop);
-        void canvas.close().finally(resolve38);
+        void canvas.close().finally(resolve43);
       };
       process.on("SIGINT", stop);
       process.on("SIGTERM", stop);
@@ -17584,6 +18464,16 @@ config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, s
     const focus = stringFlag2(flags, "focus") ?? readOperatorProfile2().profile?.operator_profile.focus;
     if (focus !== void 0 && !["everyday", "coding", "ops", "research", "creative"].includes(focus)) throw new Error("--focus must be everyday, coding, ops, research, or creative.");
     return printHardwareReport2({ json: flags.json === true, contextTokens: numberFlag(flags, "context", 1), focus });
+  }
+  if (_[0] === "learn") {
+    const { runLearnCommand: runLearnCommand2 } = await Promise.resolve().then(() => (init_command4(), command_exports4));
+    process.exitCode = await runLearnCommand2(_.slice(1), flags);
+    return;
+  }
+  if (_[0] === "export") {
+    const { runExportCommand: runExportCommand2 } = await Promise.resolve().then(() => (init_command5(), command_exports5));
+    process.exitCode = await runExportCommand2(_.slice(1), flags, { tty: process.stdin.isTTY === true });
+    return;
   }
   if (_[0] === "doctor") {
     const { runDoctor: runDoctor2 } = await Promise.resolve().then(() => (init_doctor(), doctor_exports));

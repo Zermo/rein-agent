@@ -439,7 +439,11 @@ Rein now has an explicit [managed model workflow](docs/managed-models.md) for pi
 GGUF downloads, integrity checks, headless serving, and scoped background services.
 Start with `rein model help`. Existing server discovery remains `rein models`.
 The [Dareecho development kit](docs/rein-os.md) prepares a verified terminal overlay
-for an Omarchy VM, with separate platform and installation checks.
+for an Omarchy VM or a ChromeOS userland, with separate platform and installation
+checks. Before considering either path, run `rein learn`: Dareecho Learn writes a
+fresh, read-only machine dossier. Use `rein export` to copy personal files to a
+backup destination before any eventual OS replacement. The
+[Dareecho export wiki page](docs/wiki/Dareecho-export.md) is the operator runbook.
 
 Rein connects to an OpenAI-compatible Chat Completions server on this computer,
 on another machine in your LAN, or through a mesh VPN such as NetBird or Tailscale.
@@ -820,10 +824,11 @@ is the baseline for fully self-sustaining agents.
 
 ### Dareecho — learning the machine, keeping the files
 
-Dareecho is the OS-replacement path on top of Rein. It learns the machine first,
-and the export commands keep the files that are yours before anything is replaced.
-Replacing an OS obviously removes the current image and its settings — these are
-the data-loss prevention steps.
+Dareecho is the OS-replacement path on top of Rein. **Dareecho Learn** is its
+implemented, read-only assessment pass, exposed through `rein learn`. It learns
+the machine first; the export commands keep the files that are yours before
+anything is replaced. Replacing an OS obviously removes the current image and
+its settings — these are the data-loss prevention steps.
 
 ```sh
 rein learn [--json]           read-only pass on this machine: boot chain of trust,
@@ -849,7 +854,11 @@ rein export <paths…> --to D   exactly the paths you name.
 
 Export copies. Sources are never moved or deleted; an existing target receives
 newer copies of the same files. The dossier writer is stricter: it refuses an
-existing directory and steps to the next free name instead.
+existing directory and steps to the next free name instead. Read the
+[Dareecho development guide](docs/rein-os.md) for the VM and ChromeOS overlay
+boundaries, and [Dareecho export](docs/wiki/Dareecho-export.md) for the
+operator-facing sequence. The dossier pass records a red-team assessment; it
+does not bundle or invoke CyberStrike's offensive tooling.
 
 ### Proactive work from task history
 
