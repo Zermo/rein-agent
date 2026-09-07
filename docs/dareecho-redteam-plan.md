@@ -7,6 +7,19 @@ planner consumes to rank injection paths and earn its gates.
 
 Rein stays the commander. CyberStrike is the weapon. We do not merge the two codebases.
 
+## Built so far (dev/dareecho-learn)
+
+- `rein learn [--json] [--output DIR]` — read-only pass on macOS, Windows, or Linux (any arch);
+  records the boot chain of trust, security gates, and per-probe evidence into a new dossier
+  directory under `~/.rein/redteam/`. Refuses to overwrite; never deletes.
+- `rein learn ios [--udid U]` — learns an attached iOS device through libimobiledevice,
+  mapping it onto the iOS boot chain (bootrom → iBSS/iBEC → AppleLL → KernelCache → launchd).
+- Verified live on thebrain (SIP disabled) and macserver (SIP enabled), both M4 Mac minis;
+  dossiers written to `~/.rein/redteam/` on each. 13 new tests, full suite green except the
+  pre-existing tmux environment failures on main.
+- Remaining: vendor CyberStrike skills, the `dareecho-firmware` plugin for x86 UEFI/BIOS
+  depth, and the `rein os plan --dossier` hook.
+
 ## What was learned
 
 ### Zermo/rein-agent (this repo)
