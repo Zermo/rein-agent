@@ -240,6 +240,21 @@ is checkable, not an assertion. No serials, no credentials, no personal paths.
   runtime dependency, user config and sessions untouched, budgets and approvals
   unchanged.
 
+## Attribution and use of CyberStrike
+
+- Prepared with Qwen3.8-27B-Uncensored (local-studio, reasoning max), working through
+  the rein-agent and CyberStrike trees on 2026-09-07.
+- CyberStrike (CyberStrikeus/CyberStrike, AGPL-3.0) served as inspiration and training
+  for this work: its skill methodology and platform playbooks helped bring the learn,
+  export, and rebuild engines up to intelligence. We took the shape of the knowledge,
+  not its code.
+- The "weaponized" portions of CyberStrike — its offensive tooling, post-exploitation,
+  and credential-harvesting surface (machook and kin) — are muted in this work. None of
+  it runs inside Rein's bundle, none of it is imported, and nothing in the learn,
+  export, or OS-kit paths executes it. It stays a separate process or vendored data.
+- This is a note of use, not a license grant: CyberStrike remains AGPL-3.0 and
+  credited to its maintainers wherever its text or ideas ship.
+
 ## Open questions (need the commander's call)
 
 1. "Colonel structure" — planned as the boot chain of trust (BootROM → firmware →
