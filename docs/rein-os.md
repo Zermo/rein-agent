@@ -1,8 +1,8 @@
-# rein-dərāchō development
+# Dareecho development
 
-rein-dərāchō has two preparation paths: retain the computer's OS and set up a local model host, or prepare a Rein harness payload for an Omarchy VM. The first implementation provides platform plans and a runnable terminal overlay. Bootable rein-dərāchō media, physical disk migration, and a fully integrated Linux desktop remain later build gates.
+Dareecho has two preparation paths: retain the computer's OS and set up a local model host, or prepare a Rein harness payload for an Omarchy VM. The first implementation provides platform plans and a runnable terminal overlay. Bootable Dareecho media, physical disk migration, and a fully integrated Linux desktop remain later build gates.
 
-rein-dərāchō is the OS build's display name. The stable CLI is `rein os`, development stays on `codex/rein-os`, and existing filesystem paths and manifest fields keep their names for compatibility.
+Dareecho is the OS build's display name. The stable CLI is `rein os`, development stays on `codex/rein-os`, and existing filesystem paths and manifest fields keep their names for compatibility.
 
 See [model and OS validation](model-os-validation.md) for completed checks and untested target behavior.
 

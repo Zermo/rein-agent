@@ -1,11 +1,11 @@
-# rein-dərāchō model manager and overlay validation
+# Dareecho model manager and overlay validation
 
 Development validation on 2026-09-07. This change adds managed GGUF artifacts,
 an owned headless server, explicit user services, connection handoff and an
 Omarchy VM overlay exporter. The existing release version remains 0.14.2;
 these checks do not publish a release.
 
-rein-dərāchō is the OS build's display name. These checks continue to use the
+Dareecho is the OS build's display name. These checks continue to use the
 stable `rein os` CLI, filesystem paths and manifest schema.
 
 ## Checks completed
@@ -76,7 +76,7 @@ an existing desktop theme. No wallpaper or Omarchy theme was activated.
   latency, streaming, tool use and sustained task quality on supported hardware.
 - Exercise real launchd/systemd restart and shutdown behavior on target hosts.
 - Complete the desktop, update/recovery and reusable-image gates in
-  [rein-dərāchō development](rein-os.md) before offering an OS installation product.
+  [Dareecho development](rein-os.md) before offering an OS installation product.
 - Validate desktop theme selection, reduced motion, reboot persistence and
   recovery on the target VM before adding an animated OS wallpaper or boot theme.
 

@@ -24,7 +24,7 @@ export function rainFrame(options: { width?: number; height?: number; frame?: nu
 			if (row > 1 && row < height - 2) rows[row][column] = tail === 0 ? ":" : ".";
 		}
 	}
-	label(0, "rein-dərāchō / RAIN FIELD");
+	label(0, "Dareecho / RAIN FIELD");
 	label(1, "-".repeat(Math.min(32, width)));
 	if (height >= 10) {
 		label(Math.floor(height / 2) - 1, "FRESH CONTEXT.");

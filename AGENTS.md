@@ -38,7 +38,7 @@ Keep changes small and preserve compatibility with self-hosted model APIs.
 
 - `codex/rein-cloud-reskin`: Rein Cloud app presentation, interaction, and the
   backend controls needed by those views.
-- `codex/rein-os`: rein-dərāchō OS overlays, platform planning, and managed model-hosting
+- `codex/rein-os`: Dareecho OS overlays, platform planning, and managed model-hosting
   development. Keep these commands, assets, tests, and generated bundles off the
   reskin branch. Build each branch's bundle from its own source tree.
 

@@ -5176,7 +5176,7 @@ function planReinOS(profile, options = {}) {
       plan.sources.push("https://learn.microsoft.com/en-us/windows/wsl/install");
     }
     plan.gates.push(
-      { id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No rein-d\u0259r\u0101ch\u014D host adapter is defined for this OS and architecture." },
+      { id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No Dareecho host adapter is defined for this OS and architecture." },
       { id: "runtime", status: "required", detail: "Check driver/runtime versions and available memory; benchmark the selected model with its real context and tool protocol." },
       { id: "autonomy", status: "required", detail: "Configure the headless helper and resource limits before explicitly enabling its user service." }
     );
@@ -5186,7 +5186,7 @@ function planReinOS(profile, options = {}) {
     plan.status = candidate ? "candidate" : "unsupported";
     plan.adapter = "omarchy-x86_64-vm-overlay";
     plan.runtimes = ["llama.cpp", "existing OpenAI-compatible server", "vLLM after GPU validation"];
-    plan.facts.push("The preparation command exports a rein-d\u0259r\u0101ch\u014D overlay for an installed Omarchy VM. It does not build a bootable ISO or certify this machine for installation.");
+    plan.facts.push("The preparation command exports a Dareecho overlay for an installed Omarchy VM. It does not build a bootable ISO or certify this machine for installation.");
     plan.facts.push(`The reviewed Omarchy base is ${OMARCHY_BASE.tag} (${OMARCHY_BASE.commit}). Its supported installation starts with the upstream ISO.`);
     if (!candidate) {
       plan.facts.push(apple ? "Omarchy does not directly support M-series Macs. Native macOS is the current path; a Linux port depends on model-specific Asahi support." : "This preparation path targets x86-64 PCs and VMs. No image target is defined for this OS and architecture.");
@@ -5196,7 +5196,7 @@ function planReinOS(profile, options = {}) {
     plan.gates.push(
       { id: "hardware", status: "required", detail: "Verify the target's firmware boot mode, graphics, storage, network, input devices, and upstream hardware support. CPU architecture alone is insufficient." },
       { id: "media", status: "required", detail: "Acquire and verify the upstream installation ISO separately. The source commit pins reviewed code, not an ISO checksum." },
-      { id: "vm", status: "required", detail: "Install Omarchy in a disposable x86-64 VM using its wizard and only that VM's virtual disk, then apply and test the rein-d\u0259r\u0101ch\u014D overlay." },
+      { id: "vm", status: "required", detail: "Install Omarchy in a disposable x86-64 VM using its wizard and only that VM's virtual disk, then apply and test the Dareecho overlay." },
       { id: "migration", status: "required", detail: "Before any physical-machine installation, review backups, recovery, exact target disk, encryption, and owner approval in a separate installer." }
     );
     plan.sources.push(OMARCHY_BASE.installation, OMARCHY_BASE.macSupport, OMARCHY_BASE.unattended);
@@ -5207,7 +5207,7 @@ function planReinOS(profile, options = {}) {
 }
 function formatReinOSPlan(plan) {
   return [
-    `rein-d\u0259r\u0101ch\u014D ${plan.mode}: ${plan.status} (${plan.platform.os}/${plan.platform.arch})`,
+    `Dareecho ${plan.mode}: ${plan.status} (${plan.platform.os}/${plan.platform.arch})`,
     `Adapter: ${plan.adapter}`,
     ...plan.runtimes.length ? [`Runtime candidates: ${plan.runtimes.join(", ")}`] : [],
     ...plan.facts.map((fact) => `- ${fact}`),
@@ -5379,7 +5379,7 @@ async function verifyPayload() {
 }
 export async function main(args) {
   if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-overlay.mjs --verify | --check | --install');
-  if (args[0] === '--help') { console.log('rein-dərāchō overlay. Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
+  if (args[0] === '--help') { console.log('Dareecho overlay. Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = homedir();
@@ -5426,11 +5426,11 @@ try {
   console.log('OMARCHY_SOURCE_PIN_OK');
 } catch(error) { console.error(error.message); process.exitCode = 1; }
 `;
-    KIT_README = `# rein-d\u0259r\u0101ch\u014D VM overlay kit
+    KIT_README = `# Dareecho VM overlay kit
 
 This kit installs the bundled terminal harness into an already installed Omarchy 4.0.2 VM. It is a development payload, not a bootable image or an OS installer. The native Rein klaud desktop package is not included in this first overlay.
 
-rein-d\u0259r\u0101ch\u014D is the OS build's display name. The CLI remains \`rein os\`; existing installation paths and manifest fields remain stable for compatibility.
+Dareecho is the OS build's display name. The CLI remains \`rein os\`; existing installation paths and manifest fields remain stable for compatibility.
 
 ## Verify the kit
 
@@ -5457,7 +5457,7 @@ node fetch-upstream.mjs ./omarchy-source
 
 That command downloads the exact Omarchy source revision and checks the result. It does not run upstream scripts or build an ISO. A source checkout alone is not bootable installation media.
 
-## Apply the rein-d\u0259r\u0101ch\u014D overlay in the VM
+## Apply the Dareecho overlay in the VM
 
 Run without sudo:
 
@@ -5514,7 +5514,7 @@ function rainFrame(options = {}) {
       if (row > 1 && row < height - 2) rows[row][column] = tail === 0 ? ":" : ".";
     }
   }
-  label(0, "rein-d\u0259r\u0101ch\u014D / RAIN FIELD");
+  label(0, "Dareecho / RAIN FIELD");
   label(1, "-".repeat(Math.min(32, width)));
   if (height >= 10) {
     label(Math.floor(height / 2) - 1, "FRESH CONTEXT.");
@@ -5655,7 +5655,7 @@ async function runOSCommand(args, flags = {}, deps = {}) {
   if (action === "prepare") {
     if (typeof flags.output !== "string" || !flags.output.trim() || /[\x00-\x1f\x7f]/.test(flags.output)) throw new Error("--output requires a new directory path.");
     const kit = await (deps.prepare ?? prepareReinOS)({ output: flags.output });
-    log(flags.json === true ? JSON.stringify(kit, null, 2) : `Prepared rein-d\u0259r\u0101ch\u014D VM kit: ${kit.output}
+    log(flags.json === true ? JSON.stringify(kit, null, 2) : `Prepared Dareecho VM kit: ${kit.output}
 Follow its README before booting or installing a VM. No operating system or service was changed.`);
     return;
   }
@@ -5668,7 +5668,7 @@ var init_command2 = __esm({
     init_plan();
     init_prepare();
     init_rain();
-    HELP = `rein-d\u0259r\u0101ch\u014D development
+    HELP = `Dareecho development
 
   rein os plan [--mode host|image] [--json]   assess this machine and show installation gates
   rein os prepare --output <new-directory>  stage a pinned Omarchy VM overlay kit

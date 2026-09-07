@@ -26,7 +26,7 @@ test("plain static frames are bounded, deterministic and distinct from animation
 	assert.notEqual(first, rainFrame({ width: 60, height: 20, frame: 8 }));
 	assert.equal(first.split("\n").length, 20);
 	assert.ok(first.split("\n").every(line => line.length === 60));
-	assert.match(first, /rein-dərāchō \/ RAIN FIELD/); assert.match(first, /STATIC PREVIEW/); assert.doesNotMatch(first, /\x1b/);
+	assert.match(first, /Dareecho \/ RAIN FIELD/); assert.match(first, /STATIC PREVIEW/); assert.doesNotMatch(first, /\x1b/);
 	assert.equal(rainFrame({ width: 100000, height: 100000 }).split("\n").length, 48);
 	assert.ok(rainFrame({ width: 100000 }).split("\n").every(line => line.length === 160));
 	assert.equal(rainFrame({ width: 1, height: 1 }).length, 1);

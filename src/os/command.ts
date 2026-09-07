@@ -3,7 +3,7 @@ import { planReinOS, formatReinOSPlan } from "./plan.ts";
 import { prepareReinOS } from "./prepare.ts";
 import { previewRain } from "./rain.ts";
 
-const HELP = `rein-dərāchō development
+const HELP = `Dareecho development
 
   rein os plan [--mode host|image] [--json]   assess this machine and show installation gates
   rein os prepare --output <new-directory>  stage a pinned Omarchy VM overlay kit
@@ -46,7 +46,7 @@ export async function runOSCommand(args: string[], flags: Flags = {}, deps: {
 	if (action === "prepare") {
 		if (typeof flags.output !== "string" || !flags.output.trim() || /[\x00-\x1f\x7f]/.test(flags.output)) throw new Error("--output requires a new directory path.");
 		const kit = await (deps.prepare ?? prepareReinOS)({ output: flags.output });
-		log(flags.json === true ? JSON.stringify(kit, null, 2) : `Prepared rein-dərāchō VM kit: ${kit.output}\nFollow its README before booting or installing a VM. No operating system or service was changed.`); return;
+		log(flags.json === true ? JSON.stringify(kit, null, 2) : `Prepared Dareecho VM kit: ${kit.output}\nFollow its README before booting or installing a VM. No operating system or service was changed.`); return;
 	}
 	throw new Error("Unknown OS action. Run rein os help.");
 }

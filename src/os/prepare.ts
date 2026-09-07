@@ -1,4 +1,4 @@
-/** Export an offline rein-dərāchō payload and explicit VM post-install workflow. */
+/** Export an offline Dareecho payload and explicit VM post-install workflow. */
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -143,7 +143,7 @@ async function verifyPayload() {
 }
 export async function main(args) {
   if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-overlay.mjs --verify | --check | --install');
-  if (args[0] === '--help') { console.log('rein-dərāchō overlay. Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
+  if (args[0] === '--help') { console.log('Dareecho overlay. Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = homedir();
@@ -192,11 +192,11 @@ try {
 } catch(error) { console.error(error.message); process.exitCode = 1; }
 `;
 
-const KIT_README = `# rein-dərāchō VM overlay kit
+const KIT_README = `# Dareecho VM overlay kit
 
 This kit installs the bundled terminal harness into an already installed Omarchy 4.0.2 VM. It is a development payload, not a bootable image or an OS installer. The native Rein klaud desktop package is not included in this first overlay.
 
-rein-dərāchō is the OS build's display name. The CLI remains \`rein os\`; existing installation paths and manifest fields remain stable for compatibility.
+Dareecho is the OS build's display name. The CLI remains \`rein os\`; existing installation paths and manifest fields remain stable for compatibility.
 
 ## Verify the kit
 
@@ -223,7 +223,7 @@ node fetch-upstream.mjs ./omarchy-source
 
 That command downloads the exact Omarchy source revision and checks the result. It does not run upstream scripts or build an ISO. A source checkout alone is not bootable installation media.
 
-## Apply the rein-dərāchō overlay in the VM
+## Apply the Dareecho overlay in the VM
 
 Run without sudo:
 

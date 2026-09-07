@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title description">
-  <title id="title">rein-dərāchō — Fresh context. Same journey.</title>
-  <desc id="description">A static computer field-guide illustration on cream paper. Square rain falls over a forest-green terminal in an amber diagram field. A rust rein-dərāchō wordmark anchors the quiet left side.</desc>
+  <title id="title">Dareecho — Fresh context. Same journey.</title>
+  <desc id="description">A static computer field-guide illustration on cream paper. An amber window frames square rain and a forest-green terminal: Dareecho, a glimpse into the unknown. A rust Dareecho wordmark anchors the quiet left side.</desc>
   <defs>
     <pattern id="paper" width="12" height="12" patternUnits="userSpaceOnUse">
       <rect x="1" y="1" width="1" height="1" fill="#252a25" opacity="0.055"/>
@@ -19,7 +19,7 @@
   <rect x="40" y="40" width="1840" height="1000" fill="none" stroke="#252a25" stroke-width="5"/>
 
   <g fill="#252a25" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="16" font-weight="600" letter-spacing="3">
-    <text x="112" y="112">rein-dərāchō / REIN SYSTEMS</text>
+    <text x="112" y="112">Dareecho / REIN SYSTEMS</text>
     <text x="1780" y="112" text-anchor="end">FIELD NO. 01 / RAIN</text>
   </g>
   <path d="M112 136H1780" fill="none" stroke="#252a25" stroke-width="1" opacity="0.4"/>
@@ -69,20 +69,16 @@
   </g>
   <rect x="1044" y="184" width="736" height="720" fill="none" stroke="#252a25" stroke-width="4"/>
 
-  <!-- Quiet space for desktop icons; the wordmark is vector geometry. -->
-  <g fill="#b54229" transform="translate(112 704)">
-    <path fill-rule="evenodd" d="M0 0h58c27 0 40 16 40 42 0 20-9 33-25 39l29 55H66L40 84H30v52H0zm30 27v31h24c9 0 14-5 14-15s-5-16-14-16z"/>
-    <path d="M120 0h85v28h-55v25h48v28h-48v27h57v28h-87zM226 0h32v136h-32zM282 0h31l43 79V0h30v136h-29l-45-82v82h-30z"/>
-  </g>
-  <text x="518" y="839" fill="#b54229" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="78" font-weight="700" letter-spacing="-3">-dərāchō</text>
+  <!-- Quiet space for desktop icons; a framed window carries the rain motif. -->
+  <text x="106" y="839" fill="#b54229" font-family="Arial Black, Helvetica, Liberation Sans, sans-serif" font-size="154" font-weight="900" letter-spacing="-7">Dareecho</text>
   <g fill="#252a25" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-weight="600">
     <text x="114" y="887" font-size="22" letter-spacing="1.5">FRESH CONTEXT. SAME JOURNEY.</text>
-    <text x="114" y="925" font-size="15" letter-spacing="2.5" opacity="0.7">A HOME FOR YOUR AGENT.</text>
+    <text x="114" y="925" font-size="15" letter-spacing="2.5" opacity="0.7">A WINDOW INTO THE UNKNOWN.</text>
   </g>
 
   <path d="M112 972H1780" fill="none" stroke="#252a25" stroke-width="1" opacity="0.4"/>
   <g fill="#252a25" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" font-weight="600" letter-spacing="2" opacity="0.7">
     <text x="112" y="1004">LOCAL FIRST / HUMAN LED</text>
-    <text x="1780" y="1004" text-anchor="end">rein-dərāchō / RAIN — STATIC PLATE</text>
+    <text x="1780" y="1004" text-anchor="end">Dareecho / RAIN — STATIC PLATE</text>
   </g>
 </svg>
