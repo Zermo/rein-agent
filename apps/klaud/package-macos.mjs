@@ -145,7 +145,10 @@ try {
   run("/usr/bin/iconutil", ["-c", "icns", "-o", join(resources, "rein.icns"), iconset]);
   const info = join(app, "Contents/Info.plist");
   renameSync(join(app, "Contents/MacOS/Electron"), join(app, "Contents/MacOS/rein-klaud"));
-  for (const [key, value] of Object.entries({ CFBundleIdentifier: "org.zermo.rein-klaud", CFBundleName: "rein-klaʊd", CFBundleDisplayName: "rein-klaʊd", CFBundleExecutable: "rein-klaud", CFBundleIconFile: "rein.icns", CFBundleVersion: metadata.version, CFBundleShortVersionString: metadata.version, NSHumanReadableCopyright: "Copyright Zermo. MIT License." })) plistSet(info, key, value);
+  // Electron's native helper lookup reads CFBundleName before JavaScript runs.
+  // Keep it aligned with the ASCII executable/helper names; the display name
+  // and the app's own menu retain the rein-klaʊd branding.
+  for (const [key, value] of Object.entries({ CFBundleIdentifier: "org.zermo.rein-klaud", CFBundleName: "rein-klaud", CFBundleDisplayName: "rein-klaʊd", CFBundleExecutable: "rein-klaud", CFBundleIconFile: "rein.icns", CFBundleVersion: metadata.version, CFBundleShortVersionString: metadata.version, NSHumanReadableCopyright: "Copyright Zermo. MIT License." })) plistSet(info, key, value);
   plistDelete(info, "ElectronAsarIntegrity");
   for (const suffix of ["", " (GPU)", " (Plugin)", " (Renderer)"]) {
     const oldName = `Electron Helper${suffix}`, newName = `rein-klaud Helper${suffix}`;
@@ -154,6 +157,12 @@ try {
     renameSync(join(helper, "Contents/MacOS", oldName), join(helper, "Contents/MacOS", newName));
     const helperInfo = join(helper, "Contents/Info.plist"), kind = suffix.replace(/[ ()]/g, "").toLowerCase();
     for (const [key, value] of Object.entries({ CFBundleExecutable: newName, CFBundleName: newName, CFBundleDisplayName: newName, CFBundleIdentifier: `org.zermo.rein-klaud.helper${kind ? `.${kind}` : ""}` })) plistSet(helperInfo, key, value);
+  }
+  const nativeAppName = run("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleName", info]).trim();
+  for (const suffix of ["", " (GPU)", " (Plugin)", " (Renderer)"]) {
+    const helperName = `${nativeAppName} Helper${suffix}`;
+    const helperContents = join(app, "Contents/Frameworks", `${helperName}.app`, "Contents");
+    if (!existsSync(join(helperContents, "MacOS", helperName)) || run("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleExecutable", join(helperContents, "Info.plist")]).trim() !== helperName) throw new Error("The native app name and Electron helper executables do not match.");
   }
   const bundledBuild = { appVersion: metadata.version, reinVersion: reinMetadata.version, electronVersion, arch, bundleId: "org.zermo.rein-klaud", reinSha256: sha256(join(runtime, "dist/rein.js")), meatWorkerSha256: sha256(join(runtime, "dist/meat-worker.js")) };
   writeFileSync(join(resources, "rein-build.json"), JSON.stringify(bundledBuild, null, 2) + "\n");

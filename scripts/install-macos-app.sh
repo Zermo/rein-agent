@@ -6,16 +6,30 @@ rein_mac_note() { printf '%s\n' "$*"; }
 rein_mac_fail() { printf 'rein-klaud: %s\n' "$*" >&2; return 1; }
 rein_mac_bundle_id() { /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$1/Contents/Info.plist" 2>/dev/null; }
 rein_mac_running() {
-    ps -axo command= | awk -v target="$1/Contents/MacOS/" 'index($0, target) == 1 { found = 1 } END { exit !found }'
+    local executable
+    executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$1/Contents/Info.plist" 2>/dev/null) || executable=''
+    case "$executable" in
+        ''|.|..|*/*|*\\*) ;;
+        *)
+            # Electron changes its process title, hiding the original path from
+            # ps. Inspect the actual mapped executable, including owned servers.
+            if /usr/sbin/lsof -t -a -d txt "$1/Contents/MacOS/$executable" >/dev/null 2>&1; then return 0; fi ;;
+    esac
+    # A helper can briefly outlive the main process. Match this exact app's
+    # executable directories, never a similarly named app or arbitrary argument.
+    ps -axo command= | REIN_MAC_CHECK_APP="$1" awk 'BEGIN { app=ENVIRON["REIN_MAC_CHECK_APP"] } index($0, app "/Contents/MacOS/") == 1 || index($0, app "/Contents/Frameworks/") == 1 { found = 1 } END { exit !found }'
 }
 rein_mac_verify_signature() { codesign --verify --deep --strict "$1" >/dev/null 2>&1; }
 rein_mac_gatekeeper() { spctl --assess --type execute "$1" >/dev/null 2>&1; }
 rein_mac_verify_arch() {
-    local executable arch="$2"
+    local executable description arch="$2"
     executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$1/Contents/Info.plist" 2>/dev/null) || return 1
     case "$executable" in ''|.|..|*/*|*\\*) return 1 ;; esac
     [ "$arch" != x64 ] || arch=x86_64
-    lipo -verify_arch "$arch" "$1/Contents/MacOS/$executable" >/dev/null 2>&1
+    # file ships with macOS; lipo can require a separate Xcode CLT install.
+    description=$(LC_ALL=C /usr/bin/file -b "$1/Contents/MacOS/$executable") || return 1
+    case "$description" in "Mach-O "*) ;; *) return 1 ;; esac
+    printf '%s\n' "$description" | LC_ALL=C awk -v arch="$arch" '{ for (i=1; i<=NF; i++) if ($i == arch) found=1 } END { exit !found }'
 }
 rein_mac_arch() {
     local machine

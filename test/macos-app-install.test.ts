@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -117,4 +117,92 @@ test("app-only helper rejects non-Mac platforms without changing files", posix, 
 test("piping the helper into Bash invokes its entry point", posix, () => {
     const result = spawnSync("/bin/bash", ["-s", "--", "--help"], { input: readFileSync(script), encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /Install the native rein-klaud Mac app/);
+});
+
+test("native Mac architecture verification accepts the binary's real slice and rejects a missing slice", { skip: process.platform !== "darwin" }, () => {
+    const root = mkdtempSync(join(tmpdir(), "rein-native-arch-"));
+    try {
+        const app = join(root, "Architecture Fixture.app"), contents = join(app, "Contents"), executable = join(contents, "MacOS", "Architecture Fixture");
+        mkdirSync(join(contents, "MacOS"), { recursive: true });
+        const native = (command: string, args: string[]) => {
+            const result = spawnSync(command, args, { encoding: "utf8" });
+            assert.equal(result.status, 0, `${command}: ${result.error?.message || result.stderr}`);
+            return result.stdout.trim();
+        };
+        // Use Apple's actual Mach-O executable, narrowed to one slice so the
+        // missing-architecture check cannot pass on a universal host binary.
+        const architectures = native("/usr/bin/lipo", ["-archs", "/usr/bin/true"]).split(/\s+/);
+        const slice = architectures.includes("x86_64") ? "x86_64" : architectures.includes("arm64") ? "arm64" : "arm64e";
+        assert.ok(architectures.includes(slice), "The system fixture must contain a known Mac architecture.");
+        if (architectures.length > 1) native("/usr/bin/lipo", ["/usr/bin/true", "-thin", slice, "-output", executable]);
+        else copyFileSync("/usr/bin/true", executable);
+        native("/usr/libexec/PlistBuddy", ["-c", "Add :CFBundleExecutable string Architecture Fixture", join(contents, "Info.plist")]);
+
+        const verify = (arch: string) => spawnSync("/bin/bash", ["-c", 'source "$1"; rein_mac_verify_arch "$2" "$3"', "fixture", script, app, arch], {
+            encoding: "utf8", env: { ...process.env, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        });
+        const supported = verify(slice === "x86_64" ? "x64" : slice);
+        assert.equal(supported.status, 0, `Real PlistBuddy/file verification rejected supported ${slice}: ${supported.stderr}`);
+        const unsupported = verify(slice === "x86_64" ? "arm64" : "x64");
+        assert.equal(unsupported.status, 1, "A thin Mach-O binary must reject the absent architecture.");
+        if (architectures.includes("arm64e") && architectures.length > 1) {
+            native("/usr/bin/lipo", ["/usr/bin/true", "-thin", "arm64e", "-output", executable]);
+            assert.equal(verify("arm64e").status, 0, "The fixture must be identified as arm64e.");
+            assert.equal(verify("arm64").status, 1, "Architecture matching must not treat arm64e as arm64.");
+        }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("native running-app check finds an executable after its process title changes", { skip: process.platform !== "darwin" }, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rein-native-running-"));
+    let child: ReturnType<typeof spawn> | undefined;
+    let closed: Promise<void> | undefined;
+    try {
+        const app = join(root, "Running Fixture.app"), contents = join(app, "Contents"), executable = join(contents, "MacOS", "fixture-sleep");
+        mkdirSync(join(contents, "MacOS"), { recursive: true });
+        // A fresh tiny executable avoids system-binary signing restrictions and
+        // installation-relative libraries in copied Homebrew Node executables.
+        const build = spawnSync("/usr/bin/xcrun", ["clang", "-x", "c", "-o", executable, "-"], {
+            input: '#include <unistd.h>\nint main(void) { write(1, "ready\\n", 6); sleep(60); return 0; }\n', encoding: "utf8",
+        });
+        assert.equal(build.status, 0, build.stderr);
+        const metadata = spawnSync("/usr/libexec/PlistBuddy", ["-c", "Add :CFBundleExecutable string fixture-sleep", join(contents, "Info.plist")], { encoding: "utf8" });
+        assert.equal(metadata.status, 0, metadata.stderr);
+        const running = () => spawnSync("/bin/bash", ["-c", 'source "$1"; rein_mac_running "$2"', "fixture", script, app], {
+            encoding: "utf8", env: { ...process.env, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        });
+        assert.equal(running().status, 1, "An installed but closed executable is not running.");
+        // Replacing argv[0] reproduces the path disappearing from ps.
+        child = spawn(executable, [], { argv0: "renamed rein fixture", stdio: ["ignore", "pipe", "pipe"] });
+        closed = new Promise(resolve => child!.once("close", () => resolve()));
+        await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("Renamed fixture did not start.")), 5000);
+            child!.once("error", error => { clearTimeout(timer); reject(error); });
+            child!.once("close", () => { clearTimeout(timer); reject(new Error("Renamed fixture exited before readiness.")); });
+            child!.stdout!.once("data", () => { clearTimeout(timer); resolve(); });
+        });
+        const result = running();
+        assert.equal(result.status, 0, `The mapped executable must identify a renamed running process: ${result.stderr}`);
+        const title = spawnSync("/bin/ps", ["-p", String(child.pid), "-o", "command="], { encoding: "utf8" });
+        assert.match(title.stdout, /renamed rein fixture/);
+        assert.equal(title.stdout.includes(executable), false, "The executable path must be absent from this ps fixture.");
+        child.kill("SIGTERM"); await closed;
+        assert.equal(running().status, 1, "A terminated fixture must stop blocking installation.");
+    } finally {
+        child?.kill("SIGKILL"); if (closed) await closed;
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("running-app fallback finds exact helper paths without matching another app", posix, () => {
+    const root = mkdtempSync(join(tmpdir(), "rein-helper-running-"));
+    try {
+        const app = join(root, "Rein Fixture.app");
+        const check = (command: string) => spawnSync("/bin/bash", ["-c", 'source "$1"; ps() { printf "%s\\n" "$REIN_FIX_COMMAND"; }; rein_mac_running "$2"', "fixture", script, app], {
+            encoding: "utf8", env: { ...process.env, REIN_FIX_COMMAND: command },
+        });
+        assert.equal(check(`${app}/Contents/Frameworks/rein-klaud Helper.app/Contents/MacOS/rein-klaud Helper --type=renderer`).status, 0);
+        assert.equal(check(`${app}.backup/Contents/Frameworks/rein-klaud Helper.app/Contents/MacOS/rein-klaud Helper`).status, 1);
+        assert.equal(check(`/usr/bin/printf ${app}/Contents/MacOS/rein-klaud`).status, 1);
+    } finally { rmSync(root, { recursive: true, force: true }); }
 });
