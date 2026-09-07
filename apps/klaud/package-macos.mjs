@@ -98,7 +98,12 @@ function nativeCode(path, entries = []) {
   }
   return entries;
 }
-function zip(target) { run("/usr/bin/ditto", ["-c", "-k", "--keepParent", app, target]); }
+function zip(target) {
+  // HFS metadata becomes ._ AppleDouble files in ZIPs. bsdtar can leave those
+  // beside framework symlinks, which invalidates the signed framework envelope.
+  // Distribute the signed files and symlinks without those metadata sidecars.
+  run("/usr/bin/ditto", ["-c", "-k", "--norsrc", "--keepParent", app, target]);
+}
 
 try {
   console.log(`Building rein-klaʊd ${metadata.version} for macOS ${arch}.`);
@@ -161,15 +166,12 @@ try {
   for (const target of targets) run("/usr/bin/codesign", ["--force", "--sign", identity, identity === "-" ? "--timestamp=none" : "--timestamp", ...(identity === "-" ? [] : ["--options", "runtime"]), ...(target.app ? ["--entitlements", entitlements] : []), target.path]);
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app]);
 
-  // Run only the headless Node entry. A build never opens the desktop app.
+  // Run only the headless Node entry after the final ZIP has been extracted by
+  // the installer's exact command. A build never opens the desktop app.
   let smoke = "not-run-cross-architecture";
   let canRun = arch === process.arch;
   if (!canRun && arch === "x64" && process.arch === "arm64") {
     try { run("/usr/bin/arch", ["-x86_64", "/usr/bin/true"]); canRun = true; } catch { /* Rosetta is optional, never installed by a build. */ }
-  }
-  if (canRun) {
-    run(process.execPath, [join(directory, "smoke-macos.mjs"), app]);
-    smoke = "passed";
   }
   let notarized = false;
   const archive = join(staging, `rein-klaud-macos-${arch}.zip`);
@@ -185,12 +187,29 @@ try {
     notarized = true;
     rmSync(archive); zip(archive);
   }
+  const archivePaths = run("/usr/bin/tar", ["-tf", archive]).trim().split("\n");
+  if (!archivePaths.length || archivePaths.some(path => !path.startsWith("rein-klaud.app/") || path.includes("\\") || path.split("/").some(part => part === ".." || part.startsWith("._")))) throw new Error("The app archive contains an unexpected path or AppleDouble metadata file.");
+  const roundtrip = join(staging, "installed");
+  mkdirSync(roundtrip);
+  run("/usr/bin/tar", ["-xf", archive, "--no-same-owner", "--no-same-permissions", "-C", roundtrip]);
+  const installedApp = join(roundtrip, "rein-klaud.app");
+  run("/usr/bin/codesign", ["--verify", "--deep", "--strict", installedApp]);
+  // A notarized release must retain its stapled ticket through the same ZIP
+  // roundtrip. Validate that directly instead of assuming metadata survived.
+  if (notarized) {
+    run("/usr/bin/xcrun", ["stapler", "validate", installedApp]);
+    run("/usr/sbin/spctl", ["--assess", "--type", "execute", installedApp]);
+  }
+  if (canRun) {
+    run(process.execPath, [join(directory, "smoke-macos.mjs"), installedApp]);
+    smoke = "passed";
+  }
   const destination = join(output, "macos", arch);
   mkdirSync(destination, { recursive: true });
   const finalApp = join(destination, "rein-klaud.app"), finalZip = join(output, basename(archive));
   rmSync(finalApp, { recursive: true, force: true });
   renameSync(app, finalApp); renameSync(archive, finalZip);
-  const report = { ...bundledBuild, artifact: basename(finalZip), bytes: statSync(finalZip).size, sha256: sha256(finalZip), codeSignature: identity === "-" ? "ad-hoc" : "developer-id", hardenedRuntime: identity !== "-", notarized, distribution: notarized ? "direct-distribution" : "local-development-only", smoke };
+  const report = { ...bundledBuild, artifact: basename(finalZip), bytes: statSync(finalZip).size, sha256: sha256(finalZip), codeSignature: identity === "-" ? "ad-hoc" : "developer-id", hardenedRuntime: identity !== "-", notarized, distribution: notarized ? "direct-distribution" : "local-development-only", archiveRoundtrip: "passed", smoke };
   writeFileSync(`${finalZip}.json`, JSON.stringify(report, null, 2) + "\n");
   writeFileSync(`${finalZip}.sha256`, `${report.sha256}  ${basename(finalZip)}\n`);
   console.log(JSON.stringify({ ...report, appPath: finalApp, zipPath: finalZip }, null, 2));
