@@ -10,6 +10,8 @@
   "scripts": {
     "postinstall": "install-electron",
     "build": "node build.mjs",
+    "package:macos": "node package-macos.mjs",
+    "package:macos:release": "node package-macos.mjs --release",
     "dev": "npm run build && electron .",
     "start": "electron .",
     "test": "node --test test/*.test.mjs"

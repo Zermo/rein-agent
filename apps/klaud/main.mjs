@@ -1,14 +1,15 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { constants, existsSync, lstatSync, openSync, closeSync, readFileSync, fstatSync } from "node:fs";
+import { constants, lstatSync, openSync, closeSync, readFileSync, fstatSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyDelta, applyShellPatch, frontendTools, replayEvents, requestRoute, sseEvents, validateConnection, validateMessages, validateState } from "./model.mjs";
 import { stopChild } from "./lifecycle.mjs";
+import { localRuntimeEnvironment, prepareLocalRuntime } from "./runtime-paths.mjs";
 
-const directory = dirname(fileURLToPath(import.meta.url)), root = resolve(directory, "../..");
+const directory = dirname(fileURLToPath(import.meta.url));
 const rendererUrl = pathToFileURL(join(directory, "dist/index.html")).href;
 const appIconPath = join(directory, "icon.png");
 const trayIconPath = busy => join(directory, `tray-${busy ? "working" : "ready"}${process.platform === "darwin" ? "Template" : ""}.png`);
@@ -83,11 +84,9 @@ async function stopOwnedServe() {
 }
 async function startLocal() {
   if (quitting) throw new Error("The app is quitting.");
-  // Installed packages cannot type-strip src/*.ts under node_modules.
-  const entry = existsSync(join(root, "dist/rein.js")) ? join(root, "dist/rein.js") : join(root, "bin/rein.js");
-  if (!existsSync(entry)) throw new Error("I couldn't find Rein. Run this app from the Rein checkout.");
+  const { entry, cwd, home } = prepareLocalRuntime({ packaged: app.isPackaged, appDirectory: directory, resourcesPath: process.resourcesPath, userHome: homedir(), reinHome: process.env.REIN_HOME });
   const child = spawn(process.execPath, [entry, "serve", "--port", "0"], {
-    cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, stdio: ["ignore", "pipe", "pipe"],
+    cwd, env: localRuntimeEnvironment({ packaged: app.isPackaged, environment: process.env, home, userHome: homedir() }), stdio: ["ignore", "pipe", "pipe"],
   });
   ownedServe = child;
   // Output is parsed privately. Neither stdout nor stderr is copied into app logs.
@@ -105,7 +104,6 @@ async function startLocal() {
     };
     child.stdout.on("data", data); child.once("error", fail); child.once("exit", exited);
   });
-  const home = resolve(process.env.REIN_HOME || join(homedir(), ".rein"));
   const file = join(home, "klaud", `serve-${new URL(url).port}.token`);
   for (const path of [home, dirname(file)]) if (!lstatSync(path).isDirectory() || lstatSync(path).isSymbolicLink()) throw new Error("Invalid Rein token directory.");
   const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);

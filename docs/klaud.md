@@ -12,6 +12,19 @@ default, unlock after the first interaction, and can be disabled in Settings.
 The preference stays on that device, and the renderer synthesizes the tones
 without audio assets or an added dependency.
 
+Install the native Mac app from the latest published release:
+
+```sh
+curl -fsSL https://github.com/Zermo/rein-agent/releases/latest/download/install-macos-app.sh | bash
+```
+
+The app includes its own runtime and goes into `~/Applications`. Choose
+**Start local rein serve** in the first window. Apple Silicon and Intel builds
+are selected automatically. Quit before updating and rerun the command; the
+previous app is preserved. Development releases are ad hoc signed and are not
+notarized, so normal macOS approval checks apply. See the
+[Mac release notes](macos-development-release.md).
+
 From a checkout, install the desktop dependencies once:
 
 ```sh
@@ -40,9 +53,9 @@ desktop does not connect to a model directly. Shell preferences apply live.
 File writes, edits, and command execution ask for a decision in the desktop.
 Hidden model reasoning is excluded from the displayed transcript.
 
-The desktop adds no runtime dependencies to the CLI. Its Electron and React
-dependencies are installed only inside `apps/klaud`. The first version runs from
-source; a signed desktop installer is not included.
+The desktop adds no runtime dependencies to the CLI. Development dependencies
+are installed only inside `apps/klaud`. The packaged Mac app keeps its embedded
+code immutable and starts its local server in `~/.rein/workspace` by default.
 
 ## Optional training
 

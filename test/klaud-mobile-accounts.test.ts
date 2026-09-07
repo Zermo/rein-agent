@@ -114,7 +114,9 @@ test("environment overrides cannot make mobile setup silently ineffective", asyn
 });
 
 test("account status uses only bounded read-only CLI checks and caches repeated requests", async t => {
-	const f = fixture(t);
+	// This test checks argv/caching, not process-start latency under a parallel
+	// suite. Short timeout and descendant cleanup have separate coverage below.
+	const f = fixture(t, { statusTimeoutMs: 10_000 });
 	const first = await f.accounts.list(); await f.accounts.list();
 	assert.equal(first.subscriptions.length, 3);
 	assert.deepEqual(f.rows().map(row => row.args).sort(), [["--version"], ["--version"], ["--version"], ["login", "status"]].sort());

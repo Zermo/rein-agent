@@ -4,7 +4,23 @@ Display name: **rein-klaʊd**. Bundle id: `org.zermo.rein-klaud`.
 
 This Electron app connects to `rein serve`. The server runs the agent loop and
 stores bot conversations. The React window displays that state and asks before
-approving an action. Node 22.18+ is required to install and build the Electron app.
+approving an action. The packaged Mac app includes its runtime. Node 22.18+
+is required only to develop or build it from source.
+
+Install the latest published Mac app:
+
+```sh
+curl -fsSL https://github.com/Zermo/rein-agent/releases/latest/download/install-macos-app.sh | bash
+```
+
+The installer selects Apple Silicon or Intel, verifies the release checksum,
+bundle identity, architecture and code-signature integrity, then installs into
+`~/Applications`. It preserves any prior valid app as a backup and refuses to
+replace a running, modified, or unrelated app. Quit before updating and rerun
+the same command. Add `--no-launch` after `bash -s --` to leave the app closed.
+Configuration and conversations stay in their existing local directories.
+Development releases have an ad hoc signature and are not notarized; normal
+macOS approval still applies. The installer never changes system protections.
 
 The window uses the same retro field guide design as Rein's setup guide and the
 canonical R-horse mark. Light mode uses cream paper with charcoal ink. Night
@@ -24,8 +40,10 @@ Installation downloads the platform's Electron binary through its supplied
 `install-electron` command. It does not start the app or a server.
 
 The first window offers **Start local rein serve** or **URL + token**. Starting
-locally launches this checkout's Rein CLI as a separate process with an ephemeral
-port. It reads the runtime token from `$REIN_HOME/klaud/serve-<port>.token`, or from
+locally launches the bundled Rein CLI (or the checkout's CLI during development)
+as a separate process with an ephemeral port. Packaged apps use
+`$REIN_HOME/workspace`, defaulting to `~/.rein/workspace`, as the writable working
+directory. They do not write into the signed app. It reads the runtime token from `$REIN_HOME/klaud/serve-<port>.token`, or from
 `~/.rein/klaud/` when `REIN_HOME` is unset. Tokens stay in the main process and
 are not logged or saved by the app.
 
@@ -78,6 +96,29 @@ The app uses the Rein field-guide computer icon for its window and Dock, plus
 dedicated R-horse tray icons for ready and working states. macOS receives native
 template images; Windows and Linux receive outlined field-guide colors that stay
 legible on light and dark panels. See `NOTICE` for dependency licenses.
-Packaging an installable `.app` is outside this first version; the bundle id is
-recorded in package metadata and used for application identity where the
-platform supports it.
+
+To package the committed CLI bundles and current desktop source on a Mac:
+
+```sh
+npm ci
+npm run package:macos -- --arch arm64
+npm run package:macos -- --arch x64
+```
+
+Each command writes `.build/rein-klaud-macos-<arch>.zip`, `.zip.sha256`, and a
+`.zip.json` build report. The app includes only explicit runtime assets,
+licenses and bundled skills. A headless smoke starts the embedded gateway and
+checks authenticated state without a model request, local account, or window.
+Cross-architecture execution uses existing Rosetta when available; otherwise
+the report records that its runtime smoke did not run.
+
+Default packages use ad hoc development signing. For notarized distribution,
+set `REIN_MAC_SIGN_IDENTITY` to an installed Developer ID Application identity
+and `REIN_MAC_NOTARY_PROFILE` to an existing notarytool Keychain profile, then
+add `--release`. That mode requires accepted notarization and staples the ticket.
+The build never submits anything to the Mac App Store.
+
+The **Native Mac app** GitHub workflow builds both architectures from a supplied
+tag. Its optional publish input uploads ZIPs, checksum files, build reports and
+the curl helper to that tag's release. Those CI packages use development signing;
+see [release notes](../../docs/macos-development-release.md).

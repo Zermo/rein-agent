@@ -1,0 +1,77 @@
+name: Native Mac app
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to package
+        required: true
+        type: string
+      publish:
+        description: Publish development app assets to this tag's GitHub release
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: node
+          cache: npm
+          cache-dependency-path: apps/klaud/package-lock.json
+      - run: npm --prefix apps/klaud ci
+      - run: npm --prefix apps/klaud test
+      - run: node --test test/macos-app-install.test.ts
+      - name: Package with embedded runtime and run headless smoke
+        run: npm --prefix apps/klaud run package:macos -- --arch '${{ matrix.arch }}'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rein-klaud-macos-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            apps/klaud/.build/rein-klaud-macos-${{ matrix.arch }}.zip
+            apps/klaud/.build/rein-klaud-macos-${{ matrix.arch }}.zip.sha256
+            apps/klaud/.build/rein-klaud-macos-${{ matrix.arch }}.zip.json
+
+  publish:
+    if: inputs.publish
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: rein-klaud-macos-*
+          merge-multiple: true
+          path: release-assets
+      - name: Publish direct-install assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          cp scripts/install-macos-app.sh release-assets/install-macos-app.sh
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "Rein $RELEASE_TAG" --notes-file docs/macos-development-release.md
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
