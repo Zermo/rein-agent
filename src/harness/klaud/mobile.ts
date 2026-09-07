@@ -18,6 +18,7 @@ import type { AgUiEvent } from "../../ai/ag-ui.ts";
 import { advertiseMobileGateway, mobileAdvertisementHost } from "./mdns.ts";
 import type { MobileAdvertisementHandle, MobileAdvertiser } from "./mdns.ts";
 import { startKlaudServe } from "./serve.ts";
+import { createMobileAccounts, MobileAccountError } from "./mobile-accounts.ts";
 
 export interface MobileGatewayOptions {
 	/** A numeric private, loopback, link-local, ULA, or private-mesh address. */
@@ -335,6 +336,7 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 	const token = validateToken(opts.token ?? storedToken ?? randomBytes(32).toString("hex"));
 	const authorization = Buffer.from(`Bearer ${token}`);
 	const backend = await startKlaudServe({ home, cwd, run: opts.run, token: randomBytes(32).toString("hex") });
+	const accounts = createMobileAccounts({ home });
 	const runs = new Map<string, MobileRun>(), tombstones = new Map<string, MobileRunTombstone>(), executions = new Set<Promise<void>>();
 	let closing: Promise<void> | undefined, url = "", allowedAuthorities = new Set<string>(), allowedOrigins = new Set<string>(), advertisement: MobileAdvertisementHandle | undefined;
 
@@ -515,9 +517,16 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			if (provided.length !== authorization.length || !timingSafeEqual(provided, authorization)) throw new HttpError(401, "Bearer token required.");
 			const parsed = new URL(req.url ?? "/", "http://rein.invalid");
 			if (parsed.pathname === API_ROOT && req.method === "GET") {
-				json(res, 200, { name: "rein-klaʊd-mobile", apiVersion: "v1", capabilities: ["resumable-events", "cancellation", "pending-actions", "bots", "shared-state"], ...(trustedOrigin ? { trustedOrigin } : {}) }); return;
+				json(res, 200, { name: "rein-klaʊd-mobile", apiVersion: "v1", capabilities: ["resumable-events", "cancellation", "pending-actions", "bots", "shared-state", "account-setup", "cli-device-auth"], ...(trustedOrigin ? { trustedOrigin } : {}) }); return;
 			}
 			if (parsed.pathname === `${API_ROOT}/health` && req.method === "GET") { json(res, 200, { ok: true, name: "rein-klaʊd-mobile", apiVersion: "v1" }); return; }
+
+			if (parsed.pathname === `${API_ROOT}/accounts` && req.method === "GET") { json(res, 200, await accounts.list()); return; }
+			if (parsed.pathname === `${API_ROOT}/accounts/provider` && req.method === "PUT") { json(res, 200, accounts.select(await requestBody(req))); return; }
+			if (parsed.pathname === `${API_ROOT}/accounts/logins` && req.method === "POST") { json(res, 202, accounts.start(await requestBody(req))); return; }
+			const loginRoute = new RegExp(`^${API_ROOT}/accounts/logins/([a-f0-9-]+)$`).exec(parsed.pathname);
+			if (loginRoute && req.method === "GET") { json(res, 200, accounts.get(loginRoute[1])); return; }
+			if (loginRoute && req.method === "DELETE") { json(res, 200, accounts.cancel(loginRoute[1])); return; }
 
 			const relative = parsed.pathname.slice(API_ROOT.length) + parsed.search;
 			if (req.method === "GET" && (parsed.pathname === `${API_ROOT}/state` || parsed.pathname === `${API_ROOT}/bots` || /^\/v1\/mobile\/bots\/[^/]+\/messages$/.test(parsed.pathname))) {
@@ -616,7 +625,7 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			if (res.headersSent || res.destroyed) { if (!res.destroyed) res.destroy(); return; }
 			if (error instanceof HttpError && error.status === 401) res.setHeader("WWW-Authenticate", "Bearer");
 			res.setHeader("Connection", "close");
-			json(res, error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : "Mobile gateway request failed." });
+			json(res, error instanceof HttpError || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError || error instanceof MobileAccountError ? error.message : "Mobile gateway request failed." });
 		});
 	});
 	server.requestTimeout = 15_000; server.headersTimeout = 5000;
@@ -645,6 +654,7 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			} catch { /* Discovery is optional; the explicit address remains usable. */ }
 		}
 	} catch (error) {
+		await accounts.close();
 		await new Promise<void>(resolveClose => server.close(() => resolveClose()));
 		await backend.close();
 		throw error;
@@ -654,6 +664,7 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 		url, token, tokenFile, trustedOrigin,
 		close() {
 			if (!closing) closing = (async () => {
+				await accounts.close();
 				try { await advertisement?.close(); } catch { /* Optional discovery cannot block shutdown. */ }
 				for (const run of runs.values()) if (!["completed", "failed", "cancelled"].includes(run.status)) await cancel(run).catch(() => run.controller.abort());
 				await Promise.allSettled([...executions]);

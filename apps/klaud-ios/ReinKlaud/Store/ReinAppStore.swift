@@ -32,6 +32,8 @@ final class ReinAppStore: ObservableObject {
     @Published private(set) var state = ReinState.empty
     @Published private(set) var connectedURL: URL?
     @Published var selectedBotID: String?
+    // Keep the unsent composer alive while connecting replaces the chat view.
+    @Published var chatDraft = ""
     @Published var section: AppSection = .chat
     @Published private(set) var messagesByBot: [String: [ReinMessage]] = [:]
     @Published private(set) var historyCursor: [String: Int?] = [:]
@@ -42,10 +44,15 @@ final class ReinAppStore: ObservableObject {
     @Published var notice: String?
     @Published var pendingDecision: PendingDecision?
     @Published private(set) var pendingRunRecovery: PendingRunRecovery?
+    @Published var showCloudWorkspace = false
+    @Published private(set) var isCheckingRoute = false
+    @Published private(set) var gatewayUnavailable = false
+    let cloud: CloudWorkspace
 
     private(set) var currentRunID: String?
     private var client: ReinGatewayClientProtocol?
     private var connectionGeneration = 0
+    private var routingGeneration = 0
     private var runTask: Task<Void, Never>?
     private var runTaskGeneration = 0
     private let secrets: SecretStore
@@ -71,6 +78,7 @@ final class ReinAppStore: ObservableObject {
         sounds: ReinSoundEngine? = nil,
         eventCursor: RunEventCursor? = nil,
         pendingRunRequests: PendingRunRequestStorage? = nil,
+        cloudWorkspace: CloudWorkspace? = nil,
         makeClient: @escaping @Sendable (GatewayConnection) -> ReinGatewayClientProtocol = { ReinGatewayClient(connection: $0) },
         makeRunID: @escaping @Sendable () -> String = { UUID().uuidString.lowercased() },
         now: @escaping @Sendable () -> Date = { Date() }
@@ -83,6 +91,7 @@ final class ReinAppStore: ObservableObject {
         self.makeClient = makeClient
         self.makeRunID = makeRunID
         self.now = now
+        cloud = cloudWorkspace ?? CloudWorkspace(defaults: defaults, secrets: secrets)
     }
 
     var selectedBot: ReinBot? { state.bots.first { $0.id == selectedBotID } }
@@ -90,8 +99,78 @@ final class ReinAppStore: ObservableObject {
     var savedURL: String { defaults.string(forKey: Self.URLKey) ?? "" }
     var savedToken: String { savedToken(for: savedURL) }
     var canLoadEarlier: Bool { selectedBotID.flatMap { historyCursor[$0] ?? nil } != nil }
+    var accountConnection: GatewayConnection? {
+        guard let connectedURL else { return nil }
+        return try? ConnectionValidator.validate(url: connectedURL.absoluteString, token: savedToken(for: connectedURL.absoluteString))
+    }
 
-    func connect(rawURL: String, token: String) async {
+    func openCloudAccounts() { cloud.page = .accounts; showCloudWorkspace = true }
+    func openDirectChat() {
+        cloud.prepareContext(origin: connectedURL, botID: selectedBotID, recent: selectedMessages)
+        cloud.page = .chat; showCloudWorkspace = true
+    }
+
+    func useBackup(_ backup: BackupGateway) async {
+        routingGeneration &+= 1
+        let route = routingGeneration
+        do {
+            let connection = try cloud.connection(for: backup)
+            await connect(rawURL: connection.baseURL.absoluteString, token: connection.token, isBackup: true)
+            if routingGeneration == route, connectedURL == connection.baseURL { showCloudWorkspace = false; notice = "Connected to backup \(backup.name). This host has its own sessions; original tasks remain tracked on their host." }
+        } catch { if routingGeneration == route { fail(error) } }
+    }
+
+    /// A read-only preflight can change routes before a task is submitted. Once
+    /// submitted, a missing response never causes automatic task replay.
+    func sendWithFallback(_ text: String) async -> Bool {
+        guard !isCheckingRoute, !isRunning, trackedRunID == nil, let context = currentConnectionContext() else { return false }
+        guard cloud.hasAutomaticFallback else { return send(text) }
+        let route = routingGeneration
+        let sourceBotID = selectedBotID, sourceMessages = selectedMessages
+        isCheckingRoute = true
+        defer { isCheckingRoute = false }
+        do {
+            try await context.client.probe()
+            try requireCurrentConnection(context)
+            guard selectedBotID == sourceBotID else {
+                notice = "The selected field unit changed. Review it before sending your draft."
+                return false
+            }
+            gatewayUnavailable = false
+            return send(text)
+        } catch {
+            guard isCurrentConnection(context), GatewayFallbackPolicy.isUnavailable(error) else {
+                if isCurrentConnection(context) { fail(error) }
+                return false
+            }
+            gatewayUnavailable = true
+            guard cloud.hasAutomaticFallback else { fail(error); return false }
+            if await tryBackup(excluding: context.origin, route: route) {
+                notice = "Backup connected. Review its selected field unit, then send your message. The draft has been kept."
+                return false
+            }
+            guard routingGeneration == route, !Task.isCancelled, cloud.hasAutomaticFallback else { return false }
+            guard !cloud.accounts.accounts.isEmpty else { fail(error); return false }
+            cloud.prepareContext(origin: context.origin, botID: sourceBotID, recent: sourceMessages)
+            cloud.page = .chat; showCloudWorkspace = true
+            return cloud.send(text, sounds: sounds)
+        }
+    }
+
+    private func tryBackup(excluding origin: URL, route: Int) async -> Bool {
+        for backup in cloud.backups where backup.origin != origin {
+            guard !Task.isCancelled, routingGeneration == route, cloud.hasAutomaticFallback else { return false }
+            guard let connection = try? cloud.connection(for: backup) else { continue }
+            await connect(rawURL: connection.baseURL.absoluteString, token: connection.token, isBackup: true)
+            guard !Task.isCancelled, routingGeneration == route else { return false }
+            if connectedURL == connection.baseURL { return true }
+        }
+        return false
+    }
+
+    func connect(rawURL: String, token: String, isBackup: Bool = false) async {
+        if !isBackup { routingGeneration &+= 1 }
+        let route = routingGeneration
         isConnecting = true; errorMessage = nil
         let connection: GatewayConnection
         do { connection = try ConnectionValidator.validate(url: rawURL, token: token) }
@@ -108,8 +187,8 @@ final class ReinAppStore: ObservableObject {
             let candidate = makeClient(connection)
             let snapshot = try await candidate.state()
             guard connectionGeneration == generation, !Task.isCancelled else { return }
-            client = candidate; state = snapshot; connectedURL = connection.baseURL
-            defaults.set(connection.baseURL.absoluteString, forKey: Self.URLKey)
+            client = candidate; state = snapshot; connectedURL = connection.baseURL; gatewayUnavailable = false
+            if !isBackup { defaults.set(connection.baseURL.absoluteString, forKey: Self.URLKey) }
             try secrets.write(connection.token, account: tokenAccount(for: connection.baseURL))
             try? secrets.delete(account: Self.legacyTokenAccount)
             let context = StoreConnectionContext(client: candidate, generation: generation, origin: connection.baseURL)
@@ -122,17 +201,24 @@ final class ReinAppStore: ObservableObject {
         } catch {
             guard connectionGeneration == generation, !Task.isCancelled else { return }
             fail(error)
+            if !isBackup, cloud.hasAutomaticFallback, GatewayFallbackPolicy.isUnavailable(error) {
+                if await tryBackup(excluding: connection.baseURL, route: route) { showCloudWorkspace = false; return }
+                guard routingGeneration == route, !Task.isCancelled else { return }
+                if !cloud.accounts.accounts.isEmpty { openDirectChat() }
+            }
         }
         if connectionGeneration == generation { isConnecting = false }
     }
 
     func disconnect(forget: Bool = false) {
+        routingGeneration &+= 1
         let tokenOrigin = connectedURL ?? canonicalOrigin(from: savedURL)
         let activeRunID = currentRunID ?? tokenOrigin.flatMap(storedActiveRunID)
         connectionGeneration &+= 1
         runTask?.cancel(); runTask = nil; runTaskGeneration &+= 1
         automaticActionTasks.values.forEach { $0.cancel() }; automaticActionTasks.removeAll()
         client = nil; connectedURL = nil; isConnecting = false; isRunning = false; isLoadingHistory = false; currentRunID = nil; pendingRunRecovery = nil
+        gatewayUnavailable = false
         clearPendingActions(for: activeRunID); notice = nil; errorMessage = nil
         if forget {
             defaults.removeObject(forKey: Self.URLKey)
@@ -969,5 +1055,9 @@ final class ReinAppStore: ObservableObject {
     private func fail(_ error: Error) {
         let value = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         errorMessage = String(value.prefix(1_000)); sounds.play(.error)
+        if GatewayFallbackPolicy.isUnavailable(error) {
+            gatewayUnavailable = true
+            if cloud.hasAutomaticFallback, connectedURL != nil { openDirectChat() }
+        }
     }
 }

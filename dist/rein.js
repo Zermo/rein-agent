@@ -96,23 +96,23 @@ function sshArguments(host, baseUrl, localPort) {
 }
 async function unusedPort() {
   const server = createServer();
-  await new Promise((resolve31, reject) => {
+  await new Promise((resolve32, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve31);
+    server.listen(0, "127.0.0.1", resolve32);
   });
   const port = server.address().port;
-  await new Promise((resolve31, reject) => server.close((error) => error ? reject(error) : resolve31()));
+  await new Promise((resolve32, reject) => server.close((error) => error ? reject(error) : resolve32()));
   return port;
 }
 function portReady(port) {
-  return new Promise((resolve31) => {
+  return new Promise((resolve32) => {
     const socket = createConnection({ host: "127.0.0.1", port });
     let done = false;
     const finish = (ready) => {
       if (done) return;
       done = true;
       socket.destroy();
-      resolve31(ready);
+      resolve32(ready);
     };
     socket.once("connect", () => finish(true));
     socket.once("error", () => finish(false));
@@ -129,16 +129,16 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
   let failure;
   let closed = false;
   let stderr = "";
-  const exited = new Promise((resolve31) => {
+  const exited = new Promise((resolve32) => {
     child.once("error", (error) => {
       failure = error;
       closed = true;
-      resolve31();
+      resolve32();
     });
     child.once("close", (code) => {
       closed = true;
       failure ??= new Error(`SSH exited (${code ?? "signal"}). ${stderr.trim()}`);
-      resolve31();
+      resolve32();
     });
   });
   child.stderr?.on("data", (chunk) => {
@@ -156,7 +156,7 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
       if (failure) throw new Error(`Cannot open SSH tunnel through ${sshHost}: ${failure.message}. Check that ssh ${sshHost} works with key authentication.`);
       if (Date.now() >= deadline) throw new Error(`SSH tunnel through ${sshHost} timed out. Check the VPN and SSH connection.`);
       if (await portReady(port)) break;
-      await new Promise((resolve31) => setTimeout(resolve31, 40));
+      await new Promise((resolve32) => setTimeout(resolve32, 40));
     }
     const forwarded = new URL(baseUrl);
     forwarded.hostname = "127.0.0.1";
@@ -652,7 +652,7 @@ function parseLinuxNeighbors(output) {
   }))];
 }
 function commandOutput(command, args) {
-  return new Promise((resolve31, reject) => execFile(command, args, { encoding: "utf8", timeout: 1200, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve31(stdout)));
+  return new Promise((resolve32, reject) => execFile(command, args, { encoding: "utf8", timeout: 1200, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve32(stdout)));
 }
 async function knownPeers(dependencies) {
   const platform2 = dependencies.platform ?? process.platform;
@@ -903,23 +903,23 @@ function scopedApiKeyFor(provider, baseUrl, sshHost, allowGeneric = true) {
 function loadConfig() {
   return readConfig();
 }
-async function resolveModel(overrides = {}) {
+async function resolveModel(overrides2 = {}) {
   const config = loadConfig();
   const envBase = process.env.REIN_BASE_URL?.trim() || void 0;
   const envModel = process.env.REIN_MODEL?.trim() || void 0;
-  const providerOverride = overrides.provider?.toLowerCase();
-  const requestedApi = overrides.api ?? (process.env.REIN_API?.trim() || void 0);
+  const providerOverride = overrides2.provider?.toLowerCase();
+  const requestedApi = overrides2.api ?? (process.env.REIN_API?.trim() || void 0);
   if (requestedApi !== void 0) validateHttpApi(requestedApi);
-  const selectingEndpoint = overrides.baseUrl !== void 0 || !!envBase;
+  const selectingEndpoint = overrides2.baseUrl !== void 0 || !!envBase;
   const configuredProvider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0);
   const providerName = providerOverride ?? (selectingEndpoint ? void 0 : configuredProvider);
   if (providerName === "github") throw new Error(GITHUB_MODELS_RETIRED);
   if (providerName === "codex" || providerName === "copilot" || providerName === "grok") {
     if (requestedApi !== void 0) throw new Error("--api/REIN_API selects an HTTP API protocol. Subscription CLI providers manage their own transport.");
-    if (overrides.baseUrl !== void 0 || envBase) throw new Error(`CLI provider ${providerName} cannot be combined with an HTTP base URL. Remove --base-url/REIN_BASE_URL or select an API provider.`);
-    if (overrides.sshHost) throw new Error("SSH forwarding applies to HTTP API providers, not subscription CLI providers.");
+    if (overrides2.baseUrl !== void 0 || envBase) throw new Error(`CLI provider ${providerName} cannot be combined with an HTTP base URL. Remove --base-url/REIN_BASE_URL or select an API provider.`);
+    if (overrides2.sshHost) throw new Error("SSH forwarding applies to HTTP API providers, not subscription CLI providers.");
     return {
-      id: overrides.model ?? envModel ?? (configuredProvider === providerName ? config.model : void 0) ?? "default",
+      id: overrides2.model ?? envModel ?? (configuredProvider === providerName ? config.model : void 0) ?? "default",
       provider: providerName,
       baseUrl: `cli://${providerName}`,
       contextWindow: config.contextWindow ?? 32768,
@@ -929,19 +929,19 @@ async function resolveModel(overrides = {}) {
   validateHttpApi(requestedApi ?? config.api);
   const preset = providerName ? PROVIDER_PRESETS[providerName] : void 0;
   if (providerOverride && !preset && !["custom", "openai-compatible"].includes(providerOverride)) {
-    throw new Error(`Unknown provider "${overrides.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, grok, custom`);
+    throw new Error(`Unknown provider "${overrides2.provider}". Known: ${Object.keys(PROVIDER_PRESETS).join(", ")}, codex, copilot, grok, custom`);
   }
   const configuredBase = config.auth?.type !== "cli" && !config.baseUrl?.startsWith("cli://") ? config.baseUrl : void 0;
-  const rawBase = overrides.baseUrl ?? (providerOverride ? preset?.baseUrl : void 0) ?? envBase ?? configuredBase ?? preset?.baseUrl;
+  const rawBase = overrides2.baseUrl ?? (providerOverride ? preset?.baseUrl : void 0) ?? envBase ?? configuredBase ?? preset?.baseUrl;
   const baseUrl = rawBase ? normalizeBaseUrl(rawBase, providerName) : "";
   let sameEndpoint = false;
   try {
     sameEndpoint = !!baseUrl && normalizeBaseUrl(configuredBase ?? (configuredProvider ? PROVIDER_PRESETS[configuredProvider]?.baseUrl ?? "" : "")) === baseUrl;
   } catch {
   }
-  if (overrides.sshHost !== void 0 && overrides.sshHost !== config.sshHost) sameEndpoint = false;
-  const modelId = overrides.model ?? envModel ?? (sameEndpoint || !baseUrl && !configuredBase && config.auth?.type !== "cli" ? config.model : void 0);
-  const sshHost = overrides.sshHost ?? (sameEndpoint ? config.sshHost : void 0);
+  if (overrides2.sshHost !== void 0 && overrides2.sshHost !== config.sshHost) sameEndpoint = false;
+  const modelId = overrides2.model ?? envModel ?? (sameEndpoint || !baseUrl && !configuredBase && config.auth?.type !== "cli" ? config.model : void 0);
+  const sshHost = overrides2.sshHost ?? (sameEndpoint ? config.sshHost : void 0);
   const metadata = { contextWindow: config.contextWindow ?? 32768, maxTokens: config.maxTokens ?? 4096, ...sshHost ? { sshHost } : {} };
   if (baseUrl) {
     const provider = providerName ?? guessProvider(baseUrl, "custom");
@@ -2453,7 +2453,7 @@ import { tmpdir } from "node:os";
 import { join as join6 } from "node:path";
 function runProgram(command, args, signal, timeoutMs) {
   signal.throwIfAborted();
-  return new Promise((resolve31, reject) => {
+  return new Promise((resolve32, reject) => {
     const child = spawn3(command, args, { shell: false, detached: true, stdio: "inherit" });
     let closed = false, settled = false, code = null, error;
     let escalation;
@@ -2470,7 +2470,7 @@ function runProgram(command, args, signal, timeoutMs) {
       signal.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (code !== 0) reject(new Error(`${command} exited ${code ?? "after a signal"}.`));
-      else resolve31();
+      else resolve32();
     };
     const stop = (reason2) => {
       if (error) return;
@@ -2952,9 +2952,9 @@ var init_budgets = __esm({
 });
 
 // src/harness/run-budgets.ts
-function resolveRunBudgets(config = {}, overrides = {}) {
-  const maxTurns = validateMaxTurns(overrides.maxTurns !== void 0 ? overrides.maxTurns : config.maxTurns !== void 0 ? config.maxTurns : DEFAULT_MAX_TURNS);
-  const maxIterations = overrides.maxIterations !== void 0 ? overrides.maxIterations : config.maxIterations !== void 0 ? config.maxIterations : DEFAULT_MAX_ITERATIONS;
+function resolveRunBudgets(config = {}, overrides2 = {}) {
+  const maxTurns = validateMaxTurns(overrides2.maxTurns !== void 0 ? overrides2.maxTurns : config.maxTurns !== void 0 ? config.maxTurns : DEFAULT_MAX_TURNS);
+  const maxIterations = overrides2.maxIterations !== void 0 ? overrides2.maxIterations : config.maxIterations !== void 0 ? config.maxIterations : DEFAULT_MAX_ITERATIONS;
   if (!Number.isSafeInteger(maxIterations) || maxIterations < 1 || maxIterations > 1e3) throw new Error("maxIterations must be an integer from 1 to 1000. Run rein setup budgets to change it.");
   return { maxTurns, maxIterations };
 }
@@ -3361,8 +3361,8 @@ var init_event_stream = __esm({
       constructor(isComplete, extractResult) {
         this.isComplete = isComplete ?? (() => false);
         this.extractResult = extractResult ?? ((event) => event);
-        this.finalResultPromise = new Promise((resolve31) => {
-          this.resolveFinalResult = resolve31;
+        this.finalResultPromise = new Promise((resolve32) => {
+          this.resolveFinalResult = resolve32;
         });
       }
       push(event) {
@@ -3391,7 +3391,7 @@ var init_event_stream = __esm({
           if (this.queue.length > 0) yield this.queue.shift();
           else if (this.done) return;
           else {
-            const result = await new Promise((resolve31) => this.waiting.push(resolve31));
+            const result = await new Promise((resolve32) => this.waiting.push(resolve32));
             if (result.done) return;
             yield result.value;
           }
@@ -3642,8 +3642,8 @@ function rejectedField(detail) {
   const rejectedClause = message.split(/[.!?;\n]/).find((clause) => UNSUPPORTED.test(clause));
   const named = rejectedClause?.match(/(?:unsupported(?:[_ ](?:parameter|argument|field|value))?|unrecognized(?: request)?(?: argument)?(?: supplied)?|unknown(?: (?:parameter|field|argument))?|unexpected(?: keyword)?(?: argument)?)[\s:="'`]*([a-z_]+)/i)?.[1];
   const before = rejectedClause?.match(/\b(max_tokens|stream_options|temperature|top_p|cache_prompt)\b[\s"'`]*(?:is |does )?(?:not supported|not support|unsupported)/i)?.[1];
-  const field = typeof parameter === "string" ? parameter.match(FIELD)?.[1] : named ? named.match(FIELD)?.[0] === named ? named : void 0 : before;
-  return { field: field === "max_completion_tokens" ? void 0 : field, message };
+  const field2 = typeof parameter === "string" ? parameter.match(FIELD)?.[1] : named ? named.match(FIELD)?.[0] === named ? named : void 0 : before;
+  return { field: field2 === "max_completion_tokens" ? void 0 : field2, message };
 }
 async function postChatCompletion(url, body2, init = {}, fetchFn = fetch, onCompatibilityFallback) {
   const requestBody2 = { ...body2 };
@@ -3653,15 +3653,15 @@ async function postChatCompletion(url, body2, init = {}, fetchFn = fetch, onComp
     const response = await fetchFn(url, { ...init, method: "POST", body: JSON.stringify(requestBody2), redirect: "error" });
     if (response.status !== 400 && response.status !== 422) return response;
     const detail = await response.clone().text();
-    const { field, message } = rejectedField(detail);
-    if (!field || changed.has(field) || !Object.hasOwn(requestBody2, field)) return response;
-    if (field === "max_tokens") {
+    const { field: field2, message } = rejectedField(detail);
+    if (!field2 || changed.has(field2) || !Object.hasOwn(requestBody2, field2)) return response;
+    if (field2 === "max_tokens") {
       if (!/\bmax_completion_tokens\b/.test(message) || !/\bmax_tokens\b/.test(detail)) return response;
       if (!Object.hasOwn(requestBody2, "max_completion_tokens")) requestBody2.max_completion_tokens = requestBody2.max_tokens;
     }
-    delete requestBody2[field];
-    changed.add(field);
-    onCompatibilityFallback?.(field);
+    delete requestBody2[field2];
+    changed.add(field2);
+    onCompatibilityFallback?.(field2);
     await response.body?.cancel();
   }
 }
@@ -3831,8 +3831,8 @@ Parameters: ${JSON.stringify(t.parameters)}`).join("\n\n"));
         headers,
         signal: options.signal,
         redirect: "error"
-      }, fetch, (field) => {
-        if (field === "cache_prompt") promptCacheUnsupported.add(promptCacheKey);
+      }, fetch, (field2) => {
+        if (field2 === "cache_prompt") promptCacheUnsupported.add(promptCacheKey);
       });
       if (!response.ok) {
         const text = await response.text().catch(() => "");
@@ -4005,8 +4005,8 @@ import { join as join9 } from "node:path";
 function cliAuthDirectory(provider, env = process.env) {
   return join9(env.REIN_HOME || join9(homedir4(), ".rein"), "cli-auth", provider);
 }
-function cliEnvironment(provider, overrides = {}) {
-  const env = { ...process.env, ...overrides };
+function cliEnvironment(provider, overrides2 = {}) {
+  const env = { ...process.env, ...overrides2 };
   for (const key of Object.keys(env)) if (key.startsWith("COPILOT_PROVIDER_")) delete env[key];
   for (const key of ["ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY", "OPENAI_API_BASE", "OPENAI_BASE_URL", "OPENAI_API_KEY", "XAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "COPILOT_ALLOW_ALL", "NODE_OPTIONS", "BASH_ENV", "ENV"]) delete env[key];
   if (provider === "grok") return grokEnvironment(env, cliAuthDirectory(provider, env));
@@ -4119,7 +4119,7 @@ function streamCli(model, context, options = {}) {
   return out;
 }
 function runCliProcess(provider, args, input, cwd, env, options) {
-  return new Promise((resolve31, reject) => {
+  return new Promise((resolve32, reject) => {
     const child = spawn5(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
     let stdout = "", stderr = "", pendingLine = "", bytes = 0, error, forceKill;
     let closed = false, settled = false, exitCode = null, exitSignal = null;
@@ -4152,7 +4152,7 @@ function runCliProcess(provider, args, input, cwd, env, options) {
       options.signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (exitCode !== 0) reject(new Error(`${provider} CLI exited ${exitCode ?? exitSignal}. ${stderr.trim().slice(-2e3)} Run 'rein login ${provider}' if authentication is required.`));
-      else resolve31(stdout);
+      else resolve32(stdout);
     };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -4942,8 +4942,8 @@ var init_tmux = __esm({
           throw error;
         }
       }
-      environment(overrides) {
-        const current = { ...process.env, ...overrides };
+      environment(overrides2) {
+        const current = { ...process.env, ...overrides2 };
         for (const [name, value] of Object.entries(current)) {
           if (!name || /[=\0\n]/.test(name) || value !== void 0 && (typeof value !== "string" || value.includes("\0"))) throw new Error("Invalid shell environment variable.");
         }
@@ -5065,7 +5065,7 @@ var init_tmux = __esm({
 import { spawn as spawn7 } from "node:child_process";
 async function runShell(command, cwd, timeout, signal) {
   if (signal?.aborted) return { stdout: "", stderr: "", code: 1, reason: "Operation aborted" };
-  return new Promise((resolve31) => {
+  return new Promise((resolve32) => {
     const child = spawn7("bash", ["-c", command], { cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, code = 1, reason2;
     let closed = false, settled = false, killTimer;
@@ -5081,7 +5081,7 @@ async function runShell(command, cwd, timeout, signal) {
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
-      resolve31({ stdout, stderr, code, reason: reason2 });
+      resolve32({ stdout, stderr, code, reason: reason2 });
     };
     const stop = (detail) => {
       if (reason2) return;
@@ -5666,7 +5666,7 @@ function browserEnvironment() {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => names.has(name))), RUST_LOG: "error", NO_COLOR: "1" };
 }
 function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
-  return new Promise((resolve31, reject) => {
+  return new Promise((resolve32, reject) => {
     const child = spawn8(executable2, args, { cwd, env: browserEnvironment(), detached: process.platform !== "win32", shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, closed = false, settled = false, exitCode = null, error;
     let escalation;
@@ -5684,7 +5684,7 @@ function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
       signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (exitCode !== 0) reject(new Error(`Obscura exited ${exitCode ?? "with a signal"}: ${cleanWebText(stderr).trim().slice(-1500) || "page navigation failed"}`));
-      else resolve31(stdout);
+      else resolve32(stdout);
     };
     const stop = (message) => {
       if (error) return;
@@ -6015,12 +6015,12 @@ function toolsForCwd(cwd) {
     return {
       ...tool,
       execute(id, args, signal, onUpdate) {
-        const field = tool.name === "gates" ? "root" : "path";
-        const value = args[field];
+        const field2 = tool.name === "gates" ? "root" : "path";
+        const value = args[field2];
         const defaultsToRoot = tool.name === "gates" || optionalPaths.has(tool.name);
         const expanded = value === "~" ? homedir10() : typeof value === "string" && value.startsWith("~/") ? resolve9(homedir10(), value.slice(2)) : value;
         const path2 = typeof expanded === "string" ? resolve9(root2, expanded) : value === void 0 && defaultsToRoot ? root2 : value;
-        return tool.execute(id, { ...args, [field]: path2 }, signal, onUpdate);
+        return tool.execute(id, { ...args, [field2]: path2 }, signal, onUpdate);
       }
     };
   })];
@@ -6122,7 +6122,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
   }
   postEvent(request3, { nodeterm_pending_id: pendingId });
   const deadline = Date.now() + wait * 1e3;
-  return new Promise((resolve31) => {
+  return new Promise((resolve32) => {
     let timer, settled = false;
     const finish = (answer, answered = false) => {
       if (settled) return;
@@ -6139,7 +6139,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
         { hook_event_name: "PostToolUse", tool_name: toolName, hookSpecificOutput: { hookEventName: "PostToolUse" } },
         { nodeterm_answered: answer }
       );
-      resolve31(answer);
+      resolve32(answer);
     };
     const abort = () => finish("deny");
     const tick = () => {
@@ -6379,18 +6379,18 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
       prepare(messages) {
         this.pageTokensAllocated = 0;
         if (this.enabled && this.used(messages) >= this.line) this.autoRollover(messages, "threshold");
-        let active2 = this.active(messages);
+        let active3 = this.active(messages);
         const used = this.used(messages);
         const remindAt = this.line - Math.min(32e3, Math.floor(this.line * 0.1));
         if (this.enabled && used >= remindAt && used < this.line) {
           const seen = this.entries.some((e) => "type" in e && e.type === "posthorse-reminder" && e.windowId === this.windowId && e.contextWindow === this.model.contextWindow && e.reserveTokens === this.reserveTokens);
           if (!seen) {
             this.store({ type: "posthorse-reminder", id: randomUUID8(), timestamp: Date.now(), windowId: this.windowId, contextWindow: this.model.contextWindow, reserveTokens: this.reserveTokens });
-            active2 = [...active2, { role: "user", timestamp: Date.now(), content: "[posthorse] Checkpoint now: save goal/progress/decisions/next steps in notes, then call new_context. This reminder is best-effort; automatic rollover may occur without it." }];
+            active3 = [...active3, { role: "user", timestamp: Date.now(), content: "[posthorse] Checkpoint now: save goal/progress/decisions/next steps in notes, then call new_context. This reminder is best-effort; automatic rollover may occur without it." }];
           }
         }
         this.lastRequestCount = providerMessages(messages).length;
-        return active2;
+        return active3;
       }
       autoRollover(messages, reason2) {
         let end = messages.length;
@@ -6917,7 +6917,7 @@ async function updateState(change) {
   let unlock;
   for (let attempt = 0; attempt < 50 && !unlock; attempt++) {
     unlock = acquireLock("state");
-    if (!unlock) await new Promise((resolve31) => setTimeout(resolve31, 100));
+    if (!unlock) await new Promise((resolve32) => setTimeout(resolve32, 100));
   }
   if (!unlock) throw new Error("Autonomy state is busy. Try again shortly.");
   const temp = join20(autonomyDirectory(), `state-${randomUUID10()}.tmp`);
@@ -7465,7 +7465,7 @@ async function runDashboard(controller) {
   }
   const wasRaw = Boolean(input.isRaw);
   const wasPaused = input.isPaused();
-  await new Promise((resolve31, reject) => {
+  await new Promise((resolve32, reject) => {
     let state = { selected: 0, button: 0, details: false };
     let done = false;
     let busy = false;
@@ -7491,7 +7491,7 @@ async function runDashboard(controller) {
       } catch {
       }
       if (error) reject(error);
-      else resolve31();
+      else resolve32();
     };
     const draw = () => {
       if (done) return;
@@ -8358,7 +8358,7 @@ function botMessages(bot, home, before) {
 }
 function body(req) {
   if (req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") return Promise.reject(new HttpError(415, "Use application/json."));
-  return new Promise((resolve31, reject) => {
+  return new Promise((resolve32, reject) => {
     let size = 0;
     const chunks = [];
     const cleanup = () => {
@@ -8385,7 +8385,7 @@ function body(req) {
       try {
         const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         if (!object(value)) invalid("Expected a JSON object.");
-        resolve31(value);
+        resolve32(value);
       } catch (error) {
         reject(error instanceof HttpError ? error : new HttpError(400, "Invalid JSON."));
       }
@@ -8419,10 +8419,10 @@ function validateFrontend(name, args) {
 }
 function abortable2(promise, signal) {
   if (signal.aborted) return Promise.reject(new Error("Run cancelled."));
-  return new Promise((resolve31, reject) => {
+  return new Promise((resolve32, reject) => {
     const abort = () => reject(new Error("Run cancelled."));
     signal.addEventListener("abort", abort, { once: true });
-    promise.then(resolve31, reject).finally(() => signal.removeEventListener("abort", abort));
+    promise.then(resolve32, reject).finally(() => signal.removeEventListener("abort", abort));
   });
 }
 async function startKlaudServe(opts = {}) {
@@ -8439,7 +8439,7 @@ async function startKlaudServe(opts = {}) {
   const token2 = opts.token ?? randomBytes(24).toString("hex");
   if (!/^[\x21-\x7e]{1,512}$/.test(token2)) throw new Error("The bearer token must be nonempty printable ASCII without spaces.");
   const authorization = Buffer.from(`Bearer ${token2}`);
-  const active2 = /* @__PURE__ */ new Map(), threads = /* @__PURE__ */ new Set();
+  const active3 = /* @__PURE__ */ new Map(), threads = /* @__PURE__ */ new Set();
   const executions = /* @__PURE__ */ new Set();
   let url = "", tokenFile, closing;
   const snapshot = () => {
@@ -8448,7 +8448,7 @@ async function startKlaudServe(opts = {}) {
       shell: loadKlaudShell(home),
       prefs: bots.some((bot) => bot.id === prefs.lastBotId) ? prefs : {},
       bots,
-      approvals: [...active2.values()].flatMap((run3) => [...run3.pending.entries()].filter(([, pending]) => pending.kind === "approval" || pending.tool === "confirmAction").map(([id, pending]) => ({ id, tool: pending.tool, summary: pending.summary })))
+      approvals: [...active3.values()].flatMap((run3) => [...run3.pending.entries()].filter(([, pending]) => pending.kind === "approval" || pending.tool === "confirmAction").map(([id, pending]) => ({ id, tool: pending.tool, summary: pending.summary })))
     };
   };
   const savePref = (value) => {
@@ -8456,13 +8456,13 @@ async function startKlaudServe(opts = {}) {
     privateWrite(prefsFile, JSON.stringify({ lastBotId: bot.id }) + "\n");
   };
   const broadcast = (event) => {
-    for (const run3 of active2.values()) run3.emit(event);
+    for (const run3 of active3.values()) run3.emit(event);
   };
   const publishState = () => broadcast(stateSnapshot(snapshot()));
   function waitFor(run3, id, kind, tool, args) {
     if (run3.controller.signal.aborted) return Promise.reject(new Error("Run cancelled."));
     if (run3.pending.has(id)) return Promise.reject(new Error("Duplicate pending tool call id."));
-    return new Promise((resolve31, reject) => {
+    return new Promise((resolve32, reject) => {
       const signal = run3.controller.signal;
       const cleanup = () => {
         clearTimeout(timer);
@@ -8475,7 +8475,7 @@ async function startKlaudServe(opts = {}) {
       };
       const settle = (value) => {
         cleanup();
-        resolve31(value);
+        resolve32(value);
       };
       const timer = setTimeout(() => {
         settle(kind === "approval" ? false : { content: "The renderer did not answer before the timeout.", isError: true });
@@ -8519,7 +8519,7 @@ async function startKlaudServe(opts = {}) {
         res.destroy();
       }
     } };
-    active2.set(id, run3);
+    active3.set(id, run3);
     threads.add(sessionId);
     const disconnected = () => controller.abort();
     res.once("close", disconnected);
@@ -8607,7 +8607,7 @@ Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, na
       failure = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Run failed.";
     } finally {
       controller.abort();
-      active2.delete(id);
+      active3.delete(id);
       threads.delete(sessionId);
       res.removeListener("close", disconnected);
       run3.emit(failure ? { type: "RUN_ERROR", threadId, runId: id, message: failure } : {
@@ -8687,7 +8687,7 @@ Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, na
         const declarations = frontendDeclarations(input.tools);
         if (closing) throw new HttpError(503, "Server is closing.");
         if (threads.has(sessionId)) throw new HttpError(409, "This thread already has an active run.");
-        if (active2.size >= 8) throw new HttpError(429, "Too many active runs.");
+        if (active3.size >= 8) throw new HttpError(429, "Too many active runs.");
         const execution = streamRun(res, input, declarations, sessionId, bot);
         executions.add(execution);
         try {
@@ -8699,7 +8699,7 @@ Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, na
       }
       const route = /^\/runs\/([a-f0-9-]+)\/(cancel|tools\/([^/]+)|approvals\/([^/]+))$/.exec(req.url ?? "");
       if (req.method === "POST" && route) {
-        const input = await body(req), run3 = active2.get(route[1]);
+        const input = await body(req), run3 = active3.get(route[1]);
         if (!run3 || run3.controller.signal.aborted) throw new HttpError(404, "No active run.");
         if (route[2] === "cancel") {
           run3.controller.abort();
@@ -8732,11 +8732,11 @@ Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, na
   });
   server.requestTimeout = 15e3;
   server.headersTimeout = 5e3;
-  await new Promise((resolve31, reject) => {
+  await new Promise((resolve32, reject) => {
     server.once("error", reject);
     server.listen(opts.port ?? 0, "127.0.0.1", () => {
       server.removeListener("error", reject);
-      resolve31();
+      resolve32();
     });
   });
   url = `http://127.0.0.1:${server.address().port}`;
@@ -8746,14 +8746,14 @@ Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, na
       privateWrite(tokenFile, token2 + "\n");
     }
   } catch (error) {
-    await new Promise((resolve31) => server.close(() => resolve31()));
+    await new Promise((resolve32) => server.close(() => resolve32()));
     throw error;
   }
   return { url, token: token2, close() {
     if (!closing) closing = (async () => {
-      for (const run3 of active2.values()) run3.controller.abort();
-      await new Promise((resolve31, reject) => {
-        server.close((error) => error ? reject(error) : resolve31());
+      for (const run3 of active3.values()) run3.controller.abort();
+      await new Promise((resolve32, reject) => {
+        server.close((error) => error ? reject(error) : resolve32());
         server.closeAllConnections?.();
       });
       await Promise.allSettled([...executions]);
@@ -8795,6 +8795,394 @@ var init_serve = __esm({
   }
 });
 
+// src/harness/klaud/mobile-accounts.ts
+import { spawn as spawn9 } from "node:child_process";
+import { randomUUID as randomUUID14 } from "node:crypto";
+import { homedir as homedir16 } from "node:os";
+import { join as join25, resolve as resolve18 } from "node:path";
+function mobileDeviceChallenge(provider, output) {
+  const text = output.replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "").replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  let verificationURL, userCode;
+  for (const candidate of text.match(/https:\/\/[^\s<>\u001b"']+/g) ?? []) {
+    try {
+      const url = new URL(candidate.replace(/[),.;]+$/, ""));
+      const expected = provider === "codex" ? url.origin === "https://auth.openai.com" && url.pathname === "/codex/device" : provider === "copilot" ? url.origin === "https://github.com" && url.pathname === "/login/device" : url.origin === "https://auth.x.ai" && /^\/[A-Za-z0-9/_-]{1,128}$/.test(url.pathname);
+      if (!expected || url.username || url.password || url.hash) continue;
+      const params = [...url.searchParams];
+      if (params.length > 1 || params.some(([key, value]) => !["user_code", "code"].includes(key) || !challengeCode(value))) continue;
+      verificationURL = url.toString();
+      userCode = params[0]?.[1];
+      break;
+    } catch {
+    }
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^(?:(?:your |one.time |device |verification |enter (?:the |this )?)?code\s*[:=]?\s*)([A-Z0-9]{3,12}(?:-[A-Z0-9]{3,4})?)\s*$/i.exec(line.trim()) ?? /^([A-Z0-9]{4}-[A-Z0-9]{4})$/.exec(line.trim());
+    if (match && challengeCode(match[1])) {
+      userCode ??= match[1];
+      break;
+    }
+  }
+  return { ...verificationURL ? { verificationURL } : {}, ...userCode ? { userCode } : {} };
+}
+function checkCommand(provider, args, options, signal) {
+  if (signal.aborted) return Promise.resolve({ ok: false, missing: false });
+  return new Promise((resolveCheck) => {
+    const child = spawn9(options.executables?.[provider] ?? CLI_PROVIDERS[provider].command, args, {
+      env: cliEnvironment(provider, { ...options.env, REIN_HOME: options.home, BROWSER: "false", NO_COLOR: "1" }),
+      cwd: options.home,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      detached: process.platform !== "win32"
+    });
+    let bytes = 0, ok = false, missing = false, failed = false, ended = false, settled = false, escalation;
+    const kill = (name) => {
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, name);
+        else child.kill(name);
+      } catch {
+      }
+    };
+    const finish = () => {
+      if (settled || !ended || escalation) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      resolveCheck({ ok: ok && !failed, missing });
+    };
+    const stop = () => {
+      if (failed) return;
+      failed = true;
+      kill("SIGTERM");
+      if (!escalation) escalation = setTimeout(() => {
+        kill("SIGKILL");
+        escalation = void 0;
+        finish();
+      }, 1e3);
+    };
+    const abort = () => stop();
+    const timer = setTimeout(stop, options.statusTimeoutMs ?? 1500);
+    timer.unref();
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    const receive = (chunk) => {
+      bytes += chunk.length;
+      if (bytes > 64 * 1024) stop();
+    };
+    child.stdout.on("data", receive);
+    child.stderr.on("data", receive);
+    child.once("error", (error) => {
+      missing = error.code === "ENOENT";
+      failed = true;
+      ended = true;
+      finish();
+    });
+    child.once("close", (code) => {
+      ok = code === 0;
+      ended = true;
+      clearTimeout(timer);
+      if (!escalation && child.pid && process.platform !== "win32") {
+        kill("SIGTERM");
+        escalation = setTimeout(() => {
+          kill("SIGKILL");
+          escalation = void 0;
+          finish();
+        }, 1e3);
+      }
+      finish();
+    });
+  });
+}
+async function subscriptionStatus(provider, options, signal) {
+  const version = await checkCommand(provider, ["--version"], options, signal);
+  if (!version.ok) return {
+    provider,
+    label: CLI_PROVIDERS[provider].label,
+    available: false,
+    authenticated: false,
+    detail: version.missing ? `Install the official CLI on the gateway: ${CLI_PROVIDERS[provider].installCommand}.` : "The CLI could not be checked within its limits. Update it on the gateway host and retry."
+  };
+  if (provider !== "codex") return {
+    provider,
+    label: CLI_PROVIDERS[provider].label,
+    available: true,
+    authenticated: null,
+    detail: "CLI installed. It does not offer a separate read-only account check; sign in if needed."
+  };
+  const auth = await checkCommand(provider, ["login", "status"], options, signal);
+  return {
+    provider,
+    label: CLI_PROVIDERS[provider].label,
+    available: true,
+    authenticated: auth.ok,
+    detail: auth.ok ? "Codex reports authenticated in Rein's isolated profile." : "Codex did not confirm authentication. Start device sign-in to connect it."
+  };
+}
+function createMobileAccounts(options) {
+  const records = /* @__PURE__ */ new Map(), controller = new AbortController();
+  let closed = false, statusPromise, statusAt = 0;
+  const checkHome = () => {
+    if (closed) throw new MobileAccountError(503, "Mobile account setup is closed.");
+    if (resolve18(options.home) !== resolve18(process.env.REIN_HOME || join25(homedir16(), ".rein"))) throw new MobileAccountError(409, "Start the gateway with REIN_HOME set to its configuration directory before managing accounts.");
+  };
+  const configuration2 = () => {
+    checkHome();
+    const config = readConfig(), auth = config.auth;
+    const candidate = config.provider ?? (auth?.type === "cli" ? auth.provider : void 0);
+    const provider = typeof candidate === "string" && (isCli(candidate) || Object.hasOwn(PROVIDER_PRESETS, candidate) || ["custom", "openai-compatible"].includes(candidate)) ? candidate : void 0;
+    let baseUrl;
+    try {
+      if (provider && isCli(provider)) baseUrl = `cli://${provider}`;
+      else if (typeof config.baseUrl === "string") baseUrl = normalizeBaseUrl(config.baseUrl);
+      else if (provider) baseUrl = PROVIDER_PRESETS[provider]?.baseUrl;
+    } catch {
+    }
+    return {
+      configured: {
+        ...provider ? { provider } : {},
+        ...field(config.model, 512) ? { model: config.model } : {},
+        ...baseUrl ? { baseUrl } : {},
+        auth: provider && isCli(provider) ? "cli" : "api-key",
+        apiKeyConfigured: !!(baseUrl && !baseUrl.startsWith("cli://") && apiKeyFor(provider, baseUrl, typeof config.sshHost === "string" ? config.sshHost : void 0))
+      },
+      environmentOverrides: overrides()
+    };
+  };
+  return {
+    async list() {
+      const config = configuration2();
+      if (!statusPromise || Date.now() - statusAt > 1e4) {
+        statusAt = Date.now();
+        statusPromise = Promise.all(providers.map((provider) => subscriptionStatus(provider, options, controller.signal)));
+      }
+      return { ...config, subscriptions: await statusPromise };
+    },
+    select(input) {
+      checkHome();
+      if (Object.keys(input).some((key) => !["provider", "model", "baseUrl", "apiKey"].includes(key))) throw new MobileAccountError(400, "Unknown provider setup field.");
+      const provider = input.provider;
+      if (typeof provider !== "string" || !(isCli(provider) || Object.hasOwn(PROVIDER_PRESETS, provider) || ["custom", "openai-compatible"].includes(provider))) throw new MobileAccountError(400, "Choose a supported API or CLI provider.");
+      if (!field(input.model, 512)) throw new MobileAccountError(400, "Enter a nonempty model ID of at most 512 characters.");
+      const dominating = overrides();
+      if (dominating.length) throw new MobileAccountError(409, `The gateway uses ${dominating.join(", ")}. Remove these environment overrides and restart it before changing its provider from iOS.`);
+      const current = readConfig(), next = { ...current, provider, model: input.model };
+      if (isCli(provider)) {
+        if (input.baseUrl !== void 0 || input.apiKey !== void 0) throw new MobileAccountError(400, "Subscription CLIs manage their own endpoint and credentials.");
+        Object.assign(next, { auth: { type: "cli", provider }, baseUrl: `cli://${provider}` });
+        delete next.apiKey;
+        delete next.api;
+        delete next.sshHost;
+      } else {
+        if (input.baseUrl !== void 0 && !field(input.baseUrl, 2048)) throw new MobileAccountError(400, "Enter a valid HTTP API base URL.");
+        let baseUrl;
+        try {
+          baseUrl = normalizeBaseUrl(input.baseUrl ?? PROVIDER_PRESETS[provider]?.baseUrl ?? "", provider);
+        } catch {
+          throw new MobileAccountError(400, "Enter an HTTP API base URL without credentials, query parameters, or a fragment.");
+        }
+        if (input.apiKey !== void 0 && input.apiKey !== null && !field(input.apiKey, 8192)) throw new MobileAccountError(400, "Enter an API key without surrounding whitespace or control characters, or null to remove it.");
+        const keyEnv = PROVIDER_PRESETS[provider]?.keyEnv;
+        const envKey = process.env.REIN_API_KEY ? "REIN_API_KEY" : keyEnv && process.env[keyEnv] && new URL(baseUrl).origin === new URL(PROVIDER_PRESETS[provider].baseUrl).origin ? keyEnv : void 0;
+        if (envKey && (input.apiKey !== void 0 || envKey === "REIN_API_KEY")) throw new MobileAccountError(409, `The gateway uses ${envKey}. Remove that environment override and restart it before replacing its API key from iOS.`);
+        let sameEndpoint = false;
+        try {
+          sameEndpoint = typeof current.baseUrl === "string" && normalizeBaseUrl(current.baseUrl) === baseUrl && current.auth?.type !== "cli";
+        } catch {
+        }
+        if (!sameEndpoint) {
+          delete next.apiKey;
+          delete next.sshHost;
+        }
+        Object.assign(next, { auth: { type: "api-key" }, api: "chat-completions", baseUrl });
+        if (input.apiKey === null) delete next.apiKey;
+        else if (typeof input.apiKey === "string") next.apiKey = input.apiKey;
+      }
+      saveConfig(next);
+      return { ...configuration2(), message: "Saved for new runs on this gateway. Existing runs keep their current provider." };
+    },
+    start(input) {
+      checkHome();
+      if (Object.keys(input).some((key) => key !== "provider") || !isCli(input.provider)) throw new MobileAccountError(400, "Choose codex, copilot, or grok for official CLI device sign-in.");
+      const provider = input.provider;
+      for (const record4 of records.values()) if (record4.value.provider === provider) {
+        if (active2(record4.value.status)) return { ...record4.value };
+        if (record4.child) throw new MobileAccountError(409, "The previous sign-in is still stopping. Retry in a moment.");
+      }
+      while (records.size >= 32) {
+        const oldest = [...records].find(([, record4]) => !active2(record4.value.status) && !record4.child);
+        if (!oldest) throw new MobileAccountError(429, "Too many active sign-ins.");
+        records.delete(oldest[0]);
+      }
+      const env = cliEnvironment(provider, { ...options.env, REIN_HOME: options.home, BROWSER: "false", NO_COLOR: "1", TERM: "dumb" });
+      try {
+        prepareCliProfile(provider, env);
+      } catch {
+        throw new MobileAccountError(409, `The isolated ${provider} CLI profile needs attention. Run 'rein login ${provider}' on the gateway host to resolve it.`);
+      }
+      const value = { id: randomUUID14(), provider, status: "starting", message: "Starting official CLI device sign-in on this gateway." };
+      let finishDone;
+      const record3 = { value, done: new Promise((resolveDone) => {
+        finishDone = resolveDone;
+      }) };
+      records.set(value.id, record3);
+      const child = spawn9(options.executables?.[provider] ?? CLI_PROVIDERS[provider].command, ["login", provider === "copilot" ? "--device-code" : "--device-auth"], {
+        env,
+        cwd: cliAuthDirectory(provider, env),
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        detached: process.platform !== "win32"
+      });
+      record3.child = child;
+      let bytes = 0, stdout = "", stderr = "", pendingCode, ended = false, settled = false, escalation;
+      const kill = (signal) => {
+        try {
+          if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
+          else child.kill(signal);
+        } catch {
+        }
+      };
+      const finish = () => {
+        if (settled || !ended || escalation) return;
+        settled = true;
+        clearTimeout(timeout);
+        clearTimeout(challengeTimeout);
+        stdout = "";
+        stderr = "";
+        record3.child = void 0;
+        record3.stop = void 0;
+        statusPromise = void 0;
+        finishDone();
+      };
+      record3.stop = (status2, message) => {
+        if (!active2(value.status)) return;
+        value.status = status2;
+        value.message = message;
+        delete value.verificationURL;
+        delete value.userCode;
+        clearTimeout(timeout);
+        clearTimeout(challengeTimeout);
+        kill("SIGTERM");
+        escalation = setTimeout(() => {
+          kill("SIGKILL");
+          escalation = void 0;
+          finish();
+        }, 1e3);
+      };
+      const timeout = setTimeout(() => record3.stop?.("expired", "Device sign-in expired. Start it again when ready."), options.loginTimeoutMs ?? 6e5);
+      timeout.unref();
+      const challengeTimeout = setTimeout(() => {
+        if (!value.verificationURL) record3.stop?.("failed", `This CLI did not provide a supported device challenge. Update it or run 'rein login ${provider}' in a terminal on the gateway host.`);
+      }, options.challengeTimeoutMs ?? 3e4);
+      challengeTimeout.unref();
+      const inspect = (text) => {
+        if (!active2(value.status)) return;
+        const challenge = mobileDeviceChallenge(provider, text);
+        if (challenge.verificationURL) {
+          value.verificationURL = challenge.verificationURL;
+          value.status = "waiting";
+          value.message = "Open the verification page and approve this sign-in. Credentials stay managed by the official CLI on this gateway.";
+          clearTimeout(challengeTimeout);
+        }
+        if (challenge.userCode) pendingCode = challenge.userCode;
+        if (value.verificationURL && pendingCode) value.userCode = pendingCode;
+      };
+      const receive = (source, chunk) => {
+        if (!active2(value.status)) return;
+        bytes += chunk.length;
+        if (bytes > 64 * 1024) {
+          record3.stop?.("failed", "CLI sign-in exceeded its output limit. Update the CLI and retry on the gateway host.");
+          return;
+        }
+        let buffer = (source === "stdout" ? stdout : stderr) + chunk.toString("utf8");
+        const end = Math.max(buffer.lastIndexOf("\n"), buffer.lastIndexOf("\r"));
+        if (end >= 0) {
+          inspect(buffer.slice(0, end + 1));
+          buffer = buffer.slice(end + 1);
+        }
+        if (buffer.length > 8192) {
+          record3.stop?.("failed", "CLI sign-in returned an unsupported response. Run sign-in on the gateway host.");
+          return;
+        }
+        if (source === "stdout") stdout = buffer;
+        else stderr = buffer;
+      };
+      child.stdout.on("data", (chunk) => receive("stdout", chunk));
+      child.stderr.on("data", (chunk) => receive("stderr", chunk));
+      child.once("error", (error) => {
+        if (active2(value.status)) {
+          value.status = "failed";
+          value.message = error.code === "ENOENT" ? `Install the official CLI on this gateway with '${CLI_PROVIDERS[provider].installCommand}', then retry.` : `The ${provider} CLI could not start. Check its installation on the gateway host.`;
+        }
+        ended = true;
+        finish();
+      });
+      child.once("close", (code) => {
+        inspect(stdout);
+        inspect(stderr);
+        if (active2(value.status)) {
+          value.status = code === 0 ? "succeeded" : "failed";
+          value.message = code === 0 ? "Official CLI sign-in completed on this gateway. Select this provider to use it for new runs." : `CLI device sign-in could not finish. Update it or run 'rein login ${provider}' in a terminal on the gateway host.`;
+          delete value.verificationURL;
+          delete value.userCode;
+        }
+        ended = true;
+        if (!escalation && child.pid && process.platform !== "win32") {
+          kill("SIGTERM");
+          escalation = setTimeout(() => {
+            kill("SIGKILL");
+            escalation = void 0;
+            finish();
+          }, 1e3);
+        }
+        finish();
+      });
+      return { ...value };
+    },
+    get(id) {
+      checkHome();
+      const record3 = records.get(id);
+      if (!record3) throw new MobileAccountError(404, "Sign-in record has expired or was not found.");
+      return { ...record3.value };
+    },
+    cancel(id) {
+      checkHome();
+      const record3 = records.get(id);
+      if (!record3) throw new MobileAccountError(404, "Sign-in record has expired or was not found.");
+      record3.stop?.("cancelled", "Device sign-in cancelled.");
+      return { ...record3.value };
+    },
+    async close() {
+      closed = true;
+      controller.abort();
+      for (const record3 of records.values()) record3.stop?.("cancelled", "Gateway stopped; device sign-in cancelled.");
+      await Promise.allSettled([...records.values()].map((record3) => record3.done));
+      await statusPromise?.catch(() => {
+      });
+    }
+  };
+}
+var MobileAccountError, providers, isCli, active2, field, overrides, challengeCode;
+var init_mobile_accounts = __esm({
+  "src/harness/klaud/mobile-accounts.ts"() {
+    init_config();
+    init_models();
+    init_cli_provider();
+    MobileAccountError = class extends Error {
+      status;
+      constructor(status2, message) {
+        super(message);
+        this.status = status2;
+      }
+    };
+    providers = Object.keys(CLI_PROVIDERS);
+    isCli = (value) => typeof value === "string" && Object.hasOwn(CLI_PROVIDERS, value);
+    active2 = (status2) => status2 === "starting" || status2 === "waiting";
+    field = (value, max) => typeof value === "string" && value.length > 0 && value.length <= max && value === value.trim() && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+    overrides = () => ["REIN_BASE_URL", "REIN_MODEL", "REIN_API"].filter((name) => process.env[name]?.trim());
+    challengeCode = (value) => /^(?:[A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z0-9]{3}-[A-Z0-9]{3}|[A-Z0-9]{8,12})$/.test(value);
+  }
+});
+
 // src/harness/klaud/mobile.ts
 var mobile_exports = {};
 __export(mobile_exports, {
@@ -8802,12 +9190,12 @@ __export(mobile_exports, {
   validateMobileBindHost: () => validateMobileBindHost,
   validateMobileTrustedOrigin: () => validateMobileTrustedOrigin
 });
-import { createHash as createHash9, randomBytes as randomBytes2, randomUUID as randomUUID14, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHash as createHash9, randomBytes as randomBytes2, randomUUID as randomUUID15, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { closeSync as closeSync7, constants as constants11, existsSync as existsSync14, fstatSync as fstatSync5, lstatSync as lstatSync11, mkdirSync as mkdirSync15, openSync as openSync7, readFileSync as readFileSync19, renameSync as renameSync9, unlinkSync as unlinkSync10, writeFileSync as writeFileSync16 } from "node:fs";
 import { createServer as createServer3 } from "node:http";
 import { BlockList, isIP as isIP2 } from "node:net";
-import { homedir as homedir16 } from "node:os";
-import { dirname as dirname12, join as join25, resolve as resolve18 } from "node:path";
+import { homedir as homedir17 } from "node:os";
+import { dirname as dirname12, join as join26, resolve as resolve19 } from "node:path";
 function json2(res, status2, value) {
   res.writeHead(status2, { "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify(value));
 }
@@ -8883,7 +9271,7 @@ function writeCredential(file, token2) {
   checkCredentialPath(file);
   mkdirSync15(dirname12(file), { recursive: true, mode: 448 });
   checkCredentialPath(file);
-  const temp = `${file}.${randomUUID14()}.tmp`;
+  const temp = `${file}.${randomUUID15()}.tmp`;
   try {
     writeFileSync16(temp, token2 + "\n", { flag: "wx", mode: 384 });
     checkCredentialPath(file);
@@ -8894,7 +9282,7 @@ function writeCredential(file, token2) {
 }
 function credentialPath(home, host, port) {
   const id = createHash9("sha256").update(`${host}:${port}`).digest("hex").slice(0, 16);
-  return join25(home, "klaud", `mobile-${id}.token`);
+  return join26(home, "klaud", `mobile-${id}.token`);
 }
 function requestBody(req) {
   if (req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") return Promise.reject(new HttpError2(415, "Use application/json."));
@@ -9030,12 +9418,13 @@ async function desktopEvents(body2, receive) {
 async function startKlaudMobileGateway(opts) {
   const host = validateMobileBindHost(opts?.host), requestedPort = validatePort(opts.port);
   const trustedOrigin = opts.trustedOrigin === void 0 ? void 0 : validateMobileTrustedOrigin(opts.trustedOrigin);
-  const home = resolve18(opts.home ?? processHome2()), cwd = resolve18(opts.cwd ?? process.cwd());
+  const home = resolve19(opts.home ?? processHome2()), cwd = resolve19(opts.cwd ?? process.cwd());
   let tokenFile = opts.token === void 0 && requestedPort !== 0 ? credentialPath(home, host, requestedPort) : void 0;
   const storedToken = tokenFile ? readCredential(tokenFile) : void 0;
   const token2 = validateToken(opts.token ?? storedToken ?? randomBytes2(32).toString("hex"));
   const authorization = Buffer.from(`Bearer ${token2}`);
   const backend = await startKlaudServe({ home, cwd, run: opts.run, token: randomBytes2(32).toString("hex") });
+  const accounts = createMobileAccounts({ home });
   const runs = /* @__PURE__ */ new Map(), tombstones = /* @__PURE__ */ new Map(), executions = /* @__PURE__ */ new Set();
   let closing, url = "", allowedAuthorities = /* @__PURE__ */ new Set(), allowedOrigins = /* @__PURE__ */ new Set(), advertisement;
   function pruneTombstones(now = Date.now()) {
@@ -9221,11 +9610,32 @@ data: ${JSON.stringify({ sequence: stored.sequence, event: stored.event })}
       if (provided.length !== authorization.length || !timingSafeEqual2(provided, authorization)) throw new HttpError2(401, "Bearer token required.");
       const parsed = new URL(req.url ?? "/", "http://rein.invalid");
       if (parsed.pathname === API_ROOT && req.method === "GET") {
-        json2(res, 200, { name: "rein-kla\u028Ad-mobile", apiVersion: "v1", capabilities: ["resumable-events", "cancellation", "pending-actions", "bots", "shared-state"], ...trustedOrigin ? { trustedOrigin } : {} });
+        json2(res, 200, { name: "rein-kla\u028Ad-mobile", apiVersion: "v1", capabilities: ["resumable-events", "cancellation", "pending-actions", "bots", "shared-state", "account-setup", "cli-device-auth"], ...trustedOrigin ? { trustedOrigin } : {} });
         return;
       }
       if (parsed.pathname === `${API_ROOT}/health` && req.method === "GET") {
         json2(res, 200, { ok: true, name: "rein-kla\u028Ad-mobile", apiVersion: "v1" });
+        return;
+      }
+      if (parsed.pathname === `${API_ROOT}/accounts` && req.method === "GET") {
+        json2(res, 200, await accounts.list());
+        return;
+      }
+      if (parsed.pathname === `${API_ROOT}/accounts/provider` && req.method === "PUT") {
+        json2(res, 200, accounts.select(await requestBody(req)));
+        return;
+      }
+      if (parsed.pathname === `${API_ROOT}/accounts/logins` && req.method === "POST") {
+        json2(res, 202, accounts.start(await requestBody(req)));
+        return;
+      }
+      const loginRoute = new RegExp(`^${API_ROOT}/accounts/logins/([a-f0-9-]+)$`).exec(parsed.pathname);
+      if (loginRoute && req.method === "GET") {
+        json2(res, 200, accounts.get(loginRoute[1]));
+        return;
+      }
+      if (loginRoute && req.method === "DELETE") {
+        json2(res, 200, accounts.cancel(loginRoute[1]));
         return;
       }
       const relative5 = parsed.pathname.slice(API_ROOT.length) + parsed.search;
@@ -9240,7 +9650,7 @@ data: ${JSON.stringify({ sequence: stored.sequence, event: stored.event })}
       if (req.method === "POST" && parsed.pathname === `${API_ROOT}/runs`) {
         const input = await requestBody(req);
         validateRunInput(input);
-        const id = typeof input.runId === "string" ? input.runId : randomUUID14();
+        const id = typeof input.runId === "string" ? input.runId : randomUUID15();
         pruneTombstones();
         const requestHash = runRequestHash(input), existing = runs.get(id), retained = retainedReceipt(id);
         if (existing) {
@@ -9364,7 +9774,7 @@ data: ${JSON.stringify({ lastSequence: retained.lastSequence, status: retained.s
       }
       if (error instanceof HttpError2 && error.status === 401) res.setHeader("WWW-Authenticate", "Bearer");
       res.setHeader("Connection", "close");
-      json2(res, error instanceof HttpError2 ? error.status : 500, { error: error instanceof HttpError2 ? error.message : "Mobile gateway request failed." });
+      json2(res, error instanceof HttpError2 || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError2 || error instanceof MobileAccountError ? error.message : "Mobile gateway request failed." });
     });
   });
   server.requestTimeout = 15e3;
@@ -9401,6 +9811,7 @@ data: ${JSON.stringify({ lastSequence: retained.lastSequence, status: retained.s
       }
     }
   } catch (error) {
+    await accounts.close();
     await new Promise((resolveClose) => server.close(() => resolveClose()));
     await backend.close();
     throw error;
@@ -9412,6 +9823,7 @@ data: ${JSON.stringify({ lastSequence: retained.lastSequence, status: retained.s
     trustedOrigin,
     close() {
       if (!closing) closing = (async () => {
+        await accounts.close();
         try {
           await advertisement?.close();
         } catch {
@@ -9437,6 +9849,7 @@ var init_mobile = __esm({
   "src/harness/klaud/mobile.ts"() {
     init_mdns();
     init_serve();
+    init_mobile_accounts();
     API_ROOT = "/v1/mobile";
     MAX_BODY2 = 256 * 1024;
     MAX_PROXY_RESPONSE = 4 * 1024 * 1024;
@@ -9456,7 +9869,7 @@ var init_mobile = __esm({
     privateHosts.addSubnet("::1", 128, "ipv6");
     privateHosts.addSubnet("fc00::", 7, "ipv6");
     privateHosts.addSubnet("fe80::", 10, "ipv6");
-    processHome2 = () => resolve18(process.env.REIN_HOME || join25(homedir16(), ".rein"));
+    processHome2 = () => resolve19(process.env.REIN_HOME || join26(homedir17(), ".rein"));
     object2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
     HttpError2 = class extends Error {
       status;
@@ -9473,22 +9886,22 @@ var init_mobile = __esm({
 
 // src/harness/desktop/surface.ts
 import { existsSync as existsSync15, lstatSync as lstatSync12, mkdirSync as mkdirSync16, readFileSync as readFileSync20, renameSync as renameSync10, writeFileSync as writeFileSync17, unlinkSync as unlinkSync11 } from "node:fs";
-import { homedir as homedir17 } from "node:os";
-import { dirname as dirname13, join as join26, resolve as resolve19 } from "node:path";
+import { homedir as homedir18 } from "node:os";
+import { dirname as dirname13, join as join27, resolve as resolve20 } from "node:path";
 import { execFile as execFile8 } from "node:child_process";
 import { promisify as promisify7 } from "node:util";
-import { randomUUID as randomUUID15 } from "node:crypto";
+import { randomUUID as randomUUID16 } from "node:crypto";
 function remoteDesktopSession(env = process.env) {
   return !!(env.SSH_CONNECTION || env.SSH_TTY || /[/\\]\.nodeterm[/\\]hook-endpoint-[^/\\]+\.env$/.test(env.NODETERM_HOOK_ENDPOINT ?? ""));
 }
 function desktopAvailable(env = process.env, platform2 = process.platform) {
   return platform2 === "darwin" && !env.CI && !remoteDesktopSession(env);
 }
-function nativeApp(home = homedir17()) {
-  return [join26(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find((path2) => existsSync15(join26(path2, "Contents/MacOS/nodeterm")));
+function nativeApp(home = homedir18()) {
+  return [join27(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find((path2) => existsSync15(join27(path2, "Contents/MacOS/nodeterm")));
 }
 function preferencesFile(home) {
-  const file = join26(home, "desktop.json");
+  const file = join27(home, "desktop.json");
   if (lstatSync12(file, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error("Desktop preferences must not be a symlink.");
   return file;
 }
@@ -9504,7 +9917,7 @@ function preferredSurface(home = desktopHome()) {
 function preferSurface(surface, home = desktopHome()) {
   mkdirSync16(home, { recursive: true, mode: 448 });
   const file = preferencesFile(home);
-  const temp = `${file}.${randomUUID15()}.tmp`;
+  const temp = `${file}.${randomUUID16()}.tmp`;
   try {
     writeFileSync17(temp, JSON.stringify({ surface }, null, 2) + "\n", { flag: "wx", mode: 384 });
     renameSync10(temp, file);
@@ -9537,13 +9950,13 @@ function registeredSettings(current, launchCmd) {
 async function registerRein(options = {}) {
   const running = options.running ?? nodeTermRunning;
   if (await running()) return "NodeTerm is running, so its settings were preserved. Close it when convenient and run rein desktop install --no-launch to register Rein as the default agent. For now, run rein --terminal in a NodeTerm terminal node.";
-  const file = options.settingsFile ?? join26(homedir17(), "Library/Application Support/node-terminal/settings.json");
+  const file = options.settingsFile ?? join27(homedir18(), "Library/Application Support/node-terminal/settings.json");
   if (existsSync15(file) && (!lstatSync12(file).isFile() || lstatSync12(file).isSymbolicLink())) throw new Error("NodeTerm settings must be an ordinary file.");
   const before = existsSync15(file) ? readFileSync20(file, "utf8") : void 0;
-  const command = [options.node ?? "node", options.cli ?? resolve19(process.argv[1]), "--terminal"].map(shellQuote).join(" ");
+  const command = [options.node ?? "node", options.cli ?? resolve20(process.argv[1]), "--terminal"].map(shellQuote).join(" ");
   const next = registeredSettings(before === void 0 ? {} : JSON.parse(before), command);
   mkdirSync16(dirname13(file), { recursive: true, mode: 448 });
-  const temp = `${file}.${randomUUID15()}.tmp`;
+  const temp = `${file}.${randomUUID16()}.tmp`;
   try {
     writeFileSync17(temp, JSON.stringify(next, null, 2) + "\n", { flag: "wx", mode: 384 });
     if (await running() || (existsSync15(file) ? readFileSync20(file, "utf8") : void 0) !== before) throw new Error("NodeTerm settings changed during registration. Close the app and retry.");
@@ -9563,7 +9976,7 @@ var init_surface = __esm({
     init_tmux();
     exec3 = promisify7(execFile8);
     REIN_AGENT_ID = "custom:749611bd-a3c7-4b35-b0e1-70cf837648b2";
-    desktopHome = () => resolve19(process.env.REIN_HOME || join26(homedir17(), ".rein"));
+    desktopHome = () => resolve20(process.env.REIN_HOME || join27(homedir18(), ".rein"));
   }
 });
 
@@ -9580,8 +9993,8 @@ import { execFile as execFile9 } from "node:child_process";
 import { createHash as createHash10 } from "node:crypto";
 import { constants as constants12, createReadStream as createReadStream2 } from "node:fs";
 import { access as access2, lstat as lstat2, mkdir as mkdir2, mkdtemp as mkdtemp4, rename as rename2, rm as rm4, stat as stat2 } from "node:fs/promises";
-import { homedir as homedir18, tmpdir as tmpdir4 } from "node:os";
-import { join as join27 } from "node:path";
+import { homedir as homedir19, tmpdir as tmpdir4 } from "node:os";
+import { join as join28 } from "node:path";
 import { promisify as promisify8 } from "node:util";
 function nodeTermArtifact(platform2, arch2) {
   if (platform2 !== "darwin") return void 0;
@@ -9608,8 +10021,8 @@ async function exists(path2) {
 }
 async function usableApp(path2) {
   try {
-    const executable2 = join27(path2, "Contents", "MacOS", "nodeterm");
-    if (!(await stat2(path2)).isDirectory() || !(await stat2(executable2)).isFile() || !(await stat2(join27(path2, "Contents", "Info.plist"))).isFile()) return false;
+    const executable2 = join28(path2, "Contents", "MacOS", "nodeterm");
+    if (!(await stat2(path2)).isDirectory() || !(await stat2(executable2)).isFile() || !(await stat2(join28(path2, "Contents", "Info.plist"))).isFile()) return false;
     await access2(executable2, constants12.X_OK);
     return true;
   } catch {
@@ -9626,9 +10039,9 @@ function createNodeTermInstaller(deps) {
     let mount, mounted = false, appPath;
     let detail = "";
     try {
-      const applications = join27(deps.home, "Applications");
-      const destination = join27(applications, "nodeterm.app");
-      for (const candidate of [join27(deps.systemApplications, "nodeterm.app"), destination]) {
+      const applications = join28(deps.home, "Applications");
+      const destination = join28(applications, "nodeterm.app");
+      for (const candidate of [join28(deps.systemApplications, "nodeterm.app"), destination]) {
         if (!await exists(candidate)) continue;
         if (!await usableApp(candidate)) throw new Error(`An incomplete or unusable NodeTerm app exists at ${candidate}. It was preserved. Move it aside before retrying installation.`);
         appPath = candidate;
@@ -9639,7 +10052,7 @@ function createNodeTermInstaller(deps) {
         const artifact = deps.artifact(deps.platform, deps.arch);
         if (!artifact) return { installed: false, detail: `No supported NodeTerm download for macOS ${deps.arch}. See https://nodeterm.dev/releases.` };
         await mkdir2(applications, { recursive: true });
-        const lockPath = join27(applications, ".rein-nodeterm-install.lock");
+        const lockPath = join28(applications, ".rein-nodeterm-install.lock");
         try {
           await mkdir2(lockPath, { mode: 448 });
           lock = lockPath;
@@ -9647,8 +10060,8 @@ function createNodeTermInstaller(deps) {
           if (error.code === "EEXIST") throw new Error("Another NodeTerm installation may be running. Retry when it finishes.");
           throw error;
         }
-        temporary = await mkdtemp4(join27(deps.temporaryRoot, "rein-nodeterm-"));
-        const download2 = join27(temporary, "nodeterm.dmg");
+        temporary = await mkdtemp4(join28(deps.temporaryRoot, "rein-nodeterm-"));
+        const download2 = join28(temporary, "nodeterm.dmg");
         await deps.run("curl", [
           "--fail",
           "--silent",
@@ -9671,16 +10084,16 @@ function createNodeTermInstaller(deps) {
         const downloaded = await stat2(download2);
         if (!downloaded.isFile() || downloaded.size === 0 || downloaded.size > 536870912) throw new Error("The NodeTerm download is empty or exceeds the expected size limit.");
         await verifyNodeTermDownload(download2, artifact.sha256);
-        mount = join27(temporary, "mount");
+        mount = join28(temporary, "mount");
         await mkdir2(mount);
         mounted = true;
         await deps.run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, download2], 6e4);
-        const source = join27(mount, "nodeterm.app");
+        const source = join28(mount, "nodeterm.app");
         if (!(await lstat2(source)).isDirectory()) throw new Error("The release disk image does not contain nodeterm.app.");
         await deps.run("codesign", ["--verify", "--deep", "--strict", source], 6e4);
         await deps.run("spctl", ["--assess", "--type", "execute", source], 6e4);
-        staging = await mkdtemp4(join27(applications, ".rein-nodeterm-stage-"));
-        const stagedApp = join27(staging, "nodeterm.app");
+        staging = await mkdtemp4(join28(applications, ".rein-nodeterm-stage-"));
+        const stagedApp = join28(staging, "nodeterm.app");
         await deps.run("ditto", [source, stagedApp], 12e4);
         await deps.run("codesign", ["--verify", "--deep", "--strict", stagedApp], 6e4);
         if (await exists(destination)) throw new Error("A NodeTerm installation appeared while downloading. It was preserved; retry to use it.");
@@ -9732,7 +10145,7 @@ var init_install2 = __esm({
     installNodeTerm = createNodeTermInstaller({
       platform: process.platform,
       arch: process.arch,
-      home: homedir18(),
+      home: homedir19(),
       temporaryRoot: tmpdir4(),
       systemApplications: "/Applications",
       run,
@@ -9748,8 +10161,8 @@ __export(cli_exports, {
   launchKlaud: () => launchKlaud
 });
 import { accessSync as accessSync4, constants as constants13, existsSync as existsSync16 } from "node:fs";
-import { spawn as spawn9 } from "node:child_process";
-import { dirname as dirname14, join as join28, resolve as resolve20 } from "node:path";
+import { spawn as spawn10 } from "node:child_process";
+import { dirname as dirname14, join as join29, resolve as resolve21 } from "node:path";
 import { fileURLToPath as fileURLToPath6 } from "node:url";
 async function desktopCommand(args, flags) {
   const action = args[0] ?? (preferredSurface() === "klaud" ? "open" : "status");
@@ -9800,13 +10213,13 @@ NodeTerm: ${nativeApp() ? "installed" : "not found"}`);
 }
 function klaudAppDirectory() {
   const here5 = dirname14(fileURLToPath6(import.meta.url));
-  const candidates = [resolve20(here5, "../../../apps/klaud"), resolve20(here5, "../apps/klaud")];
-  return candidates.find((path2) => existsSync16(join28(path2, "main.mjs"))) ?? candidates[0];
+  const candidates = [resolve21(here5, "../../../apps/klaud"), resolve21(here5, "../apps/klaud")];
+  return candidates.find((path2) => existsSync16(join29(path2, "main.mjs"))) ?? candidates[0];
 }
 function klaudElectron(appDir) {
-  const path2 = join28(appDir, "node_modules", ".bin", process.platform === "win32" ? "electron.cmd" : "electron");
+  const path2 = join29(appDir, "node_modules", ".bin", process.platform === "win32" ? "electron.cmd" : "electron");
   try {
-    if (!existsSync16(join28(appDir, "main.mjs"))) return;
+    if (!existsSync16(join29(appDir, "main.mjs"))) return;
     accessSync4(path2, process.platform === "win32" ? constants13.F_OK : constants13.X_OK);
     return path2;
   } catch {
@@ -9816,7 +10229,7 @@ function klaudElectron(appDir) {
 async function runDesktopChild(command, args, appDir, env, deps, onStop = () => {
 }) {
   return new Promise((done, reject) => {
-    const child = (deps.spawn ?? spawn9)(command, args, { cwd: appDir, env, stdio: "inherit", shell: false, detached: process.platform !== "win32" });
+    const child = (deps.spawn ?? spawn10)(command, args, { cwd: appDir, env, stdio: "inherit", shell: false, detached: process.platform !== "win32" });
     const signals = deps.signals ?? process;
     let cancelled = 0, closed = false, code = 1, error, timer;
     const kill = (signal) => {
@@ -9901,12 +10314,12 @@ __export(auth_exports, {
   checkCliAuth: () => checkCliAuth,
   loginCli: () => loginCli
 });
-import { spawn as spawn10, execFile as execFile10 } from "node:child_process";
+import { spawn as spawn11, execFile as execFile10 } from "node:child_process";
 import { mkdirSync as mkdirSync17 } from "node:fs";
 function openLoginPage(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
   const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
-  const child = spawn10(command, args, { stdio: "ignore", detached: true, shell: false });
+  const child = spawn11(command, args, { stdio: "ignore", detached: true, shell: false });
   child.on("error", () => {
   });
   child.unref();
@@ -9927,9 +10340,9 @@ async function loginCli(provider, options = {}) {
   }
   const device = options.deviceAuth !== false || provider === "grok" && options.openBrowser === false;
   const args = ["login", ...device ? [provider !== "copilot" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
-  return new Promise((resolve31) => {
+  return new Promise((resolve32) => {
     const captureDeviceLink = provider === "grok" && device;
-    const child = spawn10(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: captureDeviceLink ? ["inherit", "pipe", "pipe"] : "inherit", shell: false });
+    const child = spawn11(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory, stdio: captureDeviceLink ? ["inherit", "pipe", "pipe"] : "inherit", shell: false });
     let loginOutput = "", openedDevicePage = false;
     const relay = (data, output) => {
       output.write(data);
@@ -9971,20 +10384,20 @@ async function loginCli(provider, options = {}) {
     };
     child.on("error", (error) => {
       cleanup();
-      resolve31({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
+      resolve32({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
     });
     child.on("close", (code) => {
       cleanup();
-      if (options.signal?.aborted || timedOut) resolve31({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
-      else resolve31(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
+      if (options.signal?.aborted || timedOut) resolve32({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
+      else resolve32(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
     });
   });
 }
 async function checkCliAuth(provider, options = {}) {
   if (!(provider in CLI_PROVIDERS)) return { available: false, authenticated: false, detail: `Unknown CLI provider: ${provider}` };
   const env = cliEnvironment(provider, options.env);
-  const run3 = (args) => new Promise((resolve31) => {
-    execFile10(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve31({ ok: !error, missing: error?.code === "ENOENT" }));
+  const run3 = (args) => new Promise((resolve32) => {
+    execFile10(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve32({ ok: !error, missing: error?.code === "ENOENT" }));
   });
   const version = await run3(["--version"]);
   if (!version.ok) return { available: false, authenticated: false, detail: version.missing ? missingCli(provider) : `${provider} CLI could not be checked. Update it and try again.` };
@@ -10040,8 +10453,8 @@ function createSetupPrompt(input = process.stdin, output = process.stdout) {
     output.write(text);
     if (queue.length) return queue.shift().trim() || fallback;
     if (closed) throw eof();
-    const answer = await new Promise((resolve31, reject) => {
-      pending = { resolve: resolve31, reject };
+    const answer = await new Promise((resolve32, reject) => {
+      pending = { resolve: resolve32, reject };
     });
     return answer.trim() || fallback;
   };
@@ -10475,7 +10888,7 @@ var init_budget_setup = __esm({
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { createHash as createHash11 } from "node:crypto";
 import { closeSync as closeSync8, constants as constants14, fstatSync as fstatSync6, lstatSync as lstatSync13, openSync as openSync8, readSync as readSync2, readdirSync as readdirSync5, realpathSync as realpathSync6 } from "node:fs";
-import { join as join29 } from "node:path";
+import { join as join30 } from "node:path";
 function redact(value) {
   return value.replace(/-----BEGIN [^-]*(?:PRIVATE KEY|OPENSSH)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/g, "[credential omitted]").split("\n").map((line) => {
     if (/(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|passwd|authorization|token|secret)["']?(?:\s*[=:]\s*|\s+is\s+)\S/i.test(line) || /\bBearer\s+[\w./+~-]{8,}/i.test(line) || /\b(?:sk-[\w-]{12,}|gh[pousr]_[\w]{12,}|github_pat_[\w]{12,}|AKIA[A-Z0-9]{16})\b/.test(line) || /https?:\/\/[^\s/@]+:[^\s/@]+@/i.test(line) || /[?&](?:key|token|api_key|secret|password)=[^\s&#]+/i.test(line)) return "[credential omitted]";
@@ -10564,7 +10977,7 @@ function collectAutonomyEvidence(workspaces, options = {}) {
   }
   const candidates = [];
   for (const file of files) {
-    const session = readBoundedSession(join29(sessionsDir(), file), allowed);
+    const session = readBoundedSession(join30(sessionsDir(), file), allowed);
     if (!session) continue;
     const workspace = session.workspace;
     const sessionId = file.slice(0, -6);
@@ -10703,17 +11116,17 @@ var init_rules = __esm({
 
 // src/harness/autonomy/service.ts
 import { spawnSync } from "node:child_process";
-import { createHash as createHash12, randomUUID as randomUUID16 } from "node:crypto";
+import { createHash as createHash12, randomUUID as randomUUID17 } from "node:crypto";
 import { closeSync as closeSync9, constants as constants15, fstatSync as fstatSync7, lstatSync as lstatSync14, mkdirSync as mkdirSync18, openSync as openSync9, readFileSync as readFileSync21, renameSync as renameSync11, unlinkSync as unlinkSync12, writeFileSync as writeFileSync18 } from "node:fs";
-import { homedir as homedir19 } from "node:os";
-import { basename, dirname as dirname15, isAbsolute as isAbsolute5, join as join30, relative as relative3, resolve as resolve21 } from "node:path";
+import { homedir as homedir20 } from "node:os";
+import { basename, dirname as dirname15, isAbsolute as isAbsolute5, join as join31, relative as relative3, resolve as resolve22 } from "node:path";
 function absolute(value, name) {
   if (!isAbsolute5(value) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${name} must be an absolute path without control characters.`);
-  return resolve21(value);
+  return resolve22(value);
 }
 function configuration(options) {
   const home = absolute(options.home, "REIN_HOME");
-  const userHome = absolute(options.userHome ?? homedir19(), "User home");
+  const userHome = absolute(options.userHome ?? homedir20(), "User home");
   const nodePath = absolute(options.nodePath ?? process.execPath, "Node executable");
   const cliPath = absolute(options.cliPath, "Rein bundle");
   const uid = options.uid ?? process.getuid?.();
@@ -10721,7 +11134,7 @@ function configuration(options) {
   if (platform2 === "darwin" && (!Number.isSafeInteger(uid) || uid < 0)) throw new Error("A user ID is required for a launchd user agent.");
   const scope = createHash12("sha256").update(home).digest("hex").slice(0, 24);
   const label = `dev.rein.${options.kind === "guardian" ? "guardian" : "autonomy"}.${scope}`;
-  const paths = [dirname15(nodePath), join30(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  const paths = [dirname15(nodePath), join31(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
   const path2 = [...new Set(paths.filter((p) => isAbsolute5(p) && !/[\x00-\x1f\x7f:]/.test(p)))].join(":");
   const arguments_ = options.kind === "guardian" ? ["autonomy", "guardian", "serve"] : ["autonomy", "daemon"];
   return { home, userHome, nodePath, cliPath, uid, platform: platform2, scope, label, path: path2, arguments_ };
@@ -10740,7 +11153,7 @@ ${body2}`;
 function servicePlan(options) {
   const cfg = configuration(options);
   if (cfg.platform === "darwin") {
-    const path2 = join30(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
+    const path2 = join31(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
     const target = `gui/${cfg.uid}/${cfg.label}`;
     const body2 = `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -10760,7 +11173,7 @@ function servicePlan(options) {
   }
   if (cfg.platform === "linux") {
     const name = `${cfg.label}.service`;
-    const path2 = join30(cfg.userHome, ".config", "systemd", "user", name);
+    const path2 = join31(cfg.userHome, ".config", "systemd", "user", name);
     const body2 = `[Unit]
 Description=Rein autonomy supervisor
 StartLimitIntervalSec=300
@@ -10830,7 +11243,7 @@ function prepareDirectory(path2, userHome) {
   const components = relative3(userHome, path2).split("/");
   let current = userHome;
   for (const component of components) {
-    current = join30(current, component);
+    current = join31(current, component);
     try {
       mkdirSync18(current, { mode: 448 });
     } catch (error) {
@@ -10858,11 +11271,11 @@ function serviceStatus(options) {
   const cfg = configuration(options);
   const command = plan.manager === "launchd" ? ["/bin/launchctl", "print", `gui/${cfg.uid}/${cfg.label}`] : ["systemctl", "--user", "is-active", basename(plan.path)];
   const result = run2(options, command, 1e3);
-  let active2 = null;
-  if (!result.error && result.status === 0) active2 = plan.manager === "systemd" || /\bstate\s*=\s*running\b/.test(result.stdout ?? "");
-  else if (!result.error && (plan.manager === "systemd" && (result.status === 3 || result.status === 4) || /could not find service|service not found/i.test(result.stderr ?? ""))) active2 = false;
+  let active3 = null;
+  if (!result.error && result.status === 0) active3 = plan.manager === "systemd" || /\bstate\s*=\s*running\b/.test(result.stdout ?? "");
+  else if (!result.error && (plan.manager === "systemd" && (result.status === 3 || result.status === 4) || /could not find service|service not found/i.test(result.stderr ?? ""))) active3 = false;
   const detail = String(result.error?.message || result.stderr || "").trim().slice(0, 500);
-  return { manager: plan.manager, path: plan.path, installed, active: active2, message: active2 === true ? "Autonomy service is running." : active2 === false ? "Autonomy service is installed but stopped." : `Autonomy service is installed; service manager status is unavailable${detail ? `: ${detail}` : "."}` };
+  return { manager: plan.manager, path: plan.path, installed, active: active3, message: active3 === true ? "Autonomy service is running." : active3 === false ? "Autonomy service is installed but stopped." : `Autonomy service is installed; service manager status is unavailable${detail ? `: ${detail}` : "."}` };
 }
 async function waitForService(options, initial, polling = {}) {
   const timeout = Math.min(5e3, Math.max(0, polling.timeoutMs ?? 3e3));
@@ -10870,7 +11283,7 @@ async function waitForService(options, initial, polling = {}) {
   const deadline = Date.now() + timeout;
   let result = initial;
   while (result.installed && result.active !== true && Date.now() < deadline) {
-    await new Promise((resolve31) => setTimeout(resolve31, Math.min(interval, Math.max(0, deadline - Date.now()))));
+    await new Promise((resolve32) => setTimeout(resolve32, Math.min(interval, Math.max(0, deadline - Date.now()))));
     result = serviceStatus(options);
   }
   return result;
@@ -10886,7 +11299,7 @@ function installService(options) {
     const result = run2(options, plan.uninstallCommands[0]);
     if ((result.status !== 0 || result.error) && !/could not find service|no such process|service not found/i.test(result.stderr ?? "")) throw new Error(`Cannot unload the existing Rein service: ${result.error?.message || result.stderr || result.status}`);
   }
-  const temp = `${plan.path}.${randomUUID16()}.tmp`;
+  const temp = `${plan.path}.${randomUUID17()}.tmp`;
   try {
     writeFileSync18(temp, plan.content, { flag: "wx", mode: 384 });
     if (ownedContent(plan.path, options) !== previous) throw new Error("The Rein service file changed while installing; retry the command.");
@@ -10922,12 +11335,12 @@ var init_service = __esm({
 
 // src/harness/autonomy/guardian-runtime.ts
 import { createHash as createHash13 } from "node:crypto";
-import { spawn as spawn11 } from "node:child_process";
+import { spawn as spawn12 } from "node:child_process";
 import { createReadStream as createReadStream3, createWriteStream, statfsSync } from "node:fs";
 import { chmod as chmod3, lstat as lstat3, mkdir as mkdir3, mkdtemp as mkdtemp5, readFile as readFile3, readdir as readdir2, readlink, realpath, rename as rename3, rm as rm5, writeFile as writeFile2 } from "node:fs/promises";
 import { get } from "node:https";
 import { release as release2 } from "node:os";
-import { isAbsolute as isAbsolute6, join as join31, relative as relative4, resolve as resolve22, sep as sep5 } from "node:path";
+import { isAbsolute as isAbsolute6, join as join32, relative as relative4, resolve as resolve23, sep as sep5 } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 function headlessRuntimePlan(profile) {
@@ -10997,7 +11410,7 @@ async function inspectTree(root2, signal, normalize = false) {
   async function visit(directory) {
     for (const name of (await readdir2(directory)).sort()) {
       signal?.throwIfAborted();
-      const full = join31(directory, name), path2 = relative4(root2, full).split(sep5).join("/");
+      const full = join32(directory, name), path2 = relative4(root2, full).split(sep5).join("/");
       if (path2 === MANIFEST) continue;
       safeName(path2);
       if (entries.length >= MAX_ENTRIES) throw new Error("Too many guardian runtime files.");
@@ -11005,7 +11418,7 @@ async function inspectTree(root2, signal, normalize = false) {
       if (!normalize && !stat3.isSymbolicLink() && (stat3.mode & 4095) !== (stat3.isDirectory() || stat3.mode & 73 ? 448 : 384)) throw new Error("Guardian runtime file permissions changed.");
       if (stat3.isSymbolicLink()) {
         const target = await readlink(full);
-        if (!target || target.startsWith("/") || /[\\\x00-\x1f\x7f]/.test(target) || !inside(root2, resolve22(directory, target)) || !inside(canonicalRoot, await realpath(full))) throw new Error("Guardian runtime link escapes its private directory.");
+        if (!target || target.startsWith("/") || /[\\\x00-\x1f\x7f]/.test(target) || !inside(root2, resolve23(directory, target)) || !inside(canonicalRoot, await realpath(full))) throw new Error("Guardian runtime link escapes its private directory.");
         entries.push({ path: path2, kind: "link", target });
       } else if (stat3.isDirectory()) {
         entries.push({ path: path2, kind: "directory" });
@@ -11024,7 +11437,7 @@ async function inspectTree(root2, signal, normalize = false) {
   if ([...inodes.values()].some((inode) => inode.count !== inode.links)) throw new Error("Guardian runtime has hard links outside its private directory.");
   for (const entry of entries) {
     signal?.throwIfAborted();
-    const full = join31(root2, entry.path);
+    const full = join32(root2, entry.path);
     if (entry.kind === "file") entry.sha256 = await hashFile(full, signal);
     if (normalize && entry.kind !== "link") await chmod3(full, entry.kind === "directory" || entry.executable ? 448 : 384);
   }
@@ -11041,15 +11454,15 @@ async function verify(root2, plan, signal) {
   try {
     const rootStat = await lstat3(root2);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("Runtime root must be an ordinary directory.");
-    const stat3 = await lstat3(join31(root2, MANIFEST));
+    const stat3 = await lstat3(join32(root2, MANIFEST));
     if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size > 8 * 1024 ** 2 || (stat3.mode & 4095) !== 384) throw new Error("Invalid manifest file.");
-    const manifest2 = JSON.parse(await readFile3(join31(root2, MANIFEST), "utf8"));
+    const manifest2 = JSON.parse(await readFile3(join32(root2, MANIFEST), "utf8"));
     if (manifest2.version !== 1 || manifest2.asset !== plan.asset || manifest2.archiveSha256 !== plan.sha256 || manifest2.runtimeVersion !== plan.version) throw new Error("Unrecognized archive manifest.");
     const entries = await inspectTree(root2, signal);
     if (JSON.stringify(entries) !== JSON.stringify(manifest2.entries)) throw new Error("Runtime file integrity mismatch.");
     const binary = entries.find((entry) => entry.path === plan.executableRelative);
     if (binary?.kind !== "file" || !binary.executable) throw new Error("Missing executable.");
-    return join31(root2, plan.executableRelative);
+    return join32(root2, plan.executableRelative);
   } catch (error) {
     signal?.throwIfAborted();
     throw new Error(`Existing guardian runtime was preserved because verification failed: ${error.message} Move the guardian-runtime directory aside after stopping its service, then retry installation.`);
@@ -11076,7 +11489,7 @@ async function installHeadlessRuntime(profile, options = {}, dependencies = {}) 
   }
   const parent = privateDirectory(), filesystem = statfsSync(parent);
   if (Number(filesystem.bavail) * Number(filesystem.bsize) < plan.downloadBytes * 4 + 1024 ** 3) throw new Error("Insufficient free disk space for the headless runtime archive and private extraction staging.");
-  const stage = await mkdtemp5(join31(parent, ".guardian-runtime-")), archive = join31(stage, plan.asset), extracted = join31(stage, "runtime");
+  const stage = await mkdtemp5(join32(parent, ".guardian-runtime-")), archive = join32(stage, plan.asset), extracted = join32(stage, "runtime");
   const controller = new AbortController(), abort = () => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", abort, { once: true });
   if (options.signal?.aborted) abort();
@@ -11112,7 +11525,7 @@ async function installHeadlessRuntime(profile, options = {}, dependencies = {}) 
     const entries = await inspectTree(extracted, controller.signal, true);
     const binary = entries.find((entry) => entry.path === plan.executableRelative);
     if (binary?.kind !== "file" || !binary.executable) throw new Error("Verified runtime archive did not contain its expected executable.");
-    await writeFile2(join31(extracted, MANIFEST), JSON.stringify({ version: 1, runtimeVersion: plan.version, asset: plan.asset, archiveSha256: plan.sha256, entries }), { flag: "wx", mode: 384 });
+    await writeFile2(join32(extracted, MANIFEST), JSON.stringify({ version: 1, runtimeVersion: plan.version, asset: plan.asset, archiveSha256: plan.sha256, entries }), { flag: "wx", mode: 384 });
     controller.signal.throwIfAborted();
     try {
       await lstat3(root2);
@@ -11121,7 +11534,7 @@ async function installHeadlessRuntime(profile, options = {}, dependencies = {}) 
       if (!absent(error)) throw error;
     }
     await rename3(extracted, root2);
-    return join31(root2, plan.executableRelative);
+    return join32(root2, plan.executableRelative);
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", abort);
@@ -11136,14 +11549,14 @@ var init_guardian_runtime = __esm({
     MANIFEST = ".rein-runtime.json";
     MAX_ENTRIES = 2e4;
     MAX_EXPANDED = 16 * 1024 ** 3;
-    runtimeDirectory = () => join31(privateDirectory(), "guardian-runtime");
+    runtimeDirectory = () => join32(privateDirectory(), "guardian-runtime");
     absent = (error) => error.code === "ENOENT";
     runRuntimeArchiveCommand = (command, args, options) => {
       options.signal?.throwIfAborted();
       return new Promise((resolveResult, reject) => {
         const env = { ...process.env, LC_ALL: "C", LANG: "C" };
         for (const key of ["TAR_OPTIONS", "TAPE", "RSH", "RSH_COMMAND", "GZIP", "BZIP", "BZIP2", "XZ_OPT", "XZ_DEFAULTS", "ZSTD_CLEVEL", "ZSTD_NBTHREADS", "BASH_ENV", "ENV"]) delete env[key];
-        const child = spawn11(command, args, { shell: false, detached: process.platform !== "win32", env, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn12(command, args, { shell: false, detached: process.platform !== "win32", env, stdio: ["ignore", "pipe", "pipe"] });
         let output = "", diagnostic = "", bytes = 0, closed = false, settled = false, code = null, failure, escalation;
         const kill = (signal) => {
           try {
@@ -11199,12 +11612,12 @@ var init_guardian_runtime = __esm({
 });
 
 // src/harness/autonomy/guardian.ts
-import { randomUUID as randomUUID17 } from "node:crypto";
-import { spawn as spawn12 } from "node:child_process";
+import { randomUUID as randomUUID18 } from "node:crypto";
+import { spawn as spawn13 } from "node:child_process";
 import { request as request2 } from "node:http";
 import { createServer as createServer4 } from "node:net";
 import { accessSync as accessSync5, constants as constants16, existsSync as existsSync17, lstatSync as lstatSync15, mkdirSync as mkdirSync19, readFileSync as readFileSync22, realpathSync as realpathSync7, renameSync as renameSync12, statfsSync as statfsSync2, statSync as statSync7, unlinkSync as unlinkSync13, writeFileSync as writeFileSync19 } from "node:fs";
-import { delimiter as delimiter5, isAbsolute as isAbsolute7, join as join32, resolve as resolve23 } from "node:path";
+import { delimiter as delimiter5, isAbsolute as isAbsolute7, join as join33, resolve as resolve24 } from "node:path";
 function guardianBaseUrl(value) {
   let url;
   try {
@@ -11233,7 +11646,7 @@ function configureGuardian(options) {
   privateDirectory();
   const path2 = configPath2();
   if (existsSync17(path2)) readGuardianConfig();
-  const temp = `${path2}.${randomUUID17()}.tmp`;
+  const temp = `${path2}.${randomUUID18()}.tmp`;
   try {
     writeFileSync19(temp, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 384 });
     renameSync12(temp, path2);
@@ -11305,10 +11718,10 @@ function stopOwnedRuntimeAt(baseUrl) {
 }
 async function guardianPortAvailable(baseUrl) {
   const url = new URL(guardianBaseUrl(baseUrl));
-  return new Promise((resolve31) => {
+  return new Promise((resolve32) => {
     const server = createServer4();
-    server.once("error", () => resolve31(false));
-    server.listen({ host: url.hostname.replace(/^\[|\]$/g, ""), port: Number(url.port || 80), exclusive: true }, () => server.close(() => resolve31(true)));
+    server.once("error", () => resolve32(false));
+    server.listen({ host: url.hostname.replace(/^\[|\]$/g, ""), port: Number(url.port || 80), exclusive: true }, () => server.close(() => resolve32(true)));
   });
 }
 async function guardianStatus(options = {}, deps = {}) {
@@ -11384,7 +11797,7 @@ async function findRuntime(profile) {
   const cached = await verifyHeadlessRuntime(profile);
   if (cached) return cached;
   const candidates = [
-    ...(process.env.PATH ?? "").split(delimiter5).filter(Boolean).map((dir) => resolve23(dir, process.platform === "win32" ? "ollama.exe" : "ollama")),
+    ...(process.env.PATH ?? "").split(delimiter5).filter(Boolean).map((dir) => resolve24(dir, process.platform === "win32" ? "ollama.exe" : "ollama")),
     "/Applications/Ollama.app/Contents/Resources/ollama",
     "/usr/local/bin/ollama",
     "/usr/bin/ollama"
@@ -11401,8 +11814,8 @@ async function findRuntime(profile) {
 }
 async function runGuardianInstallCommand(command, args, opts) {
   opts.signal?.throwIfAborted();
-  return new Promise((resolve31, reject) => {
-    const child = spawn12(command, args, { shell: false, detached: process.platform !== "win32", stdio: "inherit", env: opts.env });
+  return new Promise((resolve32, reject) => {
+    const child = spawn13(command, args, { shell: false, detached: process.platform !== "win32", stdio: "inherit", env: opts.env });
     let settled = false, closed = false, code = null, error, escalation;
     const kill = (signal) => {
       try {
@@ -11418,7 +11831,7 @@ async function runGuardianInstallCommand(command, args, opts) {
       opts.signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (code !== 0) reject(new Error(`Guardian installation command exited ${code}; rules-only mode remains available.`));
-      else resolve31();
+      else resolve32();
     };
     const stop = (reason2) => {
       if (error) return;
@@ -11447,7 +11860,7 @@ async function runGuardianInstallCommand(command, args, opts) {
   });
 }
 function guardianRuntimeOptions() {
-  return { home: autonomyHome(), cliPath: realpathSync7(resolve23(process.argv[1])), nodePath: process.execPath, kind: "guardian" };
+  return { home: autonomyHome(), cliPath: realpathSync7(resolve24(process.argv[1])), nodePath: process.execPath, kind: "guardian" };
 }
 function guardianRuntimeStatus() {
   return serviceStatus(guardianRuntimeOptions());
@@ -11456,7 +11869,7 @@ function stopGuardianRuntime() {
   return uninstallService(guardianRuntimeOptions());
 }
 function runtimeRecord() {
-  const path2 = join32(autonomyDirectory(), "guardian-runtime.json");
+  const path2 = join33(autonomyDirectory(), "guardian-runtime.json");
   if (lstatSync15(autonomyDirectory()).isSymbolicLink()) throw new Error("Invalid guardian runtime directory.");
   const stat3 = lstatSync15(path2);
   if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink !== 1 || stat3.size > 4096) throw new Error("Invalid guardian runtime record.");
@@ -11471,12 +11884,12 @@ async function startOwnedRuntime(executable2, signal, baseUrl = readGuardianConf
   if (running && running !== baseUrl) throw new Error("A guardian worker is already active at another endpoint. Run rein autonomy guardian disable before changing its port.");
   if (running === baseUrl) return true;
   if (!isAbsolute7(executable2) || /[\x00-\x1f\x7f]/.test(executable2)) throw new Error("Ollama executable must be an absolute local path.");
-  const path2 = join32(privateDirectory(), "guardian-runtime.json");
+  const path2 = join33(privateDirectory(), "guardian-runtime.json");
   if (existsSync17(path2)) {
     const stat3 = lstatSync15(path2);
     if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink !== 1 || stat3.size > 4096) throw new Error("Guardian runtime record must be a small private file.");
   }
-  const temporary = `${path2}.${randomUUID17()}.tmp`;
+  const temporary = `${path2}.${randomUUID18()}.tmp`;
   try {
     writeFileSync19(temporary, JSON.stringify({ version: 1, kind: "rein-headless-guardian", executable: executable2, baseUrl }), { mode: 384, flag: "wx" });
     renameSync12(temporary, path2);
@@ -11498,7 +11911,7 @@ async function startOwnedRuntime(executable2, signal, baseUrl = readGuardianConf
 function guardianRuntimeEnvironment(baseUrl, inherited = process.env) {
   const env = {};
   for (const name of ["PATH", "LANG", "LC_ALL", "TMPDIR", "CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES", "NVIDIA_DRIVER_CAPABILITIES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"]) if (inherited[name]) env[name] = inherited[name];
-  const models = join32(privateDirectory(), "guardian-models"), home = join32(privateDirectory(), "guardian-home");
+  const models = join33(privateDirectory(), "guardian-models"), home = join33(privateDirectory(), "guardian-home");
   for (const directory of [models, home]) {
     mkdirSync19(directory, { recursive: true, mode: 448 });
     if (!lstatSync15(directory).isDirectory() || lstatSync15(directory).isSymbolicLink()) throw new Error("Guardian storage must be an ordinary private directory.");
@@ -11566,7 +11979,7 @@ async function installGuardianModel(options = {}, deps = {}) {
         status2 = await guardianStatus({ probe: true, signal: options.signal, baseUrl: config.baseUrl }, deps);
         if (status2.runtimeAvailable) break;
         optsCheck(options);
-        if (attempt < 7) await new Promise((resolve31) => setTimeout(resolve31, 250));
+        if (attempt < 7) await new Promise((resolve32) => setTimeout(resolve32, 250));
       }
       if (!status2.runtimeAvailable) return { installed: false, detail: "The dedicated guardian service started but its runtime API is not ready. Rules-only coordination remains ready; no other server was used.", plan };
     }
@@ -11615,8 +12028,8 @@ var init_guardian = __esm({
     };
     GUARDIAN_LIMITS = { contextTokens: 2048, outputTokens: 192, timeoutMs: 2e4, keepAliveSeconds: 30, maxCandidates: 3, maxInputChars: 4200 };
     defaultGuardianConfig = () => ({ version: 1, mode: "rules", baseUrl: "http://127.0.0.1:11435", model: GUARDIAN_MODEL.tag });
-    configPath2 = () => join32(autonomyDirectory(), "guardian.json");
-    localGuardianRequest = (baseUrl, path2, opts = {}) => new Promise((resolve31, reject) => {
+    configPath2 = () => join33(autonomyDirectory(), "guardian.json");
+    localGuardianRequest = (baseUrl, path2, opts = {}) => new Promise((resolve32, reject) => {
       const origin = guardianBaseUrl(baseUrl);
       if (!["/api/tags", "/api/show", "/api/chat", "/api/pull", "/api/version"].includes(path2)) return reject(new Error("Unsupported guardian API operation."));
       if (opts.signal?.aborted) return reject(new Error("Guardian request cancelled."));
@@ -11627,7 +12040,7 @@ var init_guardian = __esm({
         settled = true;
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abort);
-        error ? reject(error) : resolve31(value);
+        error ? reject(error) : resolve32(value);
       };
       const req = request2(new URL(path2, origin), {
         method: opts.method ?? "GET",
@@ -11693,7 +12106,7 @@ var init_guardian = __esm({
 });
 
 // src/harness/autonomy/engine.ts
-import { createHash as createHash14, randomUUID as randomUUID18 } from "node:crypto";
+import { createHash as createHash14, randomUUID as randomUUID19 } from "node:crypto";
 function responseText(last) {
   if (!last || last.stopReason !== "stop") throw new Error(last?.errorMessage ?? `Model did not finish successfully (${last?.stopReason ?? "no response"}).`);
   return last.content.filter((part) => part.type === "text").map((part) => part.text).join("\n").slice(0, 2e4);
@@ -11786,7 +12199,7 @@ async function runCycle(kind, id, options = {}, deps = {}) {
     }
     if (Date.now() >= deadline) controller.abort();
     controller.signal.throwIfAborted();
-    runId = randomUUID18();
+    runId = randomUUID19();
     const activeId = runId;
     await updateState((s) => {
       if (s.paused && !(options.manual && kind === "scan")) throw new Error("Autonomy was paused.");
@@ -11925,11 +12338,11 @@ async function runDaemon(signal) {
         const due = state.proposals.find((p) => p.status === "enabled" && p.nextRun !== void 0 && p.nextRun <= Date.now());
         await runCycle(due ? "routine" : "scan", due?.id, { signal: controller.signal });
       }
-      if (!controller.signal.aborted) await new Promise((resolve31) => {
+      if (!controller.signal.aborted) await new Promise((resolve32) => {
         const done = () => {
           clearTimeout(timer);
           controller.signal.removeEventListener("abort", done);
-          resolve31();
+          resolve32();
         };
         const timer = setTimeout(done, 15e3);
         controller.signal.addEventListener("abort", done, { once: true });
@@ -11967,7 +12380,7 @@ __export(command_exports, {
   serviceConfigurationIssue: () => serviceConfigurationIssue
 });
 import { realpathSync as realpathSync8 } from "node:fs";
-import { resolve as resolve24 } from "node:path";
+import { resolve as resolve25 } from "node:path";
 function serviceConfigurationIssue(config, env = process.env) {
   const provider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0);
   const cli = provider === "codex" || provider === "copilot" || provider === "grok";
@@ -12008,7 +12421,7 @@ function numberOption(flags, name, min, max) {
   return n;
 }
 function autonomyServiceOptions() {
-  return { home: autonomyHome(), cliPath: realpathSync8(resolve24(process.argv[1])), nodePath: process.execPath };
+  return { home: autonomyHome(), cliPath: realpathSync8(resolve25(process.argv[1])), nodePath: process.execPath };
 }
 function requireServiceModelCompatibility(dependencies) {
   const status2 = (dependencies.status ?? serviceStatus)((dependencies.serviceOptions ?? autonomyServiceOptions)());
@@ -12136,7 +12549,7 @@ async function runAutonomyCommand(args, flags = {}, dependencies = {}) {
     return;
   }
   if (command === "unenroll") {
-    let workspace = resolve24(typeof flags.workspace === "string" ? flags.workspace : process.cwd());
+    let workspace = resolve25(typeof flags.workspace === "string" ? flags.workspace : process.cwd());
     try {
       workspace = canonicalWorkspace(workspace);
     } catch {
@@ -12296,8 +12709,8 @@ __export(onboarding_exports, {
   runOnboarding: () => runOnboarding,
   runProfileWizard: () => runProfileWizard
 });
-import { homedir as homedir20 } from "node:os";
-import { join as join33, resolve as resolve25 } from "node:path";
+import { homedir as homedir21 } from "node:os";
+import { join as join34, resolve as resolve26 } from "node:path";
 async function menu(prompt, log, question, choices, fallback = 1) {
   log(`
 ${question}`);
@@ -12474,15 +12887,15 @@ async function setupProactivity(getPrompt, releasePrompt, log, connected, depend
     return true;
   }
   log("Choose a folder for your notes, everyday tasks, or project whose Rein conversations may be used for suggestions. Git is not required. Avoid your entire home folder.");
-  const candidate = resolve25(process.cwd());
-  const defaultFolder = [resolve25(homedir20()), privateHome()].includes(candidate) ? void 0 : candidate;
+  const candidate = resolve26(process.cwd());
+  const defaultFolder = [resolve26(homedir21()), privateHome()].includes(candidate) ? void 0 : candidate;
   if (!defaultFolder) log("You are in a settings or home folder. Enter an existing working folder, or skip and run rein autonomy init from that folder later.");
   for (; ; ) {
     const answer = await prompt.ask(`Folder [${defaultFolder ?? "skip"}] (or skip): `, defaultFolder ?? "skip");
     if (answer.toLowerCase() === "skip") return true;
     let workspace;
     try {
-      workspace = canonicalWorkspace(answer.startsWith("~/") ? join33(homedir20(), answer.slice(2)) : resolve25(answer));
+      workspace = canonicalWorkspace(answer.startsWith("~/") ? join34(homedir21(), answer.slice(2)) : resolve26(answer));
     } catch (error) {
       log(error.message);
       continue;
@@ -12621,7 +13034,7 @@ var init_onboarding = __esm({
     init_guardian();
     init_profile();
     init_tui();
-    privateHome = () => resolve25(process.env.REIN_HOME || join33(homedir20(), ".rein"));
+    privateHome = () => resolve26(process.env.REIN_HOME || join34(homedir21(), ".rein"));
     packIds = Object.keys(PACKS);
     firstTasks = {
       everyday: "Help me make one small part of today easier. Ask what feels hard to start, then help me choose one manageable next step.",
@@ -12641,7 +13054,7 @@ __export(terminal_exports, {
   watchActivity: () => watchActivity
 });
 import { emitKeypressEvents } from "node:readline";
-import { resolve as resolve26 } from "node:path";
+import { resolve as resolve27 } from "node:path";
 function renderActivity(snapshot, selected, width = 65, height = 36, controls = "\u2191\u2193 select \xB7 f follow \xB7 q quit") {
   const columns = Math.max(16, width), rows = Math.max(8, height);
   const lines = ["REIN / ACTIVITY", snapshot ? `${snapshot.state} \xB7 ${snapshot.model ?? ""}` : "Waiting for the session\u2026", controls, ""];
@@ -12736,7 +13149,7 @@ async function launchVisual(argv, cwd) {
   const id = newActivityId(), shells = new TmuxShells(cwd, "visual");
   const boundary = argv.indexOf("--");
   const args = argv.filter((arg, index) => boundary >= 0 && index > boundary || !/^--visual(?:=true|=false)?$/.test(arg));
-  const cli = [process.execPath, resolve26(process.argv[1])].map(shellQuote).join(" ");
+  const cli = [process.execPath, resolve27(process.argv[1])].map(shellQuote).join(" ");
   const prefix = `cd ${shellQuote(cwd)} && `;
   const session = await shells.start();
   try {
@@ -12807,10 +13220,10 @@ __export(server_exports, {
 });
 import { createServer as createServer5 } from "node:http";
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { spawn as spawn13 } from "node:child_process";
+import { spawn as spawn14 } from "node:child_process";
 function openCanvas(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
-  const child = spawn13(command, process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url], { stdio: "ignore", detached: true, shell: false });
+  const child = spawn14(command, process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url], { stdio: "ignore", detached: true, shell: false });
   child.on("error", () => {
   });
   child.unref();
@@ -12854,13 +13267,13 @@ async function startCanvas(id) {
   });
   server.requestTimeout = 5e3;
   server.headersTimeout = 5e3;
-  await new Promise((resolve31, reject) => {
+  await new Promise((resolve32, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve31);
+    server.listen(0, "127.0.0.1", resolve32);
   });
   origin = `http://127.0.0.1:${server.address().port}`;
-  return { url: `${origin}/#${token2}`, close: () => new Promise((resolve31, reject) => {
-    server.close((error) => error ? reject(error) : resolve31());
+  return { url: `${origin}/#${token2}`, close: () => new Promise((resolve32, reject) => {
+    server.close((error) => error ? reject(error) : resolve32());
     server.closeAllConnections();
   }) };
 }
@@ -12905,10 +13318,10 @@ Search: DuckDuckGo. Page extraction: local browser.` : "Obscura is not installed
     const value = args.slice(1).join(" ");
     if (!value) throw new Error(`Usage: rein web ${action} <${action === "search" ? "query" : "url"}> [--json]`);
     const input = action === "search" ? { query: value } : { url: value };
-    for (const [flag, field] of [["max-results", "max_results"], ["max-chars", "max_chars"]]) {
-      if (flags[flag] !== void 0) input[field] = typeof flags[flag] === "string" && String(flags[flag]).trim() ? Number(flags[flag]) : NaN;
+    for (const [flag, field2] of [["max-results", "max_results"], ["max-chars", "max_chars"]]) {
+      if (flags[flag] !== void 0) input[field2] = typeof flags[flag] === "string" && String(flags[flag]).trim() ? Number(flags[flag]) : NaN;
     }
-    for (const [flag, field] of [["include-domains", "include_domains"], ["exclude-domains", "exclude_domains"]]) if (flags[flag] !== void 0) input[field] = flags[flag];
+    for (const [flag, field2] of [["include-domains", "include_domains"], ["exclude-domains", "exclude_domains"]]) if (flags[flag] !== void 0) input[field2] = flags[flag];
     const result = await web_default[action === "search" ? 0 : 1].execute("web-cli", input, controller.signal, progress);
     if (controller.signal.aborted) throw new Error("Web operation cancelled.");
     console.log(flags.json === true ? JSON.stringify(result) : result.content);
@@ -12936,7 +13349,7 @@ __export(debug_exports, {
   formatDebugReport: () => formatDebugReport
 });
 import { lstat as lstat4, readdir as readdir3, realpath as realpath2, open as open3 } from "node:fs/promises";
-import { resolve as resolve27 } from "node:path";
+import { resolve as resolve28 } from "node:path";
 function emptyCounts() {
   return {
     users: 0,
@@ -12975,10 +13388,10 @@ async function analyzeDebugFolder(folder) {
   }
 }
 async function readExport(folder) {
-  const root2 = await realpath2(resolve27(folder));
+  const root2 = await realpath2(resolve28(folder));
   let directory;
   let files = [];
-  for (const path2 of [resolve27(root2, "sessions/raw"), resolve27(root2, "raw"), root2]) {
+  for (const path2 of [resolve28(root2, "sessions/raw"), resolve28(root2, "raw"), root2]) {
     try {
       if (await realpath2(path2) !== path2 || !(await lstat4(path2)).isDirectory()) continue;
       const entries = await readdir3(path2, { withFileTypes: true });
@@ -12996,7 +13409,7 @@ async function readExport(folder) {
   const perSession = [];
   let totalBytes = 0;
   for (const name of files) {
-    const path2 = resolve27(directory, name);
+    const path2 = resolve28(directory, name);
     if (await realpath2(path2) !== path2) throw new DebugInputError("Symlinked session files are not supported.");
     const handle = await open3(path2, "r");
     const counts = emptyCounts();
@@ -13138,8 +13551,8 @@ __export(doctor_exports, {
 });
 import { execFileSync as execFileSync4 } from "node:child_process";
 import { existsSync as existsSync18, lstatSync as lstatSync16, readFileSync as readFileSync23, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
-import { homedir as homedir21 } from "node:os";
-import { dirname as dirname16, join as join34 } from "node:path";
+import { homedir as homedir22 } from "node:os";
+import { dirname as dirname16, join as join35 } from "node:path";
 function checkNodeRuntime(version = process.versions.node) {
   const major = Number(version.split(".")[0]);
   const supported = Number.isSafeInteger(major) && major >= 18;
@@ -13190,7 +13603,7 @@ function sh2(cmd, opts = {}) {
 function gitRootOf(file, maxDepth = 4) {
   let dir = existsSync18(file) && statSync8(file).isFile() ? dirname16(file) : file;
   for (let i = 0; i < maxDepth; i++) {
-    if (existsSync18(join34(dir, ".git"))) return dir;
+    if (existsSync18(join35(dir, ".git"))) return dir;
     const up = dirname16(dir);
     if (up === dir) return void 0;
     dir = up;
@@ -13202,7 +13615,7 @@ function newestMtime(dir) {
   const walk = (d) => {
     for (const entry of readdirSync6(d, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name === ".git") continue;
-      const p = join34(d, entry.name);
+      const p = join35(d, entry.name);
       if (entry.isDirectory()) walk(p);
       else newest = Math.max(newest, statSync8(p).mtimeMs);
     }
@@ -13283,10 +13696,10 @@ async function runDoctor(opts = {}) {
       let installedPackage = false;
       try {
         const packageRoot = dirname16(dirname16(real));
-        installedPackage = JSON.parse(readFileSync23(join34(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join34(packageRoot, "dist", "rein.js");
+        installedPackage = JSON.parse(readFileSync23(join35(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join35(packageRoot, "dist", "rein.js");
       } catch {
       }
-      const distOk = installedPackage || repo && existsSync18(join34(repo, "dist", "rein.js"));
+      const distOk = installedPackage || repo && existsSync18(join35(repo, "dist", "rein.js"));
       checks.push({
         name: "bin",
         status: distOk ? "ok" : "fail",
@@ -13316,7 +13729,7 @@ async function runDoctor(opts = {}) {
     }
   }
   if (repo) {
-    const bundle = join34(repo, "dist", "rein.js");
+    const bundle = join35(repo, "dist", "rein.js");
     if (!existsSync18(bundle)) {
       checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => {
         const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
@@ -13325,7 +13738,7 @@ async function runDoctor(opts = {}) {
       } });
     } else {
       const bundleMtime = statSync8(bundle).mtimeMs;
-      const srcMtime = newestMtime(join34(repo, "src"));
+      const srcMtime = newestMtime(join35(repo, "src"));
       const fresh = bundleMtime >= srcMtime;
       checks.push({
         name: "bundle",
@@ -13397,7 +13810,7 @@ async function runDoctor(opts = {}) {
   }
   try {
     const { statfsSync: statfsSync3 } = await import("node:fs");
-    const free = statfsSync3(homedir21()).bavail * statfsSync3(homedir21()).bsize;
+    const free = statfsSync3(homedir22()).bavail * statfsSync3(homedir22()).bsize;
     const GiB3 = free / 2 ** 30;
     checks.push({ name: "disk", status: GiB3 >= 1 ? "ok" : "warn", detail: `${GiB3.toFixed(1)} GiB free in $HOME` });
   } catch {
@@ -13465,8 +13878,8 @@ __export(loop_exports, {
 });
 import { execFileSync as execFileSync5 } from "node:child_process";
 import { existsSync as existsSync19, readFileSync as readFileSync24, appendFileSync as appendFileSync2, realpathSync as realpathSync10 } from "node:fs";
-import { join as join35, resolve as resolve28 } from "node:path";
-import { randomUUID as randomUUID19 } from "node:crypto";
+import { join as join36, resolve as resolve29 } from "node:path";
+import { randomUUID as randomUUID20 } from "node:crypto";
 function incompleteRunReason(messages) {
   const last = messages.filter((message) => message.role === "assistant").at(-1);
   if (!last) return "no assistant result was returned";
@@ -13513,7 +13926,7 @@ function requireCleanGit(cwd) {
   } catch {
     throw new Error("Autonomous keep/discard requires a Git repository with an initial commit");
   }
-  if (realpathSync10(root2) !== realpathSync10(resolve28(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
+  if (realpathSync10(root2) !== realpathSync10(resolve29(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
   if (execFileSync5("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf8" }).trim()) {
     throw new Error("Working tree is dirty; commit or stash existing work before autonomous keep/discard");
   }
@@ -13524,7 +13937,7 @@ function discardIteration(cwd, expectedHead) {
   execFileSync5("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
 }
 function recordLesson(cwd, text, commitMessage) {
-  appendFileSync2(join35(cwd, "LESSONS.md"), `
+  appendFileSync2(join36(cwd, "LESSONS.md"), `
 ${text}
 `);
   execFileSync5("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
@@ -13535,8 +13948,8 @@ async function runExperimentLoop(opts, dependencies = {}) {
   const { maxTurns, maxIterations: maxIters } = resolveRunBudgets(loadConfig(), opts);
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join35(cwd, taskFile);
-  const metricPath = join35(cwd, metricFile);
+  const taskPath = join36(cwd, taskFile);
+  const metricPath = join36(cwd, metricFile);
   if (!existsSync19(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
@@ -13590,7 +14003,7 @@ Rules:
   let feedback = "";
   for (let i = 0; i < maxIters; i++) {
     const head = sh3("git rev-parse HEAD", cwd);
-    const tag = randomUUID19().slice(0, 8);
+    const tag = randomUUID20().slice(0, 8);
     console.log(`
 ${bold(`iteration ${i + 1}/${maxIters}`)} ${dim(tag)}`);
     try {
@@ -13661,17 +14074,17 @@ __export(improve_exports, {
 import { execFileSync as execFileSync6 } from "node:child_process";
 import { cpSync, existsSync as existsSync20, mkdtempSync as mkdtempSync2, readFileSync as readFileSync25, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
-import { join as join36, dirname as dirname17, resolve as resolve29 } from "node:path";
+import { join as join37, dirname as dirname17, resolve as resolve30 } from "node:path";
 import { fileURLToPath as fileURLToPath7 } from "node:url";
-import { randomUUID as randomUUID20 } from "node:crypto";
+import { randomUUID as randomUUID21 } from "node:crypto";
 function sh4(cmd, cwd) {
   return execFileSync6("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function runHarnessTests(repoDir) {
-  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join36(tmpdir5(), "rein-validation-")) : repoDir;
+  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join37(tmpdir5(), "rein-validation-")) : repoDir;
   try {
     if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
-      if (existsSync20(join36(repoDir, name))) cpSync(join36(repoDir, name), join36(dir, name), { recursive: true });
+      if (existsSync20(join37(repoDir, name))) cpSync(join37(repoDir, name), join37(dir, name), { recursive: true });
     }
     const output = execFileSync6(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
       cwd: dir,
@@ -13687,7 +14100,7 @@ function runHarnessTests(repoDir) {
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join36(repoDir, "LESSONS.md");
+  const path2 = join37(repoDir, "LESSONS.md");
   if (!existsSync20(path2)) return "";
   const text = readFileSync25(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
@@ -13730,7 +14143,7 @@ ${lessons}` : "(no harness lessons recorded yet \u2014 look for the weakest part
   while (iterations < maxIters) {
     iterations++;
     const head = sh4("git rev-parse HEAD", repoDir);
-    const tag = randomUUID20().slice(0, 8);
+    const tag = randomUUID21().slice(0, 8);
     console.log(`
 ${bold(`iteration ${iterations}/${maxIters}`)} ${dim(tag)}`);
     const prompt = iterations === 1 ? queueText + "\n\nDo not commit, reset, stage, or switch Git branches; the harness owns keep/discard. Pick the single most concrete weakness and fix it with the smallest change that works. Then run npm test and report the result as: RESULT: improved | no-change | failed" : `${feedback}
@@ -13756,7 +14169,7 @@ Continue: pick the next concrete weakness. Inspect current files; discarded edit
         const test = (dependencies.runTests ?? runHarnessTests)(repoDir);
         if (sh4("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
         if (test.pass) {
-          appendFileSync3(join36(repoDir, "LESSONS.md"), `
+          appendFileSync3(join37(repoDir, "LESSONS.md"), `
 - [improve ${tag}] fixed: ${firstLine(report)}
 `);
           if (useGit) sh4(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
@@ -13805,7 +14218,7 @@ var init_improve = __esm({
     init_models();
     init_run_budgets();
     here4 = dirname17(fileURLToPath7(import.meta.url));
-    REIN_REPO = [here4, resolve29(here4, ".."), resolve29(here4, "..", "..")].find((dir) => existsSync20(join36(dir, "test", "smoke.ts"))) ?? resolve29(here4, "..", "..");
+    REIN_REPO = [here4, resolve30(here4, ".."), resolve30(here4, "..", "..")].find((dir) => existsSync20(join37(dir, "test", "smoke.ts"))) ?? resolve30(here4, "..", "..");
   }
 });
 
@@ -13817,8 +14230,8 @@ __export(heartbeat_exports, {
   runHeartbeat: () => runHeartbeat
 });
 import { appendFileSync as appendFileSync4, existsSync as existsSync21, mkdirSync as mkdirSync20, readFileSync as readFileSync26, writeFileSync as writeFileSync20 } from "node:fs";
-import { homedir as homedir22 } from "node:os";
-import { isAbsolute as isAbsolute8, join as join37, resolve as resolve30 } from "node:path";
+import { homedir as homedir23 } from "node:os";
+import { isAbsolute as isAbsolute8, join as join38, resolve as resolve31 } from "node:path";
 function parseHeartbeat(text) {
   const tasks = [];
   let improveGoal;
@@ -13835,15 +14248,15 @@ function parseHeartbeat(text) {
   return { tasks, improveGoal };
 }
 function resolveHeartbeatFile(explicit) {
-  if (explicit) return isAbsolute8(explicit) ? explicit : resolve30(explicit);
-  const local = resolve30(process.cwd(), "HEARTBEAT.md");
+  if (explicit) return isAbsolute8(explicit) ? explicit : resolve31(explicit);
+  const local = resolve31(process.cwd(), "HEARTBEAT.md");
   if (existsSync21(local)) return local;
-  return join37(process.env.REIN_HOME || join37(homedir22(), ".rein"), "HEARTBEAT.md");
+  return join38(process.env.REIN_HOME || join38(homedir23(), ".rein"), "HEARTBEAT.md");
 }
 function logBeat(result) {
-  const dir = process.env.REIN_HOME || join37(homedir22(), ".rein");
+  const dir = process.env.REIN_HOME || join38(homedir23(), ".rein");
   mkdirSync20(dir, { recursive: true });
-  const path2 = join37(dir, "heartbeat.log");
+  const path2 = join38(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     file: result.file,
@@ -13861,7 +14274,7 @@ async function runHeartbeat(opts = {}, dependencies = {}) {
     if (!opts.quiet) console.log(s);
   };
   if (opts.init) {
-    const path2 = opts.file ? isAbsolute8(opts.file) ? opts.file : resolve30(opts.file) : resolve30(process.cwd(), "HEARTBEAT.md");
+    const path2 = opts.file ? isAbsolute8(opts.file) ? opts.file : resolve31(opts.file) : resolve31(process.cwd(), "HEARTBEAT.md");
     writeFileSync20(path2, HEARTBEAT_TEMPLATE);
     say(green(`wrote ${path2} \u2014 edit it, then run: rein heartbeat`));
     return 0;
@@ -13883,7 +14296,7 @@ ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync21(join37(process.env.REIN_HOME || join37(homedir22(), ".rein"), "config.json"))) {
+  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync21(join38(process.env.REIN_HOME || join38(homedir23(), ".rein"), "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -14490,8 +14903,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     if (!busy || approvalAnswer || typing || !text || key.ctrl || key.meta || ["return", "enter"].includes(key.name ?? "")) return;
     presentation.pauseForInput();
     typing = true;
-    typingDone = new Promise((resolve31) => {
-      resolveTyping = resolve31;
+    typingDone = new Promise((resolve32) => {
+      resolveTyping = resolve32;
     });
     rl.setPrompt(presentation.prompt());
     promptVisible = true;
@@ -14595,8 +15008,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
       presentation.flush();
       process.stdout.write(`
 [APPROVAL \xB7 TOOL ${toolActionType(name, args)}] approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} [y/N] `);
-      const line = await new Promise((resolve31) => {
-        approvalAnswer = resolve31;
+      const line = await new Promise((resolve32) => {
+        approvalAnswer = resolve32;
       });
       return /^y(es)?$/i.test(line.trim());
     });
@@ -14606,8 +15019,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
   const ask = () => {
     if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift());
     if (inputClosed) return Promise.resolve(null);
-    return new Promise((resolve31) => {
-      resolveLine = (line) => resolve31(line);
+    return new Promise((resolve32) => {
+      resolveLine = (line) => resolve32(line);
       if (!rl.closed && process.stdin.isTTY && process.stdout.isTTY) {
         rl.setPrompt(presentation.prompt());
         promptVisible = true;
@@ -14911,11 +15324,11 @@ async function main(argv = process.argv.slice(2)) {
     console.log(`${mobile ? "rein-kla\u028Ad mobile gateway" : "rein-kla\u028Ad"} is listening at ${handle.url}`);
     console.log(mobile && "tokenFile" in handle && handle.tokenFile ? `The reusable mobile bearer token is stored at ${handle.tokenFile}.` : "The bearer token is in $REIN_HOME/klaud/serve-<port>.token, default ~/.rein.");
     if (mobile && "trustedOrigin" in handle && handle.trustedOrigin) console.log(`The configured private-mesh origin is ${handle.trustedOrigin}.`);
-    await new Promise((resolve31, reject) => {
+    await new Promise((resolve32, reject) => {
       const stop = () => {
         process.removeListener("SIGINT", stop);
         process.removeListener("SIGTERM", stop);
-        handle.close().then(resolve31, reject);
+        handle.close().then(resolve32, reject);
       };
       process.once("SIGINT", stop);
       process.once("SIGTERM", stop);
@@ -14987,11 +15400,11 @@ async function main(argv = process.argv.slice(2)) {
     const canvas = await startCanvas2(_[1]);
     console.log(canvas.url);
     if (flags.browser === true && flags["no-browser"] !== true) openCanvas2(canvas.url);
-    await new Promise((resolve31) => {
+    await new Promise((resolve32) => {
       const stop = () => {
         process.off("SIGINT", stop);
         process.off("SIGTERM", stop);
-        void canvas.close().finally(resolve31);
+        void canvas.close().finally(resolve32);
       };
       process.on("SIGINT", stop);
       process.on("SIGTERM", stop);

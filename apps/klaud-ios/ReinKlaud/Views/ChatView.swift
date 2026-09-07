@@ -4,7 +4,6 @@ struct ChatView: View {
     @ObservedObject var store: ReinAppStore
     @Environment(\.reinTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var draft = ""
     @FocusState private var composerFocused: Bool
 
     var body: some View {
@@ -12,6 +11,9 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 chatHeading
                 ErrorStrip(store: store)
+                if store.gatewayUnavailable {
+                    Button("Host unavailable · Open fallback accounts") { store.openDirectChat() }.buttonStyle(ReinSecondaryButtonStyle()).padding(12)
+                }
                 if let recovery = store.pendingRunRecovery { recoveryStrip(recovery) }
                 if store.selectedBot == nil { emptyState }
                 else { transcript }
@@ -108,20 +110,20 @@ struct ChatView: View {
                 Spacer()
                 if let notice = store.notice { Text(notice).font(.reinMono(.caption2)).foregroundStyle(theme.muted).lineLimit(1) }
             }
-            TextEditor(text: $draft).font(.reinBody()).scrollContentBackground(.hidden).padding(8).frame(minHeight: 70, maxHeight: 150)
+            TextEditor(text: $store.chatDraft).font(.reinBody()).scrollContentBackground(.hidden).padding(8).frame(minHeight: 70, maxHeight: 150)
                 .background(theme.raised).overlay(Rectangle().stroke(theme.ink, lineWidth: 1)).focused($composerFocused)
                 .accessibilityLabel("Message to \(store.selectedBot?.name ?? "Rein")")
-                .onChange(of: draft) { old, new in if new.count > old.count { store.sounds.play(.key) } }
+                .onChange(of: store.chatDraft) { old, new in if new.count > old.count { store.sounds.play(.key) } }
             HStack {
-                Text("\(draft.utf8.count) / 131072").font(.reinMono(.caption2)).foregroundStyle(theme.muted)
+                Text("\(store.chatDraft.utf8.count) / 131072").font(.reinMono(.caption2)).foregroundStyle(theme.muted)
                 Spacer()
                 if store.isRunning {
                     Button("Stop") { Task { await store.stop() } }.buttonStyle(ReinSecondaryButtonStyle())
                 }
                 Button("Send") {
-                    let outgoing = draft
-                    if store.send(outgoing) { draft = ""; composerFocused = false }
-                }.buttonStyle(ReinPrimaryButtonStyle()).disabled(store.isRunning || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.utf8.count > 131_072)
+                    let outgoing = store.chatDraft
+                    Task { if await store.sendWithFallback(outgoing), store.chatDraft == outgoing { store.chatDraft = ""; composerFocused = false } }
+                }.buttonStyle(ReinPrimaryButtonStyle()).disabled(store.isRunning || store.isCheckingRoute || store.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.chatDraft.utf8.count > 131_072)
             }
         }.padding(.horizontal, 16).padding(.vertical, 10).background(theme.paperSecondary)
             .overlay(alignment: .top) { Rectangle().fill(theme.ink).frame(height: 2) }
@@ -135,7 +137,7 @@ private struct LedgerItem: Identifiable {
     var id: String { message.id }
 }
 
-private struct MessageLedgerRow: View {
+struct MessageLedgerRow: View {
     let message: ReinMessage
     let number: Int
     let assistantOrdinal: Int

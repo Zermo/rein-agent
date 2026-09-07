@@ -4,7 +4,8 @@ rein-klaʊd is a native SwiftUI operator console for a Rein host. The agent
 loop, model connection, shell tools, durable sessions, and optional autonomy
 helper keep running on the host. Closing the app or locking the phone does not
 stop an active host run; the app reconnects to its numbered event stream when
-it returns.
+it returns. The app can also talk directly to a saved API account for text
+assistance without a reachable Rein host.
 
 The app carries the same field-guide interface as the desktop console: cream
 paper, charcoal rules, rust controls, terminal-green tool records, numbered
@@ -62,6 +63,80 @@ with the host.
 If the connection drops, the host keeps the run alive. The app reconnects with
 an event cursor and recovers pending approvals when it becomes active. Use
 **Stop** to cancel a run deliberately.
+
+## Connect an API account
+
+Open **Accounts** and choose **API accounts**. Enter an account name, API base
+URL, exact model ID, and API key, then tap **Save API account**. Supported direct
+providers are self-hosted OpenAI-compatible servers, OpenAI, Anthropic, Gemini,
+xAI, and OpenRouter. Private self-hosted servers can use a key or accept requests
+without one. Public endpoints require HTTPS.
+
+Tap **Use for direct chat** to send a message directly from the phone. The reply
+identifies the account and model used. Direct conversation provides text
+assistance; host tools, command execution, and background autonomy still need a
+Rein host. API keys stay in this device's Keychain, scoped to their account and
+endpoint. Changing an endpoint never transfers its saved key.
+
+**Use this API on connected host** sends the selected endpoint, model, and key
+to that host for its next run. This button is available for the host's supported
+API adapters. Anthropic accounts support direct chat only.
+
+## Authorize a cloud subscription
+
+Subscriptions use an official CLI on a reachable Rein host. Install Codex,
+GitHub Copilot, or Grok Build there, then connect the app to that host. In
+**Accounts > Cloud subscriptions on this host**:
+
+1. Tap **Authorize** beside the available CLI.
+2. Tap **Open device authorization** and complete the provider's verification
+   page on the phone. Enter the one-time code when requested.
+3. Return to the app and wait for sign-in to complete.
+4. Leave the CLI model as `default` or enter a model your account can access,
+   then tap **Use on host**.
+
+ChatGPT uses Codex device authorization, GitHub Copilot uses Copilot device
+codes, and eligible Grok subscriptions use Grok Build device authorization.
+Claude and Gemini use API keys in this app. The provider determines account
+eligibility, available models, and usage limits.
+
+The official CLI keeps its tokens on the selected host in Rein's isolated
+profile. The phone receives the verification URL, one-time code, and status.
+Sign-in does not open a browser on the host. If a CLI cannot provide a supported
+device challenge, update it or run `rein login <provider>` in a terminal there.
+These subscriptions require that host to stay reachable; add another Rein host
+if you want a reserve route with its own CLI accounts and tools.
+
+Update Rein on the host if the app asks for a newer account-setup API. A host
+started with provider or model environment overrides may need its launch
+configuration changed before the app can select a different provider.
+
+## Keep a reserve connection
+
+**Use saved fallbacks when a connection fails** is off by default. Add backup
+Rein hosts and API accounts, then enable it if you want automatic routing when
+a connection fails.
+
+Before a new host request is sent, the app checks the primary host. If it is
+unavailable, it tries backup hosts in the saved order. A backup has its own
+sessions, so review its selected agent and send the retained draft yourself.
+The primary host stays saved for reconnecting. If no backup connects, a saved
+API account can answer directly from the phone. Direct requests may try other
+saved API accounts after eligible network, rate-limit, or service failures.
+Cloud API requests can incur charges and subscription requests use the
+provider's allowance.
+
+Fallback never resends an accepted host run or a request whose delivery is
+unknown. The original host keeps that run and its pending approvals. The app
+can reconnect to it later. A different host never receives its pending IDs or
+saved retry request.
+
+**Include recent visible messages in direct fallback** is also off by default.
+Enable it to include recent operator and assistant text when starting a direct
+fallback conversation. It excludes tool results, tool-call messages, and unsent
+optimistic messages. The text goes to the selected API provider. Direct
+transcripts are saved in protected files on the phone and excluded from device
+backups. **New conversation** opens an empty direct conversation.
 
 ## Build from source
 

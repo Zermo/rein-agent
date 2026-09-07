@@ -38,6 +38,7 @@ struct OnboardingView: View {
             Text("FRESH CONTEXT.\nSAME JOURNEY.")
                 .font(.reinDisplay(.largeTitle)).minimumScaleFactor(0.65).lineLimit(2)
             Text("LOCAL-FIRST AGENT HARNESS").font(.reinMono(.headline)).tracking(2)
+            Button("Cloud subscriptions & API keys") { store.openCloudAccounts() }.buttonStyle(ReinSecondaryButtonStyle())
             Rectangle().fill(theme.ink).frame(height: 2)
             Image("FieldGuideCard").resizable().scaledToFit()
                 .overlay(Rectangle().stroke(theme.ink, lineWidth: 2))
@@ -92,6 +93,9 @@ struct OnboardingView: View {
                 }
             }.tint(theme.accent).frame(minHeight: 52)
             ErrorStrip(store: store)
+            Button("Cloud subscriptions, API keys & backup hosts") { store.openCloudAccounts() }
+                .buttonStyle(ReinSecondaryButtonStyle())
+            Button("Open direct model chat") { store.openDirectChat() }.buttonStyle(ReinSecondaryButtonStyle())
             Button { Task { await store.connect(rawURL: url, token: token) } } label: {
                 if store.isConnecting { ProgressView().tint(theme.accentInk).accessibilityLabel("Connecting") }
                 else { Text("Connect to Rein") }

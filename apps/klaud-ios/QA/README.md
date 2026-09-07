@@ -31,3 +31,18 @@ Before a TestFlight upload, verify on a simulator or device:
 
 Use synthetic tasks and gateway details in screenshots. Keep signing identities,
 tokens, and personal conversations out of this directory.
+
+## Cloud accounts verification
+
+The September 6 account build passes 77 native fixture tests and the 643-test
+harness suite. An iPhone 17 Pro Max simulator also completed account setup and
+a direct Chat Completions exchange against a synthetic local API, with no
+provider credentials. The reply showed separate operator and agent labels.
+
+Regression coverage includes endpoint-scoped credentials, bounded token-field
+compatibility retries, CLI device authorization, cancelled account fallbacks,
+draft retention during backup switching, field-unit changes during preflight,
+and conversation restoration across new-thread selection and app relaunch.
+
+Live subscription entitlement requires the operator's official CLI login on a
+reachable host. Fixture tests do not claim to verify a paid provider account.

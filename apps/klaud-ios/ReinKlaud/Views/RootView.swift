@@ -17,6 +17,9 @@ struct RootView: View {
         .environment(\.reinTheme, theme)
         .background(theme.paper.ignoresSafeArea())
         .foregroundStyle(theme.ink)
+        .sheet(isPresented: $store.showCloudWorkspace) {
+            CloudWorkspaceView(store: store, workspace: store.cloud).environment(\.reinTheme, theme)
+        }
         .alert(item: $store.pendingDecision) { decision in
             let title: String
             switch decision.kind { case .approval(let tool): title = "Allow \(tool)?"; case .confirmation: title = "Confirm this action?" }

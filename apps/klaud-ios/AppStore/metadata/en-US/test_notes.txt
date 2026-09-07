@@ -1,3 +1,11 @@
-Connect to a compatible Rein mobile gateway, choose or create an agent, send a message, background the app during the run, then return to verify that streaming resumes. Exercise both Allow and Deny on a pending tool approval. Confirm Light and Night themes, Dynamic Type, VoiceOver labels, and the SFX toggle.
+Test the host console with a compatible Rein mobile gateway. Choose or create an agent, send a message, background the app during the run, then return and verify streaming recovery. Exercise Allow and Deny on a pending tool approval.
 
-Review credentials and an accessible demonstration gateway must be supplied in App Store Connect before external beta review.
+In Accounts, add a test self-hosted or cloud API endpoint, exact model ID, and API key. A private self-hosted endpoint may omit the key. Verify direct chat and its visible account/model label. Direct mode provides text assistance and does not execute host tools. Check saved direct history after reopening the app. Never put real credentials in test feedback.
+
+On an updated host with an official Codex, Copilot, or Grok CLI installed, use Authorize to begin device sign-in, open the verification page on the phone, and approve it. After completion, choose Use on host and verify the next host run uses that provider. Cancel a second authorization and verify it stops. CLI tokens remain on the host. Provider subscription eligibility and usage limits apply.
+
+Confirm automatic fallback and recent-context sharing are off initially. Save a backup host, enable fallback, and make the primary unavailable before a new request. Verify the backup connects and preserves the draft for review. Verify the original host stays saved. With no reachable backup, verify a saved API account can answer directly. API calls can incur charges. Confirm an accepted or ambiguous host request is never automatically resent through a backup or direct provider.
+
+Use fresh direct conversations to check context sharing. With recent-context sharing off, start a direct fallback conversation and verify it excludes the host transcript. With the option on, verify it includes recent operator and assistant text while excluding tool results. Check Light and Night themes, Dynamic Type, VoiceOver labels, and the SFX toggle.
+
+Review credentials and an accessible demonstration gateway must be supplied privately in App Store Connect before external beta review.

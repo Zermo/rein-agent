@@ -562,6 +562,225 @@ final class ReinAppStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDelayedBackupCannotContinueAfterManualHostSelection() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let primary = StoreMockClient(snapshot: snapshot(runID: "aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa"))
+        primary.probeError = URLError(.cannotConnectToHost)
+        let first = StoreMockClient(snapshot: snapshot(runID: "bbbbbbbb-4444-4444-8444-bbbbbbbbbbbb"))
+        let second = StoreMockClient(snapshot: snapshot(runID: "cccccccc-4444-4444-8444-cccccccccccc"))
+        let manual = StoreMockClient(snapshot: snapshot(runID: "dddddddd-4444-4444-8444-dddddddddddd"), state: appState(accent: "manual-host"))
+        let gate = StateGate(value: appState(accent: "stale-backup"))
+        first.gateNextState(gate)
+        let store = ReinAppStore(secrets: TestSecretStore(), defaults: defaults,
+            sounds: ReinSoundEngine(preference: TestSoundPreferenceStore()), pendingRunRequests: TestPendingRunRequestStore(),
+            makeClient: { connection in
+                switch connection.baseURL.host {
+                case "backup-one.local": first
+                case "backup-two.local": second
+                case "operator-choice.local": manual
+                default: primary
+                }
+            })
+        try store.cloud.saveBackup(name: "First", rawURL: "http://backup-one.local:4318", token: token)
+        try store.cloud.saveBackup(name: "Second", rawURL: "http://backup-two.local:4318", token: token)
+        store.cloud.accounts.setAutomaticFallback(true)
+        await store.connect(rawURL: gatewayOrigin, token: token)
+
+        let send = Task { await store.sendWithFallback("Preserve this draft.") }
+        await gate.waitUntilStarted()
+        await store.connect(rawURL: "http://operator-choice.local:4318", token: token)
+        await gate.release()
+        let sent = await send.value
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(store.connectedURL?.host, "operator-choice.local")
+        XCTAssertEqual(store.state.shell.theme.accent, "manual-host")
+        XCTAssertEqual(second.stateCalls, 0)
+        XCTAssertTrue(primary.startedRequests.isEmpty)
+        XCTAssertTrue(first.startedRequests.isEmpty)
+        XCTAssertTrue(manual.startedRequests.isEmpty)
+        XCTAssertFalse(store.showCloudWorkspace)
+        store.disconnect()
+    }
+
+    @MainActor
+    func testUnknownDeliveryNeverFallsBackOrMovesItsPendingRequestToBackup() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let runID = "aaaaaaaa-5555-4555-8555-aaaaaaaaaaaa"
+        let primary = StoreMockClient(snapshot: snapshot(runID: runID))
+        primary.startError = URLError(.networkConnectionLost)
+        let backup = StoreMockClient(snapshot: snapshot(runID: "bbbbbbbb-5555-4555-8555-bbbbbbbbbbbb"))
+        let pending = TestPendingRunRequestStore()
+        let store = makeMultiHostStore(defaults: defaults, clientA: primary, clientB: backup, pendingRunRequests: pending)
+        try store.cloud.saveBackup(name: "Reserve", rawURL: "http://reserve.local:4318", token: token)
+        store.cloud.accounts.setAutomaticFallback(true)
+        await store.connect(rawURL: gatewayOrigin, token: token)
+
+        let sent = await store.sendWithFallback("Run this exactly once on the original host.")
+        XCTAssertTrue(sent)
+        await waitUntil { store.pendingRunRecovery != nil }
+        let tracked = try XCTUnwrap(store.pendingRunRecovery?.runID)
+        XCTAssertEqual(primary.startedRequests.count, 1)
+        XCTAssertEqual(backup.stateCalls, 0)
+        XCTAssertEqual(pending.request(for: gatewayOrigin)?.runId, tracked)
+
+        await store.useBackup(try XCTUnwrap(store.cloud.backups.first))
+
+        XCTAssertEqual(store.savedURL, gatewayOrigin)
+        XCTAssertEqual(store.connectedURL?.host, "reserve.local")
+        XCTAssertEqual(pending.request(for: gatewayOrigin)?.runId, tracked)
+        XCTAssertNil(pending.request(for: "http://reserve.local:4318"))
+        XCTAssertEqual(defaults.string(forKey: activeRunKey), tracked)
+        XCTAssertTrue(backup.startedRequests.isEmpty)
+        XCTAssertTrue(backup.statusRunIDs.isEmpty)
+        store.disconnect()
+    }
+
+    @MainActor
+    func testGatewayAuthenticationFailureDoesNotStartFallback() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let primary = StoreMockClient(snapshot: snapshot(runID: "aaaaaaaa-6666-4666-8666-aaaaaaaaaaaa"))
+        primary.probeError = GatewayClientError.http(401, "Fixture rejected token.")
+        let backup = StoreMockClient(snapshot: snapshot(runID: "bbbbbbbb-6666-4666-8666-bbbbbbbbbbbb"))
+        let store = makeMultiHostStore(defaults: defaults, clientA: primary, clientB: backup)
+        try store.cloud.saveBackup(name: "Reserve", rawURL: "http://reserve.local:4318", token: token)
+        store.cloud.accounts.setAutomaticFallback(true)
+        await store.connect(rawURL: gatewayOrigin, token: token)
+
+        let sent = await store.sendWithFallback("Do not silently change routes on auth rejection.")
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(store.connectedURL?.absoluteString, gatewayOrigin)
+        XCTAssertEqual(backup.stateCalls, 0)
+        XCTAssertTrue(primary.startedRequests.isEmpty)
+        XCTAssertFalse(store.showCloudWorkspace)
+        store.disconnect()
+    }
+
+    @MainActor
+    func testSuccessfulBackupKeepsComposerDraftThroughViewReplacement() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let primary = StoreMockClient(snapshot: snapshot(runID: "aaaaaaaa-8888-4888-8888-aaaaaaaaaaaa"))
+        primary.probeError = URLError(.cannotConnectToHost)
+        let backup = StoreMockClient(snapshot: snapshot(runID: "bbbbbbbb-8888-4888-8888-bbbbbbbbbbbb"))
+        let gate = StateGate(value: appState(accent: "backup"))
+        backup.gateNextState(gate)
+        let store = makeMultiHostStore(defaults: defaults, clientA: primary, clientB: backup)
+        try store.cloud.saveBackup(name: "Reserve", rawURL: "http://reserve.local:4318", token: token)
+        store.cloud.accounts.setAutomaticFallback(true)
+        await store.connect(rawURL: gatewayOrigin, token: token)
+        store.chatDraft = "Keep this unsent draft."
+
+        let send = Task { await store.sendWithFallback(store.chatDraft) }
+        await gate.waitUntilStarted()
+        XCTAssertNil(store.connectedURL) // RootView replaces ChatView at this point.
+        XCTAssertEqual(store.chatDraft, "Keep this unsent draft.")
+        await gate.release()
+        let sent = await send.value
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(store.connectedURL?.host, "reserve.local")
+        XCTAssertEqual(store.chatDraft, "Keep this unsent draft.")
+        XCTAssertTrue(backup.startedRequests.isEmpty)
+        store.disconnect()
+    }
+
+    @MainActor
+    func testFieldUnitChangeDuringSuccessfulProbeDoesNotSendDraft() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var state = appState(accent: "primary")
+        state.bots.append(.init(id: "different-field-unit", name: "Another unit", sessionId: "thread-2"))
+        let primary = StoreMockClient(snapshot: snapshot(runID: "aaaaaaaa-9999-4999-8999-aaaaaaaaaaaa"), state: state)
+        let gate = PatchGate()
+        primary.probeGate = gate
+        let store = makeStore(defaults: defaults, client: primary)
+        try store.cloud.saveBackup(name: "Reserve", rawURL: "http://reserve.local:4318", token: token)
+        store.cloud.accounts.setAutomaticFallback(true)
+        await store.connect(rawURL: gatewayOrigin, token: token)
+        store.chatDraft = "Only for the original field unit."
+
+        let send = Task { await store.sendWithFallback(store.chatDraft) }
+        await gate.waitUntilStarted()
+        store.selectedBotID = "different-field-unit"
+        XCTAssertNotNil(store.selectedBot)
+        await gate.release()
+        let sent = await send.value
+
+        XCTAssertFalse(sent)
+        XCTAssertTrue(primary.startedRequests.isEmpty)
+        XCTAssertEqual(store.chatDraft, "Only for the original field unit.")
+        XCTAssertTrue(store.notice?.contains("selected field unit changed") ?? false)
+        store.disconnect()
+    }
+
+    @MainActor
+    func testDisablingFallbackDuringProbePreventsBackupConnection() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let primary = StoreMockClient(snapshot: snapshot(runID: "aaaaaaaa-abab-4bab-8bab-aaaaaaaaaaaa"))
+        primary.probeError = URLError(.cannotConnectToHost)
+        let gate = PatchGate()
+        primary.probeGate = gate
+        let backup = StoreMockClient(snapshot: snapshot(runID: "bbbbbbbb-abab-4bab-8bab-bbbbbbbbbbbb"))
+        let store = makeMultiHostStore(defaults: defaults, clientA: primary, clientB: backup)
+        try store.cloud.saveBackup(name: "Reserve", rawURL: "http://reserve.local:4318", token: token)
+        store.cloud.accounts.setAutomaticFallback(true)
+        await store.connect(rawURL: gatewayOrigin, token: token)
+
+        let send = Task { await store.sendWithFallback("Keep this on my current route.") }
+        await gate.waitUntilStarted()
+        store.cloud.accounts.setAutomaticFallback(false)
+        await gate.release()
+        let sent = await send.value
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(backup.stateCalls, 0)
+        XCTAssertTrue(primary.startedRequests.isEmpty)
+        XCTAssertFalse(store.showCloudWorkspace)
+        store.disconnect()
+    }
+
+    @MainActor
+    func testDirectFallbackUsesSourceTranscriptCapturedBeforeProbeAwait() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: "ReinSourceSnapshot-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let secrets = TestSecretStore(), direct = StoreDirectMockClient()
+        let workspace = CloudWorkspace(defaults: defaults, secrets: secrets, modelClient: direct, transcriptDirectory: directory)
+        workspace.includeRecentMessages = true
+        let account = try CloudAccount(name: "Fixture API", provider: .openai, model: "fixture-model")
+        try workspace.accounts.save(account, apiKey: "fixture-api-key")
+        workspace.accounts.setAutomaticFallback(true)
+        let primary = StoreMockClient(snapshot: snapshot(runID: "aaaaaaaa-7777-4777-8777-aaaaaaaaaaaa"))
+        primary.messagePage = .init(messages: [.init(id: "source-reply", role: .assistant, content: "Original field unit context.")], before: nil)
+        primary.probeError = URLError(.cannotConnectToHost)
+        let gate = PatchGate()
+        primary.probeGate = gate
+        let store = ReinAppStore(secrets: secrets, defaults: defaults,
+            sounds: ReinSoundEngine(preference: TestSoundPreferenceStore()), pendingRunRequests: TestPendingRunRequestStore(),
+            cloudWorkspace: workspace, makeClient: { _ in primary })
+        await store.connect(rawURL: gatewayOrigin, token: token)
+
+        let send = Task { await store.sendWithFallback("Continue this source conversation.") }
+        await gate.waitUntilStarted()
+        store.selectedBotID = "different-field-unit"
+        await gate.release()
+        let sent = await send.value
+        XCTAssertTrue(sent)
+        await waitUntil { !workspace.isRunning }
+
+        XCTAssertEqual(Array(direct.receivedMessages.map(\.content).dropFirst()), ["Original field unit context.", "Continue this source conversation."])
+        XCTAssertTrue(primary.startedRequests.isEmpty)
+        store.disconnect()
+    }
+
+    @MainActor
     private func makeStore(
         defaults: UserDefaults,
         cursor: RunEventCursor? = nil,
@@ -782,6 +1001,10 @@ private final class StoreMockClient: ReinGatewayClientProtocol, @unchecked Senda
     var resumeError: Error?
     var statusError: Error?
     var startError: Error?
+    var probeError: Error?
+    var probeGate: PatchGate?
+    var messagePage = MessagePage(messages: [], before: nil)
+    private var stateCallsValue = 0
 
     init(snapshot: MobileRunSnapshot, startGate: StartRunGate? = nil, state: ReinState? = nil, patchGate: PatchGate? = nil) {
         self.snapshotValue = snapshot
@@ -790,6 +1013,7 @@ private final class StoreMockClient: ReinGatewayClientProtocol, @unchecked Senda
         if let state { self.stateValue = state }
     }
 
+    var stateCalls: Int { lock.withLock { stateCallsValue } }
     var cancelledRunIDs: [String] { lock.withLock { cancelledRunIDsValue } }
     var approvalAnswers: [(id: String, allow: Bool)] { lock.withLock { approvalAnswersValue } }
     var toolAnswers: [(id: String, isError: Bool)] { lock.withLock { toolAnswersValue } }
@@ -810,7 +1034,13 @@ private final class StoreMockClient: ReinGatewayClientProtocol, @unchecked Senda
         lock.withLock { nextStatusGate = gate }
     }
 
+    func probe() async throws {
+        if let probeGate { await probeGate.waitForRelease() }
+        if let probeError { throw probeError }
+    }
+
     func state() async throws -> ReinState {
+        lock.withLock { stateCallsValue += 1 }
         let gate = lock.withLock { () -> StateGate? in
             defer { nextStateGate = nil }
             return nextStateGate
@@ -819,7 +1049,7 @@ private final class StoreMockClient: ReinGatewayClientProtocol, @unchecked Senda
         return lock.withLock { stateValue }
     }
     func bots() async throws -> [ReinBot] { lock.withLock { stateValue.bots } }
-    func messages(botID: String, before: Int?) async throws -> MessagePage { .init(messages: [], before: nil) }
+    func messages(botID: String, before: Int?) async throws -> MessagePage { messagePage }
     func createBot(name: String) async throws -> ReinBot { .init(id: "new-bot", name: name, sessionId: "new-thread") }
     func patchShell(_ patch: [ShellPatch]) async throws -> ReinState {
         if let patchGate { await patchGate.waitForRelease() }
@@ -942,5 +1172,15 @@ private final class TestPendingRunRequestStore: PendingRunRequestStorage {
 
     func request(for origin: String) -> RunRequest? {
         records[origin]?.request
+    }
+}
+
+private final class StoreDirectMockClient: DirectModelClientProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var received: [DirectChatMessage] = []
+    var receivedMessages: [DirectChatMessage] { lock.withLock { received } }
+    func complete(account: CloudAccount, apiKey: String?, messages: [DirectChatMessage]) async throws -> DirectChatResult {
+        lock.withLock { received = messages }
+        return .init(text: "Fixture direct reply.", finishReason: "stop")
     }
 }

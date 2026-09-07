@@ -13,6 +13,8 @@ struct SettingsView: View {
                     Text("SETTINGS").font(.reinDisplay(.largeTitle))
                     Text("Appearance and sound choices follow this console. Rein stores shared shell choices on the host.").font(.reinBody()).foregroundStyle(theme.muted)
                     Rectangle().fill(theme.ink).frame(height: 2)
+                    Button("Cloud subscriptions, API keys & backup hosts") { store.openCloudAccounts() }.buttonStyle(ReinPrimaryButtonStyle())
+                    Button("Open direct model chat") { store.openDirectChat() }.buttonStyle(ReinSecondaryButtonStyle())
 
                     SettingRow(title: "Light / night", detail: "Match the field console to the room.") {
                         Picker("Appearance", selection: Binding(get: { store.state.shell.theme.dark }, set: { value in Task { await store.setDark(value) } })) {

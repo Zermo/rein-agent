@@ -13,7 +13,7 @@ enum KeychainError: LocalizedError, Equatable {
     var errorDescription: String? {
         guard case let .status(status) = self else { return nil }
         let detail = SecCopyErrorMessageString(status, nil) as String? ?? "Unknown Security framework error"
-        return "The gateway token could not be stored in Keychain (\(detail), OSStatus \(status))."
+        return "The credential could not be accessed in Keychain (\(detail), OSStatus \(status))."
     }
 }
 

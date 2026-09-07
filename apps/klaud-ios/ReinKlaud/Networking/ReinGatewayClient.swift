@@ -1,6 +1,7 @@
 import Foundation
 
 protocol ReinGatewayClientProtocol: Sendable {
+    func probe() async throws
     func state() async throws -> ReinState
     func bots() async throws -> [ReinBot]
     func messages(botID: String, before: Int?) async throws -> MessagePage
@@ -13,6 +14,10 @@ protocol ReinGatewayClientProtocol: Sendable {
     func answerTool(runID: String, callID: String, result: String, isError: Bool) async throws
     func answerApproval(runID: String, approvalID: String, allow: Bool) async throws
     func runStatus(runID: String) async throws -> MobileRunSnapshot
+}
+
+extension ReinGatewayClientProtocol {
+    func probe() async throws { _ = try await state() }
 }
 
 enum GatewayClientError: LocalizedError {
@@ -39,6 +44,13 @@ final class ReinGatewayClient: ReinGatewayClientProtocol, @unchecked Sendable {
     }
 
     private let root = ["v1", "mobile"]
+
+    func probe() async throws {
+        var request = try makeRequest(method: "GET", path: root + ["state"], body: Optional<EmptyBody>.none)
+        request.timeoutInterval = 8
+        let (_, response) = try await session.data(for: request)
+        try validate(response: response)
+    }
 
     func state() async throws -> ReinState { try await json(method: "GET", path: root + ["state"], as: ReinState.self) }
     func bots() async throws -> [ReinBot] { try await json(method: "GET", path: root + ["bots"], as: [ReinBot].self) }
