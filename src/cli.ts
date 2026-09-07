@@ -46,6 +46,10 @@ Usage:
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
+  rein model help               pinned GGUF downloads, serving and background model services
+  rein model plan <repo> --file <gguf> [--revision <ref>] [--json]
+  rein os plan [--mode host|image] [--json]    native host and OS installation gates
+  rein os prepare --output <dir>             prepare a pinned Omarchy VM overlay kit
   rein skills [name]            list bundled workflows, or read one without running it
   rein profile [--json]         view your operator profile and enabled skill pack
   rein profile pack <name>      enable everyday|ship|ops|study|studio, or none
@@ -231,6 +235,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 	if (flags.silent !== undefined && !["doctor", "heartbeat", "hb"].includes(_[0])) throw new Error("--silent controls compatibility flags for doctor and heartbeat.");
+	if ((_[0] === "model" || _[0] === "models") && _.length > 1) {
+		const { runModelCommand } = await import("./models/command.ts");
+		await runModelCommand(_.slice(1), flags); return;
+	}
+	if (_[0] === "os") {
+		const { runOSCommand } = await import("./os/command.ts");
+		await runOSCommand(_.slice(1), flags); return;
+	}
 	if (_[0] === "update") {
 		if (_.length !== 1 || Object.keys(flags).length) throw new Error("Usage: rein update");
 		const { runUpdate } = await import("./harness/update.ts");
