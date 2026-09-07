@@ -1,8 +1,9 @@
 /** rein export — keep personal files before a Dareecho OS replacement. */
+import { readFile } from "node:fs/promises";
 import * as os from "node:os";
 import { join, resolve } from "node:path";
 import { exportFiles, formatBytes } from "./copy.ts";
-import { existingPresets } from "./presets.ts";
+import { chromeosPresets, existingPresets, filterExisting, isChromeOS } from "./presets.ts";
 import { runBrowser } from "./tui.ts";
 
 export interface ExportCommandDeps {
@@ -12,6 +13,12 @@ export interface ExportCommandDeps {
 	now?: () => Date;
 	log?: (text: string) => void;
 	browse?: (options: { start?: string; target: string }) => Promise<number>;
+	osRelease?: () => Promise<string | undefined> | string | undefined;
+	chromeosHome?: string;
+}
+
+async function defaultOsRelease(): Promise<string | undefined> {
+	try { return await readFile("/etc/os-release", "utf8"); } catch { return undefined; }
 }
 
 function defaultTarget(home: string, now: Date): string {
@@ -21,8 +28,11 @@ function defaultTarget(home: string, now: Date): string {
 
 export async function runExportCommand(args: string[], flags: Record<string, string | boolean> = {}, deps: ExportCommandDeps = {}): Promise<number> {
 	const log = deps.log ?? console.log;
-	const home = (deps.home ?? os.homedir)();
+	let home = (deps.home ?? os.homedir)();
 	const platform = deps.platform ?? process.platform;
+	const osReleaseText = await (deps.osRelease ?? defaultOsRelease)();
+	const chromeos = platform === "linux" && isChromeOS(osReleaseText);
+	if (chromeos && !home.startsWith("/home/chronos")) home = deps.chromeosHome ?? "/home/chronos/user/1000";
 	const action = args[0] ?? "browse";
 	if (action === "browse" || action === "presets") {
 		if (args.length > 1) throw new Error("Usage: rein export browse [--to DIR] | rein export <paths...> --to DIR | rein export presets [--to DIR] [--list]");
@@ -42,7 +52,7 @@ export async function runExportCommand(args: string[], flags: Record<string, str
 	}
 
 	if (action === "presets") {
-		const { presets, missing } = existingPresets(home, platform);
+		const { presets, missing } = chromeos ? filterExisting(chromeosPresets(home)) : existingPresets(home, platform);
 		if (flags.list === true || flags.json === true) {
 			for (const preset of presets) log(`${preset.id}: ${preset.paths.join(", ")}`);
 			if (missing.length) log(`not present, skipped: ${missing.join(", ")}`);

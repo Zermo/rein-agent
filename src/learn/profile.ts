@@ -109,8 +109,50 @@ export async function learnMachine(deps: LearnDeps = {}): Promise<Outcome> {
 			{ id: "boot-entry", status: bootEntryOk ? "verified" : "required", detail: bootEntryOk ? "Active boot entry readable; injection path C is testable." : "bless and nvram boot both unavailable; boot entry state unknown." },
 		);
 	} else if (platform === "linux") {
+		const osrelText = await read("/etc/os-release");
+		probes.push({ id: "os-release", command: "/etc/os-release", ok: osrelText !== undefined, detail: osrelText ? firstLine(osrelText) : "missing" });
+		const chromeos = /ID=chromeos/i.test(osrelText ?? "") || /CROS_RELEASE/i.test(osrelText ?? "");
+		if (chromeos) {
+			const [uname, meminfo, dmi, dts, chrome, crosh, arc, verity, ab, efi, virt] = await Promise.all([
+				out("uname", "uname", ["-sr"]),
+				(async () => { const text = await read("/proc/meminfo"); probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== undefined, detail: text ? firstLine(text) : "missing" }); return text; })(),
+				(async () => { const text = await read("/sys/class/dmi/id/product_name"); probes.push({ id: "dmi", command: "/sys/class/dmi/id", ok: text !== undefined, detail: text ? text.trim() : "not present" }); return text; })(),
+				(async () => { const text = await read("/proc/device-tree/model"); probes.push({ id: "dtb-model", command: "/proc/device-tree/model", ok: text !== undefined, detail: text ? text.trim() : "not present" }); return text; })(),
+				out("chrome", "ls", ["/opt/google/chrome"]),
+				out("crosh", "ls", ["/usr/bin/crosh"]),
+				out("arc", "arc", ["--version"]),
+				out("verity", "ls", ["/sys/block"]),
+				out("ab-labels", "ls", ["/dev/disk/by-label"]),
+				(async () => { const text = await read("/sys/firmware/efi/fw_platform_size"); probes.push({ id: "efi", command: "/sys/firmware/efi", ok: text !== undefined, detail: text ? "UEFI (CoreBoot build)" : "not present" }); return text; })(),
+				out("virt", "systemd-detect-virt", []),
+			]);
+			machine.os = "chromeos";
+			machine.release = /CROS_RELEASE=([^\s]+)/i.exec(osrelText ?? "")?.[1] ?? firstLine(osrelText) ?? "chromeos";
+			machine.model = (dmi ?? dts ?? "").trim() || "unknown";
+			const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
+			machine.ramBytes = mem ? Number(mem) * 1024 : undefined;
+			machine.kernel = uname.stdout.trim().split(" ").slice(-1)[0] ?? undefined;
+			machine.virtualized = virt.ok && virt.stdout.trim() && virt.stdout.trim() !== "none" ? virt.stdout.trim() : "physical";
+			const isUefi = efi !== undefined;
+			const verityOn = /dm-\d+/.test(verity.stdout);
+			const abOk = /ROOT-[AB]/.test(ab.stdout);
+			bootChain.push(
+				{ stage: "bootrom", trust: "immutable", notes: "Per-board ROM; not updatable through the OS." },
+				{ stage: "firmware", trust: isUefi ? "CoreBoot/UEFI" : "coreboot", evidence: isUefi ? "/sys/firmware/efi" : "chromeos-firmware", notes: "ChromeOS firmware; updates arrive through the OS." },
+				{ stage: "verified-boot", trust: verity.ok ? (verityOn ? "dm-verity on" : "not seen") : "not read", evidence: verity.ok ? "/sys/block" : undefined, notes: verityOn ? "Verified root filesystems are present." : "dm-verity devices not listed; state unknown." },
+				{ stage: "boot-ab", trust: abOk ? "A/B partitions" : "not read", evidence: ab.ok ? "/dev/disk/by-label" : undefined, notes: "ChromeOS boots ROOT-A or ROOT-B; the other stays as the fallback." },
+				{ stage: "kernel", trust: "signed", evidence: "uname", notes: machine.kernel ?? "release unknown." },
+				{ stage: "userland", trust: "chromium", evidence: chrome.ok ? "/opt/google/chrome" : undefined, notes: `crosh ${crosh.ok ? "present" : "not read"}, arc ${arc.ok ? "present" : "not read"}.` },
+			);
+			gates.push(
+				{ id: "chromeos-tooling", status: crosh.ok || arc.ok ? "verified" : "required", detail: crosh.ok || arc.ok ? "crosh or arc present; shell and remote injection are reachable." : "Neither crosh nor arc read; shell access path unknown." },
+				{ id: "verified-boot", status: verity.ok ? "verified" : "required", detail: verity.ok ? (verityOn ? "dm-verity devices listed." : "dm-verity state not read.") : "dm-verity state unknown." },
+				{ id: "ab-partitions", status: ab.ok && abOk ? "verified" : "required", detail: abOk ? "ROOT-A/ROOT-B labels visible; the A/B rollback path is confirmed." : "A/B labels not read." },
+				{ id: "backup", status: "required", detail: "Run rein export presets (or rein export browse) first; ChromeOS user data lives under /home/chronos/user." },
+			);
+		} else {
 		const [osrel, uname, meminfo, cpuinfo, efi, efibootmgr, mokutil, bootdir, virt] = await Promise.all([
-			(async () => { const text = await read("/etc/os-release"); probes.push({ id: "os-release", command: "/etc/os-release", ok: text !== undefined, detail: text ? firstLine(text) : "missing" }); return text; })(),
+			(async () => { return osrelText; })(),
 			out("uname", "uname", ["-sr"]),
 			(async () => { const text = await read("/proc/meminfo"); probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== undefined, detail: text ? firstLine(text) : "missing" }); return text; })(),
 			(async () => { const text = await read("/proc/cpuinfo"); probes.push({ id: "cpuinfo", command: "/proc/cpuinfo", ok: text !== undefined, detail: text ? firstLine(text) : "missing" }); return text; })(),
@@ -120,7 +162,7 @@ export async function learnMachine(deps: LearnDeps = {}): Promise<Outcome> {
 			out("boot-dir", "ls", ["/boot"]),
 			out("virt", "systemd-detect-virt", []),
 		]);
-		machine.release = firstLine(osrel) ?? (platform === "linux" ? "linux" : platform);
+		machine.release = firstLine(osrel) ?? "linux";
 		machine.model = (cpuinfo ?? "").split("\n").map(l => l.trim()).find(l => l.startsWith("model name"))?.split(":").slice(1).join(" ").trim() ?? "unknown";
 		const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
 		machine.ramBytes = mem ? Number(mem) * 1024 : undefined;
@@ -139,6 +181,7 @@ export async function learnMachine(deps: LearnDeps = {}): Promise<Outcome> {
 			{ id: "secure-boot", status: mokutil.ok && sb !== "unknown" ? "verified" : "required", detail: `Secure Boot ${sb}.` },
 			{ id: "boot-manager", status: efibootmgr.ok ? "verified" : "required", detail: efibootmgr.ok ? "Boot entries readable." : "efibootmgr unavailable." },
 		);
+		}
 	} else if (platform === "win32") {
 		const [ver, systeminfo, bios, secureboot, legacy, cpu, ram, hypervisor, tpm] = await Promise.all([
 			out("ver", "ver", []),

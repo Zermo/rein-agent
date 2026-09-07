@@ -73,8 +73,32 @@ Open `~/.rein/redteam/<host>-<timestamp>/dossier.md`. Three things to check befo
 - **Gates** — `verified` means Rein read the state and can show the evidence. `required` means the replacement needs it. `blocked` means it is missing and named.
 - **Evidence** — one file per probe, under `evidence/`. The dossier claims nothing without a capture.
 
+## 05 ChromeOS
+
+ChromeOS reports to Node as `linux`. Rein reads `/etc/os-release`, and when it identifies Chrome OS it switches to the ChromeOS pass.
+
+Learn
+
+REIN LEARN
+Copy
+rein learn
+
+The dossier maps the ChromeOS boot chain — bootrom, firmware (CoreBoot/UEFI), verified boot (dm-verity), the A/B partitions, kernel, userland — and names the model from DMI or the device tree. Whatever a given board cannot expose is recorded as a note, not an error.
+
+Export
+
+REIN EXPORT PRESETS CHROMEOS
+Copy
+rein export presets --to /media/removable/<drive>
+
+The presets re-home to the chronos user directory (My Files), and add the Chromium profile under `~/.config/chromium`. The engine is unchanged: it copies, and never moves or deletes.
+
+Replace
+
+The `codex/rein-os` branch stages a ChromeOS userland kit. The installer confirms the machine identifies as ChromeOS, then writes only the chronos user's `.local/share/rein-os` and `.local/bin/rein`. The verified root and the A/B partitions stay untouched. Rootfs replacement on ChromeOS is a separate image-level project.
+
 ## Notes
 
-- The learn pass is read-only. It runs the same probes on macOS, Windows, Linux, and any architecture; whatever a platform cannot answer is recorded as a note, not an error.
+- The learn pass is read-only. It runs the same probes on macOS, Windows, Linux, and ChromeOS; whatever a platform cannot answer is recorded as a note, not an error.
 - Export needs a destination. Refusing to guess is the point.
 - A replacement OS removes the image it replaces. Export first, replace second, verify after.

@@ -73,6 +73,68 @@ test("Linux learn pass reports UEFI/BIOS split and degrades without efibootmgr",
 	assert.equal(learn.gates.find(g => g.id === "boot-manager")?.status, "required");
 });
 
+test("ChromeOS learn pass maps the ChromeOS boot chain and gates", async () => {
+	const { learn } = await learnMachine({
+		platform: "linux",
+		hostname: () => "pixel",
+		now: () => new Date("2026-01-01T00:00:00Z"),
+		run: fakeRun({
+			"uname -sr": ok("Linux 6.1.0-chromeos #1 SMP x86_64"),
+			"ls /opt/google/chrome": ok("chrome  resources"),
+			"ls /usr/bin/crosh": ok("/usr/bin/crosh"),
+			"arc --version": ok("arc 1.0"),
+			"ls /sys/block": ok("sda dm-0 dm-1 loop0"),
+			"ls /dev/disk/by-label": ok("ROOT-A ROOT-B STATE-A STATE-B"),
+			"systemd-detect-virt": ok("none"),
+		}),
+		read: async (path: string) => {
+			if (path === "/etc/os-release") return "NAME=Chrome OS\nID=chromeos\nCROS_RELEASE=132.0.6834.0\n";
+			if (path === "/proc/meminfo") return "MemTotal:        8123456 kB\n";
+			if (path === "/sys/class/dmi/id/product_name") return "Nyanza\n";
+			if (path === "/sys/firmware/efi/fw_platform_size") return "256\n";
+			return undefined;
+		},
+	});
+	assert.equal(learn.machine.os, "chromeos");
+	assert.equal(learn.machine.release, "132.0.6834.0");
+	assert.equal(learn.machine.model, "Nyanza");
+	assert.deepEqual(learn.bootChain.map(s => s.stage), ["bootrom", "firmware", "verified-boot", "boot-ab", "kernel", "userland"]);
+	assert.equal(learn.bootChain.find(s => s.stage === "firmware")?.trust, "CoreBoot/UEFI");
+	assert.equal(learn.bootChain.find(s => s.stage === "verified-boot")?.trust, "dm-verity on");
+	assert.equal(learn.bootChain.find(s => s.stage === "boot-ab")?.trust, "A/B partitions");
+	assert.equal(learn.gates.find(g => g.id === "chromeos-tooling")?.status, "verified");
+	assert.equal(learn.gates.find(g => g.id === "verified-boot")?.status, "verified");
+	assert.equal(learn.gates.find(g => g.id === "ab-partitions")?.status, "verified");
+	assert.equal(learn.gates.find(g => g.id === "backup")?.status, "required");
+	assert.match(learn.gates.find(g => g.id === "backup")?.detail ?? "", /rein export/);
+});
+
+test("ChromeOS detection degrades when verity and A/B labels are not readable", async () => {
+	const { learn } = await learnMachine({
+		platform: "linux",
+		hostname: () => "cros-arm",
+		run: fakeRun({
+			"uname -sr": ok("Linux 6.1.0-chromeos #1 SMP aarch64"),
+			"ls /opt/google/chrome": fail("No such file or directory"),
+			"ls /usr/bin/crosh": fail("No such file or directory"),
+			"arc --version": fail("arc: command not found"),
+			"ls /sys/block": fail("Operation not permitted"),
+			"ls /dev/disk/by-label": fail("Operation not permitted"),
+		}),
+		read: async (path: string) => {
+			if (path === "/etc/os-release") return "NAME=Chrome OS\nID=chromeos\nCROS_RELEASE=128.0.6613.0\n";
+			if (path === "/proc/device-tree/model") return "exynos5422-Tab10\n";
+			return undefined;
+		},
+	});
+	assert.equal(learn.machine.os, "chromeos");
+	assert.equal(learn.machine.model, "exynos5422-Tab10");
+	assert.equal(learn.gates.find(g => g.id === "chromeos-tooling")?.status, "required");
+	assert.equal(learn.gates.find(g => g.id === "verified-boot")?.status, "required");
+	assert.equal(learn.gates.find(g => g.id === "ab-partitions")?.status, "required");
+	assert.ok(learn.notes.some(n => n.includes("probe")), "failed probes become notes");
+});
+
 test("Windows learn pass runs on any host and degrades cleanly when probes are missing", async () => {
 	const { learn } = await learnMachine({
 		platform: "win32",

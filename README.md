@@ -801,7 +801,8 @@ the data-loss prevention steps.
 rein learn [--json]           read-only pass on this machine: boot chain of trust,
                               security posture, per-probe evidence. Writes a new
                               dossier under ~/.rein/redteam/ (refuses to
-                              overwrite). macOS, Windows, Linux, any architecture.
+                              overwrite). macOS, Windows, Linux, ChromeOS, any
+                              architecture.
 
 rein learn ios [--udid U]     an attached iPhone or iPad via libimobiledevice
                               (brew install libimobiledevice).
@@ -812,7 +813,8 @@ rein export browse            Finder-style TUI: navigate, select files and folde
 rein export presets [--to D]  the standard personal data groups: Documents, Desktop,
                               Downloads, Pictures, Movies, Music — plus Mail,
                               keychains, browser profiles, and SSH/GPG keys where
-                              they exist.
+                              they exist. On ChromeOS the same groups, re-homed to
+                              the chronos user directory.
 
 rein export <paths…> --to D   exactly the paths you name.
 ```

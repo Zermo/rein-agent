@@ -11272,52 +11272,109 @@ async function learnMachine(deps = {}) {
       { id: "boot-entry", status: bootEntryOk ? "verified" : "required", detail: bootEntryOk ? "Active boot entry readable; injection path C is testable." : "bless and nvram boot both unavailable; boot entry state unknown." }
     );
   } else if (platform2 === "linux") {
-    const [osrel, uname, meminfo, cpuinfo, efi, efibootmgr, mokutil, bootdir, virt] = await Promise.all([
-      (async () => {
-        const text = await read2("/etc/os-release");
-        probes.push({ id: "os-release", command: "/etc/os-release", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
-        return text;
-      })(),
-      out("uname", "uname", ["-sr"]),
-      (async () => {
-        const text = await read2("/proc/meminfo");
-        probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
-        return text;
-      })(),
-      (async () => {
-        const text = await read2("/proc/cpuinfo");
-        probes.push({ id: "cpuinfo", command: "/proc/cpuinfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
-        return text;
-      })(),
-      (async () => {
-        const text = await read2("/sys/firmware/efi/fw_platform_size");
-        probes.push({ id: "efi", command: "/sys/firmware/efi", ok: text !== void 0, detail: text ? "UEFI" : "not present" });
-        return text;
-      })(),
-      out("efibootmgr", "efibootmgr", ["-v"]),
-      out("mokutil", "mokutil", ["--sb-state"]),
-      out("boot-dir", "ls", ["/boot"]),
-      out("virt", "systemd-detect-virt", [])
-    ]);
-    machine.release = firstLine(osrel) ?? (platform2 === "linux" ? "linux" : platform2);
-    machine.model = (cpuinfo ?? "").split("\n").map((l) => l.trim()).find((l) => l.startsWith("model name"))?.split(":").slice(1).join(" ").trim() ?? "unknown";
-    const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
-    machine.ramBytes = mem ? Number(mem) * 1024 : void 0;
-    machine.kernel = uname.stdout.trim().split(" ").slice(-1)[0] ?? void 0;
-    machine.virtualized = virt.ok && virt.stdout.trim() && virt.stdout.trim() !== "none" ? virt.stdout.trim() : "physical";
-    const isUefi = efi !== void 0;
-    const sb = /enabled/i.test(mokutil.stdout) ? "enabled" : /disabled/i.test(mokutil.stdout) ? "disabled" : "unknown";
-    bootChain.push(
-      { stage: "firmware", trust: isUefi ? "UEFI" : "legacy BIOS", evidence: isUefi ? "/sys/firmware/efi" : "absence", notes: isUefi ? "UEFI platform." : "No EFI runtime visible; treat as legacy BIOS." },
-      { stage: "secure-boot", trust: sb, evidence: mokutil.ok ? "mokutil" : void 0, notes: sb === "unknown" ? "Secure Boot state not read." : "State read." },
-      { stage: "boot-manager", trust: "efibootmgr", evidence: efibootmgr.ok ? "efibootmgr" : void 0, notes: efibootmgr.ok ? "Boot entries recorded." : "Boot entries not read." },
-      { stage: "bootloader", trust: "distro", evidence: bootdir.ok ? "ls /boot" : void 0, notes: bootdir.ok ? "/boot contents recorded." : "/boot not listed." },
-      { stage: "kernel", trust: "signed-by-distro", evidence: "uname", notes: machine.kernel ?? "release unknown." }
-    );
-    gates.push(
-      { id: "secure-boot", status: mokutil.ok && sb !== "unknown" ? "verified" : "required", detail: `Secure Boot ${sb}.` },
-      { id: "boot-manager", status: efibootmgr.ok ? "verified" : "required", detail: efibootmgr.ok ? "Boot entries readable." : "efibootmgr unavailable." }
-    );
+    const osrelText = await read2("/etc/os-release");
+    probes.push({ id: "os-release", command: "/etc/os-release", ok: osrelText !== void 0, detail: osrelText ? firstLine(osrelText) : "missing" });
+    const chromeos = /ID=chromeos/i.test(osrelText ?? "") || /CROS_RELEASE/i.test(osrelText ?? "");
+    if (chromeos) {
+      const [uname, meminfo, dmi, dts, chrome, crosh, arc, verity, ab, efi, virt] = await Promise.all([
+        out("uname", "uname", ["-sr"]),
+        (async () => {
+          const text = await read2("/proc/meminfo");
+          probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
+          return text;
+        })(),
+        (async () => {
+          const text = await read2("/sys/class/dmi/id/product_name");
+          probes.push({ id: "dmi", command: "/sys/class/dmi/id", ok: text !== void 0, detail: text ? text.trim() : "not present" });
+          return text;
+        })(),
+        (async () => {
+          const text = await read2("/proc/device-tree/model");
+          probes.push({ id: "dtb-model", command: "/proc/device-tree/model", ok: text !== void 0, detail: text ? text.trim() : "not present" });
+          return text;
+        })(),
+        out("chrome", "ls", ["/opt/google/chrome"]),
+        out("crosh", "ls", ["/usr/bin/crosh"]),
+        out("arc", "arc", ["--version"]),
+        out("verity", "ls", ["/sys/block"]),
+        out("ab-labels", "ls", ["/dev/disk/by-label"]),
+        (async () => {
+          const text = await read2("/sys/firmware/efi/fw_platform_size");
+          probes.push({ id: "efi", command: "/sys/firmware/efi", ok: text !== void 0, detail: text ? "UEFI (CoreBoot build)" : "not present" });
+          return text;
+        })(),
+        out("virt", "systemd-detect-virt", [])
+      ]);
+      machine.os = "chromeos";
+      machine.release = /CROS_RELEASE=([^\s]+)/i.exec(osrelText ?? "")?.[1] ?? firstLine(osrelText) ?? "chromeos";
+      machine.model = (dmi ?? dts ?? "").trim() || "unknown";
+      const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
+      machine.ramBytes = mem ? Number(mem) * 1024 : void 0;
+      machine.kernel = uname.stdout.trim().split(" ").slice(-1)[0] ?? void 0;
+      machine.virtualized = virt.ok && virt.stdout.trim() && virt.stdout.trim() !== "none" ? virt.stdout.trim() : "physical";
+      const isUefi = efi !== void 0;
+      const verityOn = /dm-\d+/.test(verity.stdout);
+      const abOk = /ROOT-[AB]/.test(ab.stdout);
+      bootChain.push(
+        { stage: "bootrom", trust: "immutable", notes: "Per-board ROM; not updatable through the OS." },
+        { stage: "firmware", trust: isUefi ? "CoreBoot/UEFI" : "coreboot", evidence: isUefi ? "/sys/firmware/efi" : "chromeos-firmware", notes: "ChromeOS firmware; updates arrive through the OS." },
+        { stage: "verified-boot", trust: verity.ok ? verityOn ? "dm-verity on" : "not seen" : "not read", evidence: verity.ok ? "/sys/block" : void 0, notes: verityOn ? "Verified root filesystems are present." : "dm-verity devices not listed; state unknown." },
+        { stage: "boot-ab", trust: abOk ? "A/B partitions" : "not read", evidence: ab.ok ? "/dev/disk/by-label" : void 0, notes: "ChromeOS boots ROOT-A or ROOT-B; the other stays as the fallback." },
+        { stage: "kernel", trust: "signed", evidence: "uname", notes: machine.kernel ?? "release unknown." },
+        { stage: "userland", trust: "chromium", evidence: chrome.ok ? "/opt/google/chrome" : void 0, notes: `crosh ${crosh.ok ? "present" : "not read"}, arc ${arc.ok ? "present" : "not read"}.` }
+      );
+      gates.push(
+        { id: "chromeos-tooling", status: crosh.ok || arc.ok ? "verified" : "required", detail: crosh.ok || arc.ok ? "crosh or arc present; shell and remote injection are reachable." : "Neither crosh nor arc read; shell access path unknown." },
+        { id: "verified-boot", status: verity.ok ? "verified" : "required", detail: verity.ok ? verityOn ? "dm-verity devices listed." : "dm-verity state not read." : "dm-verity state unknown." },
+        { id: "ab-partitions", status: ab.ok && abOk ? "verified" : "required", detail: abOk ? "ROOT-A/ROOT-B labels visible; the A/B rollback path is confirmed." : "A/B labels not read." },
+        { id: "backup", status: "required", detail: "Run rein export presets (or rein export browse) first; ChromeOS user data lives under /home/chronos/user." }
+      );
+    } else {
+      const [osrel, uname, meminfo, cpuinfo, efi, efibootmgr, mokutil, bootdir, virt] = await Promise.all([
+        (async () => {
+          return osrelText;
+        })(),
+        out("uname", "uname", ["-sr"]),
+        (async () => {
+          const text = await read2("/proc/meminfo");
+          probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
+          return text;
+        })(),
+        (async () => {
+          const text = await read2("/proc/cpuinfo");
+          probes.push({ id: "cpuinfo", command: "/proc/cpuinfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
+          return text;
+        })(),
+        (async () => {
+          const text = await read2("/sys/firmware/efi/fw_platform_size");
+          probes.push({ id: "efi", command: "/sys/firmware/efi", ok: text !== void 0, detail: text ? "UEFI" : "not present" });
+          return text;
+        })(),
+        out("efibootmgr", "efibootmgr", ["-v"]),
+        out("mokutil", "mokutil", ["--sb-state"]),
+        out("boot-dir", "ls", ["/boot"]),
+        out("virt", "systemd-detect-virt", [])
+      ]);
+      machine.release = firstLine(osrel) ?? "linux";
+      machine.model = (cpuinfo ?? "").split("\n").map((l) => l.trim()).find((l) => l.startsWith("model name"))?.split(":").slice(1).join(" ").trim() ?? "unknown";
+      const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
+      machine.ramBytes = mem ? Number(mem) * 1024 : void 0;
+      machine.kernel = uname.stdout.trim().split(" ").slice(-1)[0] ?? void 0;
+      machine.virtualized = virt.ok && virt.stdout.trim() && virt.stdout.trim() !== "none" ? virt.stdout.trim() : "physical";
+      const isUefi = efi !== void 0;
+      const sb = /enabled/i.test(mokutil.stdout) ? "enabled" : /disabled/i.test(mokutil.stdout) ? "disabled" : "unknown";
+      bootChain.push(
+        { stage: "firmware", trust: isUefi ? "UEFI" : "legacy BIOS", evidence: isUefi ? "/sys/firmware/efi" : "absence", notes: isUefi ? "UEFI platform." : "No EFI runtime visible; treat as legacy BIOS." },
+        { stage: "secure-boot", trust: sb, evidence: mokutil.ok ? "mokutil" : void 0, notes: sb === "unknown" ? "Secure Boot state not read." : "State read." },
+        { stage: "boot-manager", trust: "efibootmgr", evidence: efibootmgr.ok ? "efibootmgr" : void 0, notes: efibootmgr.ok ? "Boot entries recorded." : "Boot entries not read." },
+        { stage: "bootloader", trust: "distro", evidence: bootdir.ok ? "ls /boot" : void 0, notes: bootdir.ok ? "/boot contents recorded." : "/boot not listed." },
+        { stage: "kernel", trust: "signed-by-distro", evidence: "uname", notes: machine.kernel ?? "release unknown." }
+      );
+      gates.push(
+        { id: "secure-boot", status: mokutil.ok && sb !== "unknown" ? "verified" : "required", detail: `Secure Boot ${sb}.` },
+        { id: "boot-manager", status: efibootmgr.ok ? "verified" : "required", detail: efibootmgr.ok ? "Boot entries readable." : "efibootmgr unavailable." }
+      );
+    }
   } else if (platform2 === "win32") {
     const [ver, systeminfo, bios, secureboot, legacy, cpu, ram, hypervisor, tpm] = await Promise.all([
       out("ver", "ver", []),
@@ -11703,9 +11760,24 @@ function personalPresets(home, platform2) {
   }
   return presets;
 }
-function existingPresets(home, platform2) {
+function isChromeOS(osRelease) {
+  return /ID=chromeos/i.test(osRelease ?? "") || /CROS_RELEASE/i.test(osRelease ?? "");
+}
+function chromeosPresets(home) {
+  const p = (...sub) => join31(home, ...sub);
+  return [
+    { id: "downloads", label: "Downloads", paths: [p("Downloads")] },
+    { id: "documents", label: "Documents", paths: [p("Documents")] },
+    { id: "pictures", label: "Pictures", paths: [p("Pictures")] },
+    { id: "music", label: "Music", paths: [p("Music")] },
+    { id: "movies", label: "Videos", paths: [p("Videos")] },
+    { id: "chrome-profile", label: "Chrome profile", paths: [p(".config", "chromium")] },
+    { id: "keys", label: "SSH and GPG keys", paths: [p(".ssh"), p(".gnupg")] }
+  ];
+}
+function filterExisting(presets) {
   const missing = [];
-  const presets = personalPresets(home, platform2).map((preset) => ({
+  const kept = presets.map((preset) => ({
     ...preset,
     paths: preset.paths.filter((path2) => {
       if (existsSync15(path2)) return true;
@@ -11713,7 +11785,10 @@ function existingPresets(home, platform2) {
       return false;
     })
   })).filter((preset) => preset.paths.length > 0);
-  return { presets, missing };
+  return { presets: kept, missing };
+}
+function existingPresets(home, platform2) {
+  return filterExisting(personalPresets(home, platform2));
 }
 var init_presets = __esm({
   "src/export/presets.ts"() {
@@ -11912,16 +11987,27 @@ var command_exports3 = {};
 __export(command_exports3, {
   runExportCommand: () => runExportCommand
 });
+import { readFile as readFile5 } from "node:fs/promises";
 import * as os5 from "node:os";
 import { join as join33, resolve as resolve26 } from "node:path";
+async function defaultOsRelease() {
+  try {
+    return await readFile5("/etc/os-release", "utf8");
+  } catch {
+    return void 0;
+  }
+}
 function defaultTarget(home, now) {
   const date = now.toISOString().slice(0, 10);
   return join33(home, `Dareecho-Export-${date}`);
 }
 async function runExportCommand(args, flags = {}, deps = {}) {
   const log = deps.log ?? console.log;
-  const home = (deps.home ?? os5.homedir)();
+  let home = (deps.home ?? os5.homedir)();
   const platform2 = deps.platform ?? process.platform;
+  const osReleaseText = await (deps.osRelease ?? defaultOsRelease)();
+  const chromeos = platform2 === "linux" && isChromeOS(osReleaseText);
+  if (chromeos && !home.startsWith("/home/chronos")) home = deps.chromeosHome ?? "/home/chronos/user/1000";
   const action = args[0] ?? "browse";
   if (action === "browse" || action === "presets") {
     if (args.length > 1) throw new Error("Usage: rein export browse [--to DIR] | rein export <paths...> --to DIR | rein export presets [--to DIR] [--list]");
@@ -11939,7 +12025,7 @@ async function runExportCommand(args, flags = {}, deps = {}) {
     return 0;
   }
   if (action === "presets") {
-    const { presets, missing } = existingPresets(home, platform2);
+    const { presets, missing } = chromeos ? filterExisting(chromeosPresets(home)) : existingPresets(home, platform2);
     if (flags.list === true || flags.json === true) {
       for (const preset of presets) log(`${preset.id}: ${preset.paths.join(", ")}`);
       if (missing.length) log(`not present, skipped: ${missing.join(", ")}`);

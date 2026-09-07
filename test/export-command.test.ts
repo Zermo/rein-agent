@@ -58,6 +58,41 @@ test("rein export presets copies the present groups into a new directory", async
 	assert.ok((await readdir(join(home, "Documents", "work"))).length === 1, "source tree untouched");
 });
 
+test("on ChromeOS, presets follow the chronos home and report the chrome profile group", async () => {
+	const home = await mkdtemp(join(tmpdir(), "export-cmd-cros-"));
+	await mkdir(join(home, "Downloads"), { recursive: true });
+	await mkdir(join(home, ".config", "chromium"), { recursive: true });
+	await writeFile(join(home, "Downloads", "app.html"), "<html>");
+	const target = join(home, "Dareecho-Export-2026-01-01");
+	const logs: string[] = [];
+	const code = await runExportCommand(["presets"], { to: target }, {
+		home: () => home,
+		platform: "linux",
+		osRelease: async () => "NAME=Chrome OS\nID=chromeos\nCROS_RELEASE=132.0.6834.0\n",
+		chromeosHome: home,
+		log: t => logs.push(t),
+	});
+	assert.equal(code, 0);
+	assert.equal(await readFile(join(target, "Downloads", "app.html"), "utf8"), "<html>");
+	assert.match(logs.join("\n"), /never deletes/);
+});
+
+test("ChromeOS detection re-homes the presets to the chronos user directory", async () => {
+	const chronos = await mkdtemp(join(tmpdir(), "chronos-"));
+	await mkdir(join(chronos, "Documents"), { recursive: true });
+	await writeFile(join(chronos, "Documents", "memo.md"), "memo");
+	const logs: string[] = [];
+	const code = await runExportCommand(["presets"], { list: true }, {
+		home: () => "/Users/nobody",
+		platform: "linux",
+		osRelease: async () => "NAME=Chrome OS\nID=chromeos\n",
+		chromeosHome: chronos,
+		log: t => logs.push(t),
+	});
+	assert.equal(code, 0);
+	assert.match(logs.join("\n"), /documents: .*Documents/);
+});
+
 test("unknown export options are refused", async () => {
 	await assert.rejects(
 		() => runExportCommand(["browse"], { force: true }, { log: () => {} }),

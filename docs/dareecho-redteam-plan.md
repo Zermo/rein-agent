@@ -9,20 +9,30 @@ Rein stays the commander. CyberStrike is the weapon. We do not merge the two cod
 
 ## Built so far (dev/dareecho-learn)
 
-- `rein learn [--json] [--output DIR]` — read-only pass on macOS, Windows, or Linux (any arch);
-  records the boot chain of trust, security gates, and per-probe evidence into a new dossier
-  directory under `~/.rein/redteam/`. Refuses to overwrite; never deletes.
+- `rein learn [--json] [--output DIR]` — read-only pass on macOS, Windows, Linux (any arch),
+  and ChromeOS (reports as linux; detected via `/etc/os-release`, where the model comes
+  from DMI or the device tree and the boot chain is bootrom → firmware → verified boot
+  (dm-verity) → A/B partitions → kernel → userland); records the boot chain of trust,
+  security gates, and per-probe evidence into a new dossier directory under
+  `~/.rein/redteam/`. Refuses to overwrite; never deletes.
 - `rein learn ios [--udid U]` — learns an attached iOS device through libimobiledevice,
   mapping it onto the iOS boot chain (bootrom → iBSS/iBEC → AppleLL → KernelCache → launchd).
 - `rein export` — data-loss prevention before any replacement. `rein export browse` is a
   Finder-style TUI (navigate, select, export); `rein export presets` copies the standard
   personal data groups (Documents, Desktop, Downloads, Pictures, Movies, Music, and on
-  macOS Mail, keychains, browser profiles, SSH/GPG keys); `rein export <paths...> --to D`
+  macOS Mail, keychains, browser profiles, SSH/GPG keys; on ChromeOS the same groups
+  re-homed to the chronos user directory plus the Chromium profile); `rein export <paths...> --to D`
   copies exactly what you name. The engine copies, never moves or deletes; it refuses a
   target inside a source and a source inside a target.
 - Verified live on thebrain (SIP disabled) and macserver (SIP enabled), both M4 Mac minis;
-  dossiers written to `~/.rein/redteam/` on each. 34 new tests (learn + export), full suite
+  dossiers written to `~/.rein/redteam/` on each. 45 new tests (learn + export), full suite
   green except the pre-existing tmux environment failures on main.
+- Rebuild engine (`codex/rein-os`): `rein os plan` detects ChromeOS on linux hosts and
+  plans a `chromeos-userland` adapter with developer-mode and backup gates; `rein os
+  prepare --target chromeos --output DIR` stages a ChromeOS userland kit whose installer
+  verifies the machine identifies as ChromeOS, then writes only the chronos user's
+  `.local/share/rein-os` and `.local/bin/rein` — the verified (dm-verity) root and A/B
+  partitions stay untouched. The Omarchy VM kit remains the default `--target omarchy`.
 - Docs: README usage block + Dareecho section, wiki page `Dareecho-export`, this plan.
 - Scope note: the never-delete rule covers our work on the operator's test machines and the
   learn/export paths. Dareecho the OS replacement itself obviously removes the image it
@@ -74,6 +84,21 @@ BootROM (immutable) → Apple firmware → Secure Boot (amfi/`csrutil`) → EFI 
 (`bless`/bootpath) → kernel. The "Colonel structure" is that chain: who trusts whom,
 what is signed, where an unsigned payload can enter, and what survives a reboot.
 Serials and hostnames stay out of committed fixtures (AGENTS.md: synthetic hosts in tests).
+
+### ChromeOS
+
+- Reports to Node as `linux` (arm64 or x64); `/etc/os-release` carries `ID=chromeos`
+  and `CROS_RELEASE=` (the version). User home is `/home/chronos/user/<id>`; My Files
+  is that home. Developer mode unlocks the `arc` shell (userland packages, Node) —
+  without it the shell is limited, so developer mode is a gate for the red-team pass.
+- Boot chain: bootrom → firmware (CoreBoot/UEFI) → verified boot (dm-verity) → A/B
+  partitions → kernel → userland. dm-verity rollback plus the A/B switch make rootfs
+  replacement an image-level project (`chromeos-image` / coreboot territory). The first
+  supported injection surface is a userland overlay in the chronos home, which is what
+  the `--target chromeos` kit does.
+- Personal data: Downloads/Documents/Pictures/Music/Videos plus the Chromium profile
+  under `~/.config/chromium`; `rein export presets` on a ChromeOS host copies exactly
+  those, re-homed to the chronos directory.
 
 ## How the two combine (decision)
 

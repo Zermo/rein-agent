@@ -46,10 +46,29 @@ export function personalPresets(home: string, platform: string): Preset[] {
 	return presets;
 }
 
+/** ChromeOS reports as linux to Node; os-release is the reliable marker. */
+export function isChromeOS(osRelease?: string): boolean {
+	return /ID=chromeos/i.test(osRelease ?? "") || /CROS_RELEASE/i.test(osRelease ?? "");
+}
+
+/** ChromeOS user data lives under /home/chronos/user/<id>; the user folders are the personal surface. */
+export function chromeosPresets(home: string): Preset[] {
+	const p = (...sub: string[]) => join(home, ...sub);
+	return [
+		{ id: "downloads", label: "Downloads", paths: [p("Downloads")] },
+		{ id: "documents", label: "Documents", paths: [p("Documents")] },
+		{ id: "pictures", label: "Pictures", paths: [p("Pictures")] },
+		{ id: "music", label: "Music", paths: [p("Music")] },
+		{ id: "movies", label: "Videos", paths: [p("Videos")] },
+		{ id: "chrome-profile", label: "Chrome profile", paths: [p(".config", "chromium")] },
+		{ id: "keys", label: "SSH and GPG keys", paths: [p(".ssh"), p(".gnupg")] },
+	];
+}
+
 /** Keep only presets that have at least one existing path; report what was skipped. */
-export function existingPresets(home: string, platform: string): { presets: Preset[]; missing: string[] } {
+export function filterExisting(presets: Preset[]): { presets: Preset[]; missing: string[] } {
 	const missing: string[] = [];
-	const presets = personalPresets(home, platform).map(preset => ({
+	const kept = presets.map(preset => ({
 		...preset,
 		paths: preset.paths.filter(path => {
 			if (existsSync(path)) return true;
@@ -57,5 +76,8 @@ export function existingPresets(home: string, platform: string): { presets: Pres
 			return false;
 		}),
 	})).filter(preset => preset.paths.length > 0);
-	return { presets, missing };
+	return { presets: kept, missing };
+}
+export function existingPresets(home: string, platform: string): { presets: Preset[]; missing: string[] } {
+	return filterExisting(personalPresets(home, platform));
 }
