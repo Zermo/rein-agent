@@ -1,11 +1,12 @@
-/** Export an offline Rein payload and explicit VM post-install workflow. */
+/** Export an offline rein-dərāchō payload and explicit VM post-install workflow. */
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OMARCHY_BASE } from "./plan.ts";
 
-const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE"];
+export const OS_THEME_FILES = ["src/os/assets/rain/theme.json", "src/os/assets/rain/wallpaper.svg"] as const;
+const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES];
 const VENDOR = ["meat", "mattpocock", "ponytail", "unlazy", "obscura", "fold", "pi-posthorse"];
 export interface OSKitManifest {
 	schemaVersion: 1;
@@ -47,6 +48,10 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 	const pkg = JSON.parse((await regularFile(join(root, "package.json"))).toString("utf8"));
 	if (typeof pkg.version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?$/.test(pkg.version)) throw new Error("The Rein package version is invalid.");
 	const payload = new Map<string, Buffer>();
+	for (const directory of ["src", "src/os", "src/os/assets", "src/os/assets/rain"]) {
+		const stat = await lstat(join(root, directory));
+		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("OS theme assets must be in ordinary payload directories without symlinks.");
+	}
 	for (const path of REQUIRED) payload.set(path, await regularFile(join(root, path)));
 	const visit = async (relative: string) => {
 		const stat = await lstat(join(root, relative));
@@ -133,12 +138,12 @@ async function verifyPayload() {
     if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
     result.push([entry.path, data]);
   }
-  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg']) if (!seen.has(name)) fail('Required payload missing: ' + name);
   return result;
 }
 export async function main(args) {
   if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-overlay.mjs --verify | --check | --install');
-  if (args[0] === '--help') { console.log('Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
+  if (args[0] === '--help') { console.log('rein-dərāchō overlay. Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = homedir();
@@ -187,9 +192,11 @@ try {
 } catch(error) { console.error(error.message); process.exitCode = 1; }
 `;
 
-const KIT_README = `# Rein OS VM overlay kit
+const KIT_README = `# rein-dərāchō VM overlay kit
 
 This kit installs the bundled terminal harness into an already installed Omarchy 4.0.2 VM. It is a development payload, not a bootable image or an OS installer. The native Rein klaud desktop package is not included in this first overlay.
+
+rein-dərāchō is the OS build's display name. The CLI remains \`rein os\`; existing installation paths and manifest fields remain stable for compatibility.
 
 ## Verify the kit
 
@@ -216,7 +223,7 @@ node fetch-upstream.mjs ./omarchy-source
 
 That command downloads the exact Omarchy source revision and checks the result. It does not run upstream scripts or build an ISO. A source checkout alone is not bootable installation media.
 
-## Apply the Rein overlay in the VM
+## Apply the rein-dərāchō overlay in the VM
 
 Run without sudo:
 
@@ -228,6 +235,17 @@ node install-overlay.mjs --install
 \`\`\`
 
 The installer creates ~/.local/share/rein-os and ~/.local/bin/rein, refusing to overwrite either. Existing ~/.rein configuration, accounts and sessions remain intact. Add ~/.local/bin to PATH if your shell does not already include it. Setup remains interactive; no background inference, cloud account, system service, model, or network listener is enabled by the overlay.
+
+## Rain theme preview
+
+\`\`\`sh
+~/.local/bin/rein os rain --static
+~/.local/bin/rein os rain --animate
+\`\`\`
+
+Animation runs only in the current interactive terminal, at eight frames per second. Press q or Ctrl-C to restore the screen and input mode. REIN_REDUCED_MOTION=1 keeps even an animated request static; NO_COLOR disables ANSI palette colors. The default preview and --static are plain text and work in pipes.
+
+The verified payload includes src/os/assets/rain/theme.json and wallpaper.svg, with the field guide's cream, rust, amber and forest-green palette. The wallpaper is a static 1920-by-1080 SVG. After installation these files live under ~/.local/share/rein-os/src/os/assets/rain/. They provide a theme basis for later desktop integration; this installer never selects a wallpaper, changes terminal preferences, writes Omarchy theme settings, or installs an animated desktop background.
 
 ## Acceptance gates before making a reusable image
 

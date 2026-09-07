@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title description">
+  <title id="title">rein-dərāchō — Fresh context. Same journey.</title>
+  <desc id="description">A static computer field-guide illustration on cream paper. Square rain falls over a forest-green terminal in an amber diagram field. A rust rein-dərāchō wordmark anchors the quiet left side.</desc>
+  <defs>
+    <pattern id="paper" width="12" height="12" patternUnits="userSpaceOnUse">
+      <rect x="1" y="1" width="1" height="1" fill="#252a25" opacity="0.055"/>
+      <rect x="7" y="8" width="1" height="1" fill="#252a25" opacity="0.035"/>
+    </pattern>
+    <pattern id="diagram-dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <rect x="11" y="11" width="2" height="2" fill="#252a25" opacity="0.16"/>
+    </pattern>
+    <clipPath id="field">
+      <rect x="1044" y="184" width="736" height="720"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1920" height="1080" fill="#f5eddc"/>
+  <rect width="1920" height="1080" fill="url(#paper)"/>
+  <rect x="40" y="40" width="1840" height="1000" fill="none" stroke="#252a25" stroke-width="5"/>
+
+  <g fill="#252a25" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="16" font-weight="600" letter-spacing="3">
+    <text x="112" y="112">rein-dərāchō / REIN SYSTEMS</text>
+    <text x="1780" y="112" text-anchor="end">FIELD NO. 01 / RAIN</text>
+  </g>
+  <path d="M112 136H1780" fill="none" stroke="#252a25" stroke-width="1" opacity="0.4"/>
+
+  <!-- Static diagram field: every rain pixel is part of the illustration. -->
+  <rect x="1044" y="184" width="736" height="720" fill="#ebbc5c"/>
+  <rect x="1044" y="184" width="736" height="720" fill="url(#diagram-dots)"/>
+  <g clip-path="url(#field)">
+    <g fill="none" stroke="#284d3d" stroke-width="1.5" opacity="0.23">
+      <path d="M1044 688H1780M1044 736H1780M1044 800H1780M1044 880H1780"/>
+      <path d="M1412 600 964 904M1412 600 1112 904M1412 600 1262 904M1412 600V904M1412 600 1562 904M1412 600 1712 904M1412 600 1860 904"/>
+    </g>
+    <g fill="#284d3d" opacity="0.25">
+      <path d="M1108 232h8v8h-8zM1108 280h8v24h-8zM1108 328h8v8h-8zM1108 376h8v40h-8zM1108 440h8v8h-8z"/>
+      <path d="M1204 200h8v16h-8zM1204 240h8v8h-8zM1204 296h8v32h-8zM1204 352h8v8h-8z"/>
+      <path d="M1300 224h8v8h-8zM1300 264h8v40h-8zM1300 328h8v8h-8zM1300 384h8v24h-8zM1300 432h8v8h-8z"/>
+      <path d="M1396 192h8v8h-8zM1396 240h8v24h-8zM1396 288h8v8h-8zM1396 328h8v48h-8z"/>
+      <path d="M1492 216h8v24h-8zM1492 264h8v8h-8zM1492 312h8v40h-8zM1492 376h8v8h-8zM1492 416h8v16h-8z"/>
+      <path d="M1588 200h8v8h-8zM1588 248h8v48h-8zM1588 320h8v8h-8zM1588 360h8v24h-8z"/>
+      <path d="M1684 224h8v24h-8zM1684 272h8v8h-8zM1684 320h8v16h-8zM1684 360h8v8h-8zM1684 408h8v40h-8z"/>
+    </g>
+    <g fill="#b54229">
+      <path d="M1108 472h8v16h-8zM1204 384h8v8h-8zM1300 472h8v8h-8zM1396 400h8v16h-8zM1492 464h8v8h-8zM1588 408h8v16h-8zM1684 472h8v8h-8z"/>
+    </g>
+
+    <!-- Hard-edged cabinet, CRT and keyboard, with no simulated live status. -->
+    <path d="m1162 790 398 98 184-92-392-93z" fill="#284d3d" opacity="0.28"/>
+    <g stroke="#252a25" stroke-width="7" stroke-linejoin="miter">
+      <path d="m1228 488 106-58 342 80-108 60z" fill="#f5eddc"/>
+      <path d="m1568 570 108-60v258l-108 60z" fill="#f5eddc"/>
+      <path d="m1568 570 108-60v258l-108 60z" fill="#284d3d" fill-opacity="0.18"/>
+      <path d="m1228 488 340 82v258l-340-82z" fill="#f5eddc"/>
+      <path d="m1260 526 276 66v170l-276-66z" fill="#284d3d"/>
+      <path d="m1260 526 276 66v170l-276-66z" fill="none" stroke-width="14"/>
+      <path d="m1264 766 218 52-66 37-218-52z" fill="#f5eddc"/>
+      <path d="m1198 803 218 52v17l-218-52z" fill="#f5eddc"/>
+    </g>
+    <g fill="#ebbc5c">
+      <path d="m1292 573 19 5v15l-19-5zM1326 581l92 22v8l-92-22zM1292 612l182 44v8l-182-44zM1292 637l112 27v8l-112-27z"/>
+    </g>
+    <g fill="none" stroke="#252a25" stroke-width="3">
+      <path d="m1237 795 179 43M1256 784l179 43M1275 773l179 43M1253 780l-35 20M1285 788l-35 20M1317 796l-35 20M1349 804l-35 20M1381 812l-35 20M1413 820l-35 20"/>
+      <path d="M1618 580v102M1632 572v102M1646 564v102"/>
+    </g>
+    <path d="m1494 774 22 5v13l-22-5z" fill="#b54229"/>
+    <path d="m1248 720 45 11" stroke="#252a25" stroke-width="4"/>
+  </g>
+  <rect x="1044" y="184" width="736" height="720" fill="none" stroke="#252a25" stroke-width="4"/>
+
+  <!-- Quiet space for desktop icons; the wordmark is vector geometry. -->
+  <g fill="#b54229" transform="translate(112 704)">
+    <path fill-rule="evenodd" d="M0 0h58c27 0 40 16 40 42 0 20-9 33-25 39l29 55H66L40 84H30v52H0zm30 27v31h24c9 0 14-5 14-15s-5-16-14-16z"/>
+    <path d="M120 0h85v28h-55v25h48v28h-48v27h57v28h-87zM226 0h32v136h-32zM282 0h31l43 79V0h30v136h-29l-45-82v82h-30z"/>
+  </g>
+  <text x="518" y="839" fill="#b54229" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="78" font-weight="700" letter-spacing="-3">-dərāchō</text>
+  <g fill="#252a25" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-weight="600">
+    <text x="114" y="887" font-size="22" letter-spacing="1.5">FRESH CONTEXT. SAME JOURNEY.</text>
+    <text x="114" y="925" font-size="15" letter-spacing="2.5" opacity="0.7">A HOME FOR YOUR AGENT.</text>
+  </g>
+
+  <path d="M112 972H1780" fill="none" stroke="#252a25" stroke-width="1" opacity="0.4"/>
+  <g fill="#252a25" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" font-weight="600" letter-spacing="2" opacity="0.7">
+    <text x="112" y="1004">LOCAL FIRST / HUMAN LED</text>
+    <text x="1780" y="1004" text-anchor="end">rein-dərāchō / RAIN — STATIC PLATE</text>
+  </g>
+</svg>

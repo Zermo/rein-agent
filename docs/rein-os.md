@@ -1,6 +1,8 @@
-# Rein OS development
+# rein-dərāchō development
 
-Rein has two preparation paths: retain the computer's OS and set up a local model host, or prepare a Rein payload for an Omarchy VM. The first implementation provides platform plans and a runnable terminal overlay. Bootable Rein media, physical disk migration, and a fully integrated Linux desktop remain later build gates.
+rein-dərāchō has two preparation paths: retain the computer's OS and set up a local model host, or prepare a Rein harness payload for an Omarchy VM. The first implementation provides platform plans and a runnable terminal overlay. Bootable rein-dərāchō media, physical disk migration, and a fully integrated Linux desktop remain later build gates.
+
+rein-dərāchō is the OS build's display name. The stable CLI is `rein os`, development stays on `codex/rein-os`, and existing filesystem paths and manifest fields keep their names for compatibility.
 
 See [model and OS validation](model-os-validation.md) for completed checks and untested target behavior.
 
@@ -34,6 +36,22 @@ The supported base flow is the [upstream ISO installer](https://github.com/omaco
 After the VM boots into Omarchy 4.0.2, copy the kit into it. Its `--check` validates the platform, installed base version and empty destinations. Its explicit `--install` creates `~/.local/share/rein-os` and `~/.local/bin/rein` as the desktop user. It refuses to overwrite an existing installation or launcher and leaves `~/.rein` untouched. The generated README contains commands and acceptance gates. Payload hashes detect modification; they do not authenticate a publisher.
 
 The overlay never starts onboarding, downloads a model, opens a listener or enables an autonomy service. Run `rein setup` in the VM to select those options. Keep the small helper separate from foreground model serving and use Rein's existing budgets and approvals.
+
+## Rain theme
+
+```sh
+rein os rain --static
+rein os rain --animate
+REIN_REDUCED_MOTION=1 rein os rain --animate
+```
+
+`rein os rain` defaults to a plain static terminal preview. `--animate` explicitly starts sparse rain in the current interactive terminal at eight frames per second. It requires a TTY for both input and output; q or Ctrl-C restores the previous screen and input mode. The preview adapts to terminal resizing and uses no services, models, network calls or saved configuration. It is decorative and does not indicate agent activity.
+
+Set `REIN_REDUCED_MOTION=1` to keep the preview static even when `--animate` is requested. `NO_COLOR` removes palette color from animation. Static output always contains plain text, making it suitable for pipes and logs.
+
+The exported kit includes checksum-verified [theme metadata](../src/os/assets/rain/theme.json) and a [static 1920×1080 wallpaper](../src/os/assets/rain/wallpaper.svg). Both use the field guide's cream, rust, amber, green and ink palette. The overlay stages these files under `~/.local/share/rein-os/src/os/assets/rain/` when installed in the target VM. Existing Omarchy themes and desktop preferences are preserved.
+
+These assets are the basis for a future desktop theme. This stage does not activate an Omarchy theme, install an animated wallpaper, or add a boot animation. Desktop selection, reduced motion, reboot persistence and recovery still require validation against the actual Omarchy target.
 
 ## Gates to a distributable OS
 

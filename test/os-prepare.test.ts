@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, access } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, access, rename } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { prepareReinOS } from "../src/os/prepare.ts";
+import { OS_THEME_FILES, prepareReinOS } from "../src/os/prepare.ts";
 const exec = promisify(execFile);
 
 async function fixture(t: any) {
@@ -15,6 +16,8 @@ async function fixture(t: any) {
 	const root = join(base, "source");
 	await mkdir(join(root, "dist"), { recursive: true });
 	await mkdir(join(root, "vendor/meat"), { recursive: true });
+	await mkdir(join(root, "src/os/assets/rain"), { recursive: true });
+	for (const path of OS_THEME_FILES) await writeFile(join(root, path), await readFile(new URL(`../${path}`, import.meta.url)));
 	await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.2.3", secret: "must-not-export" }));
 	await writeFile(join(root, "dist/rein.js"), 'console.log("fixture-rein", process.argv.slice(2).join("|"));\n');
 	await writeFile(join(root, "dist/meat-worker.js"), "// fixture worker\n");
@@ -41,6 +44,8 @@ test("export produces an offline verifiable overlay, not a bootable image", asyn
 	const readme = await readFile(join(f.output, "README.md"), "utf8");
 	assert.match(readme, /```sh/);
 	assert.match(readme, /not a bootable image/);
+	assert.match(readme, /rein os rain --animate/);
+	assert.match(readme, /never selects a wallpaper/);
 });
 
 test("existing outputs and payload symlinks are never overwritten or followed", async t => {
@@ -113,6 +118,8 @@ test("bootstrap installs only fixture user files, starts a valid launcher, and p
 	await mkdir(join(user, ".rein"));
 	await writeFile(join(user, ".local/share/omarchy/version"), "4.0.2\n");
 	await writeFile(join(user, ".rein/config.json"), "preserve-me");
+	await mkdir(join(user, ".config/omarchy/themes/existing"), { recursive: true });
+	await writeFile(join(user, ".config/omarchy/themes/existing/theme.json"), "existing-desktop-theme");
 	const runner = join(f.base, "fixture-runner.mjs");
 	// Synthetic platform applies only in this test process. The shipped installer has no override flag.
 	await writeFile(runner, `Object.defineProperty(process,'platform',{value:'linux'}); Object.defineProperty(process,'arch',{value:'x64'}); process.getuid=()=>1000; const {main}=await import(${JSON.stringify(pathToFileURL(join(f.output, "install-overlay.mjs")).href)}); await main(process.argv.slice(2));`);
@@ -122,5 +129,30 @@ test("bootstrap installs only fixture user files, starts a valid launcher, and p
 	const launcher = join(user, ".local/bin/rein");
 	assert.match((await exec(process.execPath, [launcher, "--version"], { env })).stdout, /fixture-rein --version/);
 	assert.equal(await readFile(join(user, ".rein/config.json"), "utf8"), "preserve-me");
+	assert.equal(await readFile(join(user, ".config/omarchy/themes/existing/theme.json"), "utf8"), "existing-desktop-theme");
+	for (const path of OS_THEME_FILES) assert.deepEqual(await readFile(join(user, ".local/share/rein-os", path)), await readFile(join(f.root, path)));
 	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
+});
+
+test("rain assets are required hashed payloads and same-size tampering is rejected", async t => {
+	const f = await fixture(t), result = await prepareReinOS({ output: f.output, bundleRoot: f.root });
+	for (const path of OS_THEME_FILES) {
+		const data = await readFile(join(f.output, "payload", path));
+		assert.deepEqual(result.manifest.files.find(entry => entry.path === path), { path, bytes: data.length, sha256: createHash("sha256").update(data).digest("hex") });
+	}
+	const wallpaper = join(f.output, "payload", OS_THEME_FILES[1]), before = await readFile(wallpaper, "utf8");
+	await writeFile(wallpaper, before.replace(/#[a-f0-9]{6}/i, "#000000"));
+	await assert.rejects(exec(process.execPath, [join(f.output, "install-overlay.mjs"), "--verify"]), /Payload checksum mismatch/);
+	await writeFile(wallpaper, before);
+	const manifestPath = join(f.output, "manifest.json");
+	result.manifest.files = result.manifest.files.filter(entry => entry.path !== OS_THEME_FILES[1]);
+	await writeFile(manifestPath, JSON.stringify(result.manifest));
+	await assert.rejects(exec(process.execPath, [join(f.output, "install-overlay.mjs"), "--verify"]), /Required payload missing/);
+});
+
+test("theme directories cannot redirect export through a symlink", async t => {
+	const f = await fixture(t), directory = join(f.root, "src/os/assets/rain"), target = join(f.base, "other-rain");
+	await rename(directory, target); await symlink(target, directory, "dir");
+	await assert.rejects(prepareReinOS({ output: f.output, bundleRoot: f.root }), /ordinary payload directories/);
+	await assert.rejects(access(f.output));
 });

@@ -56,7 +56,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 			plan.sources.push("https://learn.microsoft.com/en-us/windows/wsl/install");
 		}
 		plan.gates.push(
-			{ id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No Rein host adapter is defined for this OS and architecture." },
+			{ id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No rein-dərāchō host adapter is defined for this OS and architecture." },
 			{ id: "runtime", status: "required", detail: "Check driver/runtime versions and available memory; benchmark the selected model with its real context and tool protocol." },
 			{ id: "autonomy", status: "required", detail: "Configure the headless helper and resource limits before explicitly enabling its user service." },
 		);
@@ -66,7 +66,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 		plan.status = candidate ? "candidate" : "unsupported";
 		plan.adapter = "omarchy-x86_64-vm-overlay";
 		plan.runtimes = ["llama.cpp", "existing OpenAI-compatible server", "vLLM after GPU validation"];
-		plan.facts.push("The preparation command exports a Rein overlay for an installed Omarchy VM. It does not build a bootable ISO or certify this machine for installation.");
+		plan.facts.push("The preparation command exports a rein-dərāchō overlay for an installed Omarchy VM. It does not build a bootable ISO or certify this machine for installation.");
 		plan.facts.push(`The reviewed Omarchy base is ${OMARCHY_BASE.tag} (${OMARCHY_BASE.commit}). Its supported installation starts with the upstream ISO.`);
 		if (!candidate) {
 			plan.facts.push(apple ? "Omarchy does not directly support M-series Macs. Native macOS is the current path; a Linux port depends on model-specific Asahi support." : "This preparation path targets x86-64 PCs and VMs. No image target is defined for this OS and architecture.");
@@ -76,7 +76,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 		plan.gates.push(
 			{ id: "hardware", status: "required", detail: "Verify the target's firmware boot mode, graphics, storage, network, input devices, and upstream hardware support. CPU architecture alone is insufficient." },
 			{ id: "media", status: "required", detail: "Acquire and verify the upstream installation ISO separately. The source commit pins reviewed code, not an ISO checksum." },
-			{ id: "vm", status: "required", detail: "Install Omarchy in a disposable x86-64 VM using its wizard and only that VM's virtual disk, then apply and test the Rein overlay." },
+			{ id: "vm", status: "required", detail: "Install Omarchy in a disposable x86-64 VM using its wizard and only that VM's virtual disk, then apply and test the rein-dərāchō overlay." },
 			{ id: "migration", status: "required", detail: "Before any physical-machine installation, review backups, recovery, exact target disk, encryption, and owner approval in a separate installer." },
 		);
 		plan.sources.push(OMARCHY_BASE.installation, OMARCHY_BASE.macSupport, OMARCHY_BASE.unattended);
@@ -88,7 +88,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 
 export function formatReinOSPlan(plan: ReinOSPlan): string {
 	return [
-		`Rein OS ${plan.mode}: ${plan.status} (${plan.platform.os}/${plan.platform.arch})`,
+		`rein-dərāchō ${plan.mode}: ${plan.status} (${plan.platform.os}/${plan.platform.arch})`,
 		`Adapter: ${plan.adapter}`,
 		...(plan.runtimes.length ? [`Runtime candidates: ${plan.runtimes.join(", ")}`] : []),
 		...plan.facts.map(fact => `- ${fact}`),

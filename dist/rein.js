@@ -5176,7 +5176,7 @@ function planReinOS(profile, options = {}) {
       plan.sources.push("https://learn.microsoft.com/en-us/windows/wsl/install");
     }
     plan.gates.push(
-      { id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No Rein host adapter is defined for this OS and architecture." },
+      { id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No rein-d\u0259r\u0101ch\u014D host adapter is defined for this OS and architecture." },
       { id: "runtime", status: "required", detail: "Check driver/runtime versions and available memory; benchmark the selected model with its real context and tool protocol." },
       { id: "autonomy", status: "required", detail: "Configure the headless helper and resource limits before explicitly enabling its user service." }
     );
@@ -5186,7 +5186,7 @@ function planReinOS(profile, options = {}) {
     plan.status = candidate ? "candidate" : "unsupported";
     plan.adapter = "omarchy-x86_64-vm-overlay";
     plan.runtimes = ["llama.cpp", "existing OpenAI-compatible server", "vLLM after GPU validation"];
-    plan.facts.push("The preparation command exports a Rein overlay for an installed Omarchy VM. It does not build a bootable ISO or certify this machine for installation.");
+    plan.facts.push("The preparation command exports a rein-d\u0259r\u0101ch\u014D overlay for an installed Omarchy VM. It does not build a bootable ISO or certify this machine for installation.");
     plan.facts.push(`The reviewed Omarchy base is ${OMARCHY_BASE.tag} (${OMARCHY_BASE.commit}). Its supported installation starts with the upstream ISO.`);
     if (!candidate) {
       plan.facts.push(apple ? "Omarchy does not directly support M-series Macs. Native macOS is the current path; a Linux port depends on model-specific Asahi support." : "This preparation path targets x86-64 PCs and VMs. No image target is defined for this OS and architecture.");
@@ -5196,7 +5196,7 @@ function planReinOS(profile, options = {}) {
     plan.gates.push(
       { id: "hardware", status: "required", detail: "Verify the target's firmware boot mode, graphics, storage, network, input devices, and upstream hardware support. CPU architecture alone is insufficient." },
       { id: "media", status: "required", detail: "Acquire and verify the upstream installation ISO separately. The source commit pins reviewed code, not an ISO checksum." },
-      { id: "vm", status: "required", detail: "Install Omarchy in a disposable x86-64 VM using its wizard and only that VM's virtual disk, then apply and test the Rein overlay." },
+      { id: "vm", status: "required", detail: "Install Omarchy in a disposable x86-64 VM using its wizard and only that VM's virtual disk, then apply and test the rein-d\u0259r\u0101ch\u014D overlay." },
       { id: "migration", status: "required", detail: "Before any physical-machine installation, review backups, recovery, exact target disk, encryption, and owner approval in a separate installer." }
     );
     plan.sources.push(OMARCHY_BASE.installation, OMARCHY_BASE.macSupport, OMARCHY_BASE.unattended);
@@ -5207,7 +5207,7 @@ function planReinOS(profile, options = {}) {
 }
 function formatReinOSPlan(plan) {
   return [
-    `Rein OS ${plan.mode}: ${plan.status} (${plan.platform.os}/${plan.platform.arch})`,
+    `rein-d\u0259r\u0101ch\u014D ${plan.mode}: ${plan.status} (${plan.platform.os}/${plan.platform.arch})`,
     `Adapter: ${plan.adapter}`,
     ...plan.runtimes.length ? [`Runtime candidates: ${plan.runtimes.join(", ")}`] : [],
     ...plan.facts.map((fact) => `- ${fact}`),
@@ -5269,6 +5269,10 @@ async function prepareReinOS(options) {
   const pkg = JSON.parse((await regularFile(join11(root2, "package.json"))).toString("utf8"));
   if (typeof pkg.version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?$/.test(pkg.version)) throw new Error("The Rein package version is invalid.");
   const payload = /* @__PURE__ */ new Map();
+  for (const directory2 of ["src", "src/os", "src/os/assets", "src/os/assets/rain"]) {
+    const stat3 = await lstat3(join11(root2, directory2));
+    if (!stat3.isDirectory() || stat3.isSymbolicLink()) throw new Error("OS theme assets must be in ordinary payload directories without symlinks.");
+  }
   for (const path2 of REQUIRED) payload.set(path2, await regularFile(join11(root2, path2)));
   const visit = async (relative6) => {
     const stat3 = await lstat3(join11(root2, relative6));
@@ -5318,11 +5322,12 @@ async function prepareReinOS(options) {
   }
   return { output, manifest: manifest3, files };
 }
-var REQUIRED, VENDOR, sha, INSTALL_OVERLAY, FETCH_UPSTREAM, KIT_README;
+var OS_THEME_FILES, REQUIRED, VENDOR, sha, INSTALL_OVERLAY, FETCH_UPSTREAM, KIT_README;
 var init_prepare = __esm({
   "src/os/prepare.ts"() {
     init_plan();
-    REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE"];
+    OS_THEME_FILES = ["src/os/assets/rain/theme.json", "src/os/assets/rain/wallpaper.svg"];
+    REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES];
     VENDOR = ["meat", "mattpocock", "ponytail", "unlazy", "obscura", "fold", "pi-posthorse"];
     sha = (data) => createHash4("sha256").update(data).digest("hex");
     INSTALL_OVERLAY = String.raw`import { createHash } from 'node:crypto';
@@ -5369,12 +5374,12 @@ async function verifyPayload() {
     if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
     result.push([entry.path, data]);
   }
-  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg']) if (!seen.has(name)) fail('Required payload missing: ' + name);
   return result;
 }
 export async function main(args) {
   if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-overlay.mjs --verify | --check | --install');
-  if (args[0] === '--help') { console.log('Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
+  if (args[0] === '--help') { console.log('rein-dərāchō overlay. Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = homedir();
@@ -5421,9 +5426,11 @@ try {
   console.log('OMARCHY_SOURCE_PIN_OK');
 } catch(error) { console.error(error.message); process.exitCode = 1; }
 `;
-    KIT_README = `# Rein OS VM overlay kit
+    KIT_README = `# rein-d\u0259r\u0101ch\u014D VM overlay kit
 
 This kit installs the bundled terminal harness into an already installed Omarchy 4.0.2 VM. It is a development payload, not a bootable image or an OS installer. The native Rein klaud desktop package is not included in this first overlay.
+
+rein-d\u0259r\u0101ch\u014D is the OS build's display name. The CLI remains \`rein os\`; existing installation paths and manifest fields remain stable for compatibility.
 
 ## Verify the kit
 
@@ -5450,7 +5457,7 @@ node fetch-upstream.mjs ./omarchy-source
 
 That command downloads the exact Omarchy source revision and checks the result. It does not run upstream scripts or build an ISO. A source checkout alone is not bootable installation media.
 
-## Apply the Rein overlay in the VM
+## Apply the rein-d\u0259r\u0101ch\u014D overlay in the VM
 
 Run without sudo:
 
@@ -5462,6 +5469,17 @@ node install-overlay.mjs --install
 \`\`\`
 
 The installer creates ~/.local/share/rein-os and ~/.local/bin/rein, refusing to overwrite either. Existing ~/.rein configuration, accounts and sessions remain intact. Add ~/.local/bin to PATH if your shell does not already include it. Setup remains interactive; no background inference, cloud account, system service, model, or network listener is enabled by the overlay.
+
+## Rain theme preview
+
+\`\`\`sh
+~/.local/bin/rein os rain --static
+~/.local/bin/rein os rain --animate
+\`\`\`
+
+Animation runs only in the current interactive terminal, at eight frames per second. Press q or Ctrl-C to restore the screen and input mode. REIN_REDUCED_MOTION=1 keeps even an animated request static; NO_COLOR disables ANSI palette colors. The default preview and --static are plain text and work in pipes.
+
+The verified payload includes src/os/assets/rain/theme.json and wallpaper.svg, with the field guide's cream, rust, amber and forest-green palette. The wallpaper is a static 1920-by-1080 SVG. After installation these files live under ~/.local/share/rein-os/src/os/assets/rain/. They provide a theme basis for later desktop integration; this installer never selects a wallpaper, changes terminal preferences, writes Omarchy theme settings, or installs an animated desktop background.
 
 ## Acceptance gates before making a reusable image
 
@@ -5478,6 +5496,126 @@ For a physical-machine release, separately validate exact hardware, boot firmwar
   }
 });
 
+// src/os/rain.ts
+function rainFrame(options = {}) {
+  const width = bound(options.width, 80, 160), height = bound(options.height, 22, 48);
+  const frame = Number.isSafeInteger(options.frame) && options.frame >= 0 ? options.frame : 0;
+  const rows = Array.from({ length: height }, () => Array(width).fill(" "));
+  const label = (row, text) => {
+    if (row >= height) return;
+    const clipped = text.slice(0, width), left = Math.max(0, Math.floor((width - clipped.length) / 2));
+    for (let column = 0; column < width; column++) rows[row][column] = column >= left && column < left + clipped.length ? clipped[column - left] : " ";
+  };
+  for (let column = 2; column < width - 2; column += 4) {
+    const length = 2 + column % 4, travel = height + length + 8;
+    const head = (Math.floor(frame / (1 + column % 3)) + column * 7) % travel - length;
+    for (let tail = 0; tail < length; tail++) {
+      const row = head - tail;
+      if (row > 1 && row < height - 2) rows[row][column] = tail === 0 ? ":" : ".";
+    }
+  }
+  label(0, "rein-d\u0259r\u0101ch\u014D / RAIN FIELD");
+  label(1, "-".repeat(Math.min(32, width)));
+  if (height >= 10) {
+    label(Math.floor(height / 2) - 1, "FRESH CONTEXT.");
+    label(Math.floor(height / 2), "SAME JOURNEY.");
+  }
+  label(height - 1, options.animated ? "RAIN PREVIEW / q or Ctrl-C to leave" : "STATIC PREVIEW / rein os rain --animate");
+  return rows.map((row, index) => {
+    const text = row.join("");
+    if (!options.color) return text;
+    if (index < 2) return background + foreground2(RAIN_PALETTE.rust) + text;
+    if (index === height - 1) return background + foreground2(RAIN_PALETTE.amber) + text;
+    return background + foreground2(RAIN_PALETTE.cream) + text.replace(/[:.]/g, (character) => foreground2(character === ":" ? RAIN_PALETTE.amber : RAIN_PALETTE.green) + character + foreground2(RAIN_PALETTE.cream));
+  }).join("\n") + (options.color ? `${ESC}0m` : "");
+}
+async function previewRain(options = {}, io = {}) {
+  if (options.animate !== void 0 && typeof options.animate !== "boolean" || options.static !== void 0 && typeof options.static !== "boolean") throw new Error("Rain options --animate and --static are boolean flags.");
+  if (options.animate && options.static) throw new Error("Choose --animate or --static, not both.");
+  const input = io.input ?? process.stdin, output = io.output ?? process.stdout, env = io.env ?? process.env;
+  const reducedMotion = /^(1|true)$/i.test(env.REIN_REDUCED_MOTION ?? "");
+  if (io.signal?.aborted) return;
+  if (!options.animate || reducedMotion) {
+    output.write(rainFrame({ width: output.isTTY ? Math.max(1, (output.columns || 81) - 1) : 80 }) + "\n");
+    return;
+  }
+  if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function" || env.TERM === "dumb") throw new Error("Rain animation needs an interactive terminal. Use rein os rain --static for pipes or reduced motion.");
+  const wasRaw = input.isRaw, wasFlowing = input.readableFlowing === true;
+  await new Promise((resolve38, reject) => {
+    let timer, finished = false, entered = false, raw = false, frame = 0;
+    const finish = (error) => {
+      if (finished) return;
+      finished = true;
+      if (timer) clearInterval(timer);
+      input.off("data", key);
+      input.off("end", stop);
+      input.off("error", fail);
+      output.off("error", fail);
+      output.off("close", stop);
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+      process.off("SIGHUP", stop);
+      io.signal?.removeEventListener("abort", stop);
+      try {
+        if (entered && !output.destroyed) output.write(`${ESC}0m${ESC}?25h${ESC}?1049l`);
+      } catch {
+      }
+      try {
+        if (raw) input.setRawMode(wasRaw);
+        if (wasFlowing) input.resume();
+        else input.pause();
+      } catch (restoreError) {
+        error ??= restoreError;
+      }
+      error ? reject(error) : resolve38();
+    };
+    const stop = () => finish();
+    const fail = (error) => finish(error);
+    const key = (chunk) => {
+      if (/[qQ\x03]/.test(chunk.toString())) stop();
+    };
+    const draw = () => {
+      if (output.writableNeedDrain) return;
+      try {
+        output.write(`${ESC}H` + rainFrame({ width: Math.max(1, (output.columns || 81) - 1), height: Math.max(1, (output.rows || 25) - 1), frame: frame++, color: env.NO_COLOR === void 0, animated: true }).replace(/\n/g, "\r\n") + `${ESC}J`);
+      } catch (error) {
+        finish(error);
+      }
+    };
+    try {
+      input.on("data", key);
+      input.on("end", stop);
+      input.on("error", fail);
+      output.on("error", fail);
+      output.on("close", stop);
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+      process.on("SIGHUP", stop);
+      io.signal?.addEventListener("abort", stop, { once: true });
+      input.setRawMode(true);
+      raw = true;
+      input.resume();
+      entered = true;
+      output.write(`${ESC}?1049h${ESC}?25l${ESC}2J`);
+      draw();
+      if (!finished) timer = setInterval(draw, 125);
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+var RAIN_PALETTE, ESC, rgb, foreground2, background, bound;
+var init_rain = __esm({
+  "src/os/rain.ts"() {
+    RAIN_PALETTE = { cream: "#f5eddc", rust: "#b54229", amber: "#ebbc5c", green: "#284d3d", ink: "#252a25" };
+    ESC = "\x1B[";
+    rgb = (hex) => [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16)).join(";");
+    foreground2 = (hex) => `${ESC}38;2;${rgb(hex)}m`;
+    background = `${ESC}48;2;${rgb(RAIN_PALETTE.ink)}m`;
+    bound = (value, fallback, max) => Number.isFinite(value) ? Math.max(1, Math.min(max, Math.floor(value))) : fallback;
+  }
+});
+
 // src/os/command.ts
 var command_exports2 = {};
 __export(command_exports2, {
@@ -5485,15 +5623,28 @@ __export(command_exports2, {
 });
 async function runOSCommand(args, flags = {}, deps = {}) {
   const log = deps.log ?? console.log, action = args[0] ?? "help";
-  if (args.length > 1) throw new Error("Usage: rein os plan|prepare. Run rein os help.");
+  if (args.length > 1) throw new Error("Usage: rein os plan|prepare|rain. Run rein os help.");
   if (action === "help") {
     if (Object.keys(flags).length) throw new Error("Usage: rein os help");
     log(HELP);
     return;
   }
-  const allowed = action === "plan" ? ["mode", "json"] : action === "prepare" ? ["output", "json"] : [];
+  const allowed = action === "plan" ? ["mode", "json"] : action === "prepare" ? ["output", "json"] : action === "rain" ? ["animate", "static"] : [];
   for (const key of Object.keys(flags)) if (!allowed.includes(key)) throw new Error(`Unsupported OS option --${key}.`);
   if (flags.json !== void 0 && typeof flags.json !== "boolean") throw new Error("--json expects true or false.");
+  if (action === "rain") {
+    const boolean = (name) => {
+      const value = flags[name];
+      if (value === void 0) return void 0;
+      if (value === true || value === "true") return true;
+      if (value === false || value === "false") return false;
+      throw new Error(`--${name} expects true or false.`);
+    };
+    const animate = boolean("animate"), still = boolean("static");
+    if (animate && still) throw new Error("Choose --animate or --static, not both.");
+    await (deps.rain ?? previewRain)({ animate, static: still });
+    return;
+  }
   if (action === "plan") {
     const mode = flags.mode ?? "host";
     if (mode !== "host" && mode !== "image") throw new Error("--mode must be host or image.");
@@ -5504,7 +5655,7 @@ async function runOSCommand(args, flags = {}, deps = {}) {
   if (action === "prepare") {
     if (typeof flags.output !== "string" || !flags.output.trim() || /[\x00-\x1f\x7f]/.test(flags.output)) throw new Error("--output requires a new directory path.");
     const kit = await (deps.prepare ?? prepareReinOS)({ output: flags.output });
-    log(flags.json === true ? JSON.stringify(kit, null, 2) : `Prepared Rein OS VM kit: ${kit.output}
+    log(flags.json === true ? JSON.stringify(kit, null, 2) : `Prepared rein-d\u0259r\u0101ch\u014D VM kit: ${kit.output}
 Follow its README before booting or installing a VM. No operating system or service was changed.`);
     return;
   }
@@ -5516,13 +5667,17 @@ var init_command2 = __esm({
     init_profile();
     init_plan();
     init_prepare();
-    HELP = `Rein OS development
+    init_rain();
+    HELP = `rein-d\u0259r\u0101ch\u014D development
 
   rein os plan [--mode host|image] [--json]   assess this machine and show installation gates
   rein os prepare --output <new-directory>  stage a pinned Omarchy VM overlay kit
+  rein os rain [--static | --animate]        preview the rain motif in this terminal
 
 Plan is read-only. Prepare writes only the chosen new kit directory. It does not
 partition disks, install an operating system or enable a background service.
+Rain is static by default; --animate requires a TTY. q or Ctrl-C restores the screen.
+REIN_REDUCED_MOTION=1 keeps the preview still. No desktop theme is activated.
 Use the kit's instructions on a disposable VM before testing physical hardware.`;
   }
 });
@@ -12960,12 +13115,12 @@ function checkedRun2(options, command) {
   const result = run3(options, command);
   if (result.status !== 0 || result.error) throw new Error(`${command[0]} ${command.slice(1).join(" ")} failed: ${String(result.error?.message || result.stderr || result.stdout || `exit ${result.status}`).trim().slice(0, 1e3)}. You can run rein autonomy daemon in the foreground.`);
 }
-function foreground2() {
+function foreground3() {
   return { manager: "foreground", path: "", installed: false, active: false, message: "This platform has no supported user-service manager. Run rein autonomy daemon in the foreground." };
 }
 function serviceStatus(options) {
   const plan = servicePlan(options);
-  if (plan.manager === "foreground") return foreground2();
+  if (plan.manager === "foreground") return foreground3();
   const installed = ownedContent2(plan.path, options) !== void 0;
   if (!installed) return { manager: plan.manager, path: plan.path, installed, active: false, message: "Autonomy service is not installed." };
   const cfg = configuration2(options);
@@ -12990,7 +13145,7 @@ async function waitForService(options, initial, polling = {}) {
 }
 function installService(options) {
   const plan = servicePlan(options);
-  if (plan.manager === "foreground") return foreground2();
+  if (plan.manager === "foreground") return foreground3();
   const cfg = configuration2(options);
   const previous = ownedContent2(plan.path, options);
   prepareDirectory2(dirname18(plan.path), cfg.userHome);
@@ -13017,7 +13172,7 @@ function installService(options) {
 }
 function uninstallService(options) {
   const plan = servicePlan(options);
-  if (plan.manager === "foreground") return foreground2();
+  if (plan.manager === "foreground") return foreground3();
   const previous = ownedContent2(plan.path, options);
   if (previous === void 0) return { manager: plan.manager, path: plan.path, installed: false, active: false, message: "Autonomy service is not installed." };
   const result = run3(options, plan.uninstallCommands[0]);
