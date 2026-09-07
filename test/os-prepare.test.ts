@@ -156,3 +156,66 @@ test("theme directories cannot redirect export through a symlink", async t => {
 	await assert.rejects(prepareReinOS({ output: f.output, bundleRoot: f.root }), /ordinary payload directories/);
 	await assert.rejects(access(f.output));
 });
+
+test("the ChromeOS kit exports a userland installer, not the Omarchy fetch", async t => {
+	const f = await fixture(t), output = join(f.base, "kit-cros");
+	const kit = await prepareReinOS({ output, bundleRoot: f.root, target: "chromeos" });
+	assert.equal(kit.manifest.kind, "chromeos-user-overlay");
+	assert.equal(kit.manifest.target, "chromeos");
+	assert.equal(kit.manifest.omarchy, undefined);
+	assert.ok(kit.files.includes("install-chromeos.mjs"));
+	assert.ok(!kit.files.includes("install-overlay.mjs"));
+	assert.ok(!kit.files.includes("fetch-upstream.mjs"));
+	const manifest = JSON.parse(await readFile(join(output, "manifest.json"), "utf8"));
+	assert.equal(manifest.kind, "chromeos-user-overlay");
+	assert.equal(manifest.target, "chromeos");
+	assert.ok((await readFile(join(output, "README.md"), "utf8")).includes("chronos"));
+});
+
+test("the ChromeOS target check rejects foreign platforms and non-ChromeOS releases", async t => {
+	const f = await fixture(t), output = join(f.base, "kit-cros-check");
+	await prepareReinOS({ output, bundleRoot: f.root, target: "chromeos" });
+	const { validateTarget } = await import(pathToFileURL(join(output, "install-chromeos.mjs")).href);
+	assert.doesNotThrow(() => validateTarget("linux", "NAME=Chrome OS\nID=chromeos\nCROS_RELEASE=132.0.0.0\n"));
+	assert.doesNotThrow(() => validateTarget("linux", "CROS_RELEASE=132.0.0.0\n"));
+	assert.throws(() => validateTarget("linux", "PRETTY_NAME=\"Ubuntu 24.04\"\n"), /ChromeOS/);
+	assert.throws(() => validateTarget("darwin", "ID=chromeos\n"), /linux/);
+	assert.throws(() => validateTarget("linux", ""), /ChromeOS/);
+});
+
+test("the ChromeOS bootstrap installs chronos user files only, and preserves user data", async t => {
+	const f = await fixture(t), output = join(f.base, "kit-cros-install");
+	await prepareReinOS({ output, bundleRoot: f.root, target: "chromeos" });
+	const user = join(f.base, "home/chronos/user/1000");
+	await mkdir(join(user, ".local/share"), { recursive: true });
+	await mkdir(join(user, "Documents"), { recursive: true });
+	await writeFile(join(user, ".local/share/myfiles-marker"), "user-data");
+	await writeFile(join(user, "Documents/note.md"), "preserve-me");
+	const osRelease = join(f.base, "os-release.txt");
+	await writeFile(osRelease, "NAME=Chrome OS\nID=chromeos\nCROS_RELEASE=132.0.6834.0\n");
+	const runner = join(f.base, "cros-runner.mjs");
+	// Synthetic platform applies only in this test process. The shipped installer has no override flag.
+	await writeFile(runner, `Object.defineProperty(process,'platform',{value:'linux'}); const {main}=await import(${JSON.stringify(pathToFileURL(join(output, "install-chromeos.mjs")).href)}); await main(process.argv.slice(2));`);
+	const env = { ...process.env, HOME: user, USERPROFILE: user, REIN_OS_OSRELEASE: osRelease };
+	assert.match((await exec(process.execPath, [runner, "--check"], { env })).stdout, /REIN_OS_TARGET_READY/);
+	assert.match((await exec(process.execPath, [runner, "--install"], { env })).stdout, /REIN_OS_CHROMEOS_INSTALLED/);
+	const launcher = join(user, ".local/bin/rein");
+	assert.match((await exec(process.execPath, [launcher, "--version"], { env })).stdout, /fixture-rein --version/);
+	assert.equal(await readFile(join(user, "Documents/note.md"), "utf8"), "preserve-me");
+	assert.equal(await readFile(join(user, ".local/share/myfiles-marker"), "utf8"), "user-data");
+	for (const path of OS_THEME_FILES) assert.deepEqual(await readFile(join(user, ".local/share/rein-os", path)), await readFile(join(f.root, path)));
+	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
+});
+
+test("a non-chronos home is refused by the ChromeOS bootstrap", async t => {
+	const f = await fixture(t), output = join(f.base, "kit-cros-home");
+	await prepareReinOS({ output, bundleRoot: f.root, target: "chromeos" });
+	const user = join(f.base, "plain-user");
+	await mkdir(user, { recursive: true });
+	const osRelease = join(f.base, "os-release2.txt");
+	await writeFile(osRelease, "ID=chromeos\n");
+	const runner = join(f.base, "cros-runner2.mjs");
+	await writeFile(runner, `Object.defineProperty(process,'platform',{value:'linux'}); const {main}=await import(${JSON.stringify(pathToFileURL(join(output, "install-chromeos.mjs")).href)}); await main(process.argv.slice(2));`);
+	const env = { ...process.env, HOME: user, USERPROFILE: user, REIN_OS_OSRELEASE: osRelease };
+	await assert.rejects(exec(process.execPath, [runner, "--check"], { env }), /chronos/);
+});

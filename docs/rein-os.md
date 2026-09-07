@@ -1,6 +1,6 @@
 # Dareecho development
 
-Dareecho has two preparation paths: retain the computer's OS and set up a local model host, or prepare a Rein harness payload for an Omarchy VM. The first implementation provides platform plans and a runnable terminal overlay. Bootable Dareecho media, physical disk migration, and a fully integrated Linux desktop remain later build gates.
+Dareecho has three preparation paths: retain the computer's OS and set up a local model host, prepare a Rein harness payload for an Omarchy VM, or stage a userland kit for ChromeOS. The first implementation provides platform plans and runnable terminal overlays. Bootable Dareecho media, physical disk migration, a fully integrated Linux desktop, and a ChromeOS rootfs image remain later build gates.
 
 Dareecho is the OS build's display name. The stable CLI is `rein os`, development stays on `codex/rein-os`, and existing filesystem paths and manifest fields keep their names for compatibility.
 
@@ -11,6 +11,9 @@ rein os plan --mode host
 rein os plan --mode image --json
 rein os prepare --output ./rein-os-kit
 node ./rein-os-kit/install-overlay.mjs --verify
+
+rein os prepare --output ./rein-os-kit-cros --target chromeos
+node ./rein-os-kit-cros/install-chromeos.mjs --verify
 ```
 
 Planning reads the hardware profile. Preparing writes only the new output directory and includes the current installed Rein bundle. Both preserve the running computer's operating system, services, accounts, and configuration. The output must not already exist; missing bundles require `npm run bundle` in a source checkout first.
@@ -24,6 +27,7 @@ Planning reads the hardware profile. Preparing writes only the new output direct
 | Linux x86-64 | Native harness; Omarchy VM overlay as a separate target | Distribution dependencies, graphics/compute drivers and model runtime |
 | Linux ARM64 | Native harness and a supported runtime | Hardware-specific Linux support; no Omarchy image from this kit |
 | Windows x86-64/ARM64 | Windows remains installed; full terminal execution in WSL2 | WSL2 distribution, Bash/tmux and any GPU forwarding |
+| ChromeOS (x86-64/ARM64) | Chronos userland overlay; the verified root and A/B partitions stay untouched | Developer mode, the arc shell, Node 18+ inside it, and an A/B-update survival test |
 
 Candidate means a path exists to validate. It does not mean Rein detected working firmware, drivers, model acceleration, or all dependencies. Omarchy's [Mac guide](https://github.com/omacom/omarchy/blob/v4.0.2/manual/44-mac-support.md) has specific Intel Mac limitations and does not directly support M-series machines. Apple Silicon Linux would require a separate port against [Asahi's model-specific support matrix](https://asahilinux.org/docs/platform/feature-support/overview/). The Windows backend follows [Microsoft's WSL installation path](https://learn.microsoft.com/en-us/windows/wsl/install).
 
@@ -36,6 +40,12 @@ The supported base flow is the [upstream ISO installer](https://github.com/omaco
 After the VM boots into Omarchy 4.0.2, copy the kit into it. Its `--check` validates the platform, installed base version and empty destinations. Its explicit `--install` creates `~/.local/share/rein-os` and `~/.local/bin/rein` as the desktop user. It refuses to overwrite an existing installation or launcher and leaves `~/.rein` untouched. The generated README contains commands and acceptance gates. Payload hashes detect modification; they do not authenticate a publisher.
 
 The overlay never starts onboarding, downloads a model, opens a listener or enables an autonomy service. Run `rein setup` in the VM to select those options. Keep the small helper separate from foreground model serving and use Rein's existing budgets and approvals.
+
+### The ChromeOS kit
+
+`rein os prepare --target chromeos --output <new-directory>` stages the same verified payload for a ChromeOS user account. Its installer, `install-chromeos.mjs`, confirms the machine identifies as ChromeOS through `/etc/os-release` (`ID=chromeos` or `CROS_RELEASE`) and that it runs as the chronos user, then creates `~/.local/share/rein-os` and `~/.local/bin/rein` in that home, refusing to overwrite either. It never touches the verified (dm-verity) root, the A/B partitions, or Chrome settings. `REIN_OS_OSRELEASE` overrides the os-release path so the kit can be exercised on a non-ChromeOS staging host.
+
+ChromeOS reports as `linux` to the harness; `rein os plan` detects it on the host and reports the `chromeos-userland` adapter with developer-mode and backup gates. Rootfs replacement on ChromeOS is image-level work (coreboot and `chromeos-image` territory) and is not what this kit claims.
 
 ## Rain theme
 

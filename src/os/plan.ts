@@ -24,13 +24,14 @@ export interface ReinOSPlan {
 	sources: string[];
 }
 
-export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | "image" } = {}): ReinOSPlan {
+export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | "image"; chromeos?: boolean } = {}): ReinOSPlan {
 	if (!profile || typeof profile.os !== "string" || typeof profile.arch !== "string" ||
 		!Array.isArray(profile.gpus) || !profile.gpus.every(gpu => gpu && typeof gpu === "object")) {
 		throw new Error("A hardware profile with OS, architecture, and GPUs is required.");
 	}
 	const mode = options.mode ?? "host";
 	if (mode !== "host" && mode !== "image") throw new Error("OS mode must be host or image.");
+	const chromeos = options.chromeos === true;
 	const platform = { os: profile.os, arch: profile.arch };
 	const recognized = ["darwin", "linux", "win32"].includes(profile.os) && ["x64", "arm64"].includes(profile.arch);
 	const apple = profile.os === "darwin" && profile.arch === "arm64";
@@ -54,6 +55,17 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 			plan.facts.push("The full terminal harness needs Bash and tmux. WSL2 is the planned execution backend; its presence and GPU forwarding are unverified.");
 			plan.gates.push({ id: "wsl2", status: "required", detail: "Confirm WSL2 and a Linux distribution, then run Rein's hardware and connection checks inside that distribution." });
 			plan.sources.push("https://learn.microsoft.com/en-us/windows/wsl/install");
+		}
+		if (chromeos && profile.os === "linux") {
+			plan.adapter = "chromeos-userland";
+			plan.facts.push("ChromeOS reports as linux to the harness. The overlay installs only into the chronos user's home; the verified (dm-verity) root and A/B partitions stay untouched.");
+			plan.facts.push("ChromeOS user data (My Files) lives under /home/chronos/user/<id>; export it with rein export before any OS-level change.");
+			plan.gates.push(
+				{ id: "developer-mode", status: "required", detail: "Enable developer mode and confirm the arc shell with a Node 18+ environment inside it." },
+				{ id: "backup", status: "required", detail: "Run rein export presets (or rein export browse) to an external drive before any OS-level change." },
+			);
+			plan.sources.push("https://chromium.googlesource.com/chromiumos/docs/+/HEAD/developer_mode.md");
+			plan.next = ["rein export presets --to <external-drive>", "rein os prepare --target chromeos --output ./rein-os-kit"];
 		}
 		plan.gates.push(
 			{ id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No Dareecho host adapter is defined for this OS and architecture." },

@@ -37,6 +37,23 @@ test("Windows planning requires validation inside WSL2", () => {
 	}
 });
 
+test("ChromeOS planning uses the userland adapter and gates developer mode and backup", () => {
+	for (const arch of ["x64", "arm64"]) {
+		const plan = planReinOS(profile("linux", arch), { chromeos: true });
+		assert.equal(plan.status, "candidate");
+		assert.equal(plan.adapter, "chromeos-userland");
+		assert.ok(plan.gates.some(gate => gate.id === "developer-mode" && gate.status === "required"));
+		assert.ok(plan.gates.some(gate => gate.id === "backup" && gate.status === "required"));
+		assert.match(plan.facts.join(" "), /dm-verity/);
+		assert.match(plan.facts.join(" "), /rein export/);
+		assert.match(plan.next.join(" "), /rein os prepare --target chromeos/);
+		assert.ok(plan.sources.some(url => url.includes("chromiumos")));
+	}
+	// The chromeos marker is host-mode only; image mode keeps the Omarchy VM path.
+	assert.equal(planReinOS(profile("linux", "x64"), { mode: "image", chromeos: true }).adapter, "omarchy-x86_64-vm-overlay");
+	assert.equal(planReinOS(profile("darwin", "arm64"), { chromeos: true }).adapter, "macos-native");
+});
+
 test("unknown platforms are unsupported and Linux ARM is host-only", () => {
 	for (const [os, arch] of [["freebsd", "x64"], ["linux", "riscv64"], ["darwin", "ia32"]]) {
 		assert.equal(planReinOS(profile(os, arch)).status, "unsupported");
