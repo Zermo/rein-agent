@@ -30,6 +30,17 @@ Keep changes small and preserve compatibility with self-hosted model APIs.
   are user features; development setup should not start them.
 - Work style preferences are an operator profile, not a clinical assessment.
 - Use existing approval and budget controls for autonomous actions.
+- For UI/UX work, read `design.md` and its Beautiful UI, beUI, Rare UI,
+  Transitions, and shadcn references. Preserve Rein's vintage theme and sounds;
+  animated activity must follow real runtime state and respect reduced motion.
+
+## Development branches
+
+- `codex/rein-cloud-reskin`: Rein Cloud app presentation, interaction, and the
+  backend controls needed by those views.
+- `codex/rein-os`: Dareecho OS overlays, platform planning, and managed model-hosting
+  development. Keep these commands, assets, tests, and generated bundles off the
+  reskin branch. Build each branch's bundle from its own source tree.
 
 ## Public examples and private installations
 

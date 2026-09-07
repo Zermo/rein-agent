@@ -46,6 +46,20 @@ A named four-point scale lives in `tokens.css`. App styles use those names rathe
 - Views use one short opacity and vertical-position reveal.
 - State changes use the three named easing tokens.
 - Reduced motion keeps only opacity changes at 150 ms or less.
+- Typing, thinking, note-writing, and autonomy use distinct terminal signals
+  driven by actual runtime events. Stop the animation when that activity ends.
+  A running daemon alone is not evidence that it is doing autonomy work.
+- Keep phase names readable beside the animation. Decorative frames are hidden
+  from assistive technology; reduced motion shows a static phase symbol.
+- Rain is Rein Cloud's ambient motif: sparse square drops, a pixel cloud, and
+  the established rust/paper/amber palette. Keep it in frame or wallpaper areas,
+  away from reading and input surfaces. Provide an off switch, pause while hidden,
+  and use static rain with reduced motion. Ambient rain does not imply agent work.
+- The OS build is named **Dareecho**. Its intended brand meaning is a window, portal,
+  or metaphorical glimpse into the unknown. Frame the rain around a readable,
+  unobscured working surface.
+  Its rain theme shares Rein-klaud's
+  palette and field-guide artwork; keep the OS name on OS-facing surfaces.
 
 ## Sound
 
@@ -60,6 +74,16 @@ A named four-point scale lives in `tokens.css`. App styles use those names rathe
 - Focus is immediate and visibly outlined.
 - Hover feedback appears only for fine pointers and has a keyboard-focus equivalent.
 - All controls keep a stable one-pixel border and a 44 px target.
+
+### Interaction references
+
+Use [Beautiful UI](https://beautifului.dev), [beUI](https://beui.dev),
+[Rare UI](https://rareui.com), [Transitions](https://transitions.dev), and
+[shadcn/ui](https://ui.shadcn.com) as references for control behavior, accessible
+disclosure, and restrained motion. Adapt useful patterns to Rein's square field
+controls, paper surfaces, hard rules, and existing sound cues. Keep the palette,
+typography, and reduced-motion behavior above; a reference is not a new theme or
+a reason to add a component dependency.
 
 ## Navigation and control voice
 

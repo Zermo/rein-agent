@@ -430,6 +430,12 @@ for findings, fixes, and limitations. Both upstreams are pinned under `vendor/`;
 
 ### Host models on your own hardware
 
+Rein now has an explicit [managed model workflow](docs/managed-models.md) for pinned
+GGUF downloads, integrity checks, headless serving, and scoped background services.
+Start with `rein model help`. Existing server discovery remains `rein models`.
+The [Dareecho development kit](docs/rein-os.md) prepares a verified terminal overlay
+for an Omarchy VM, with separate platform and installation checks.
+
 Rein connects to an OpenAI-compatible Chat Completions server on this computer,
 on another machine in your LAN, or through a mesh VPN such as NetBird or Tailscale.
 Choose a model that fits the serving machine's memory and supports tool use for
