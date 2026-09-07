@@ -52,7 +52,7 @@ test("default runner registers context tools and {} status calls keep native mod
 	let requests = 0;
 	t.mock.method(globalThis, "fetch", async () => requests++ === 0 ? call("get_context_remaining") : reply());
 	const runner = await createRunner(defaults);
-	for (const name of ["new_context", "get_context_remaining", "notes", "history", "bash"]) assert.ok(runner.tools.some(tool => tool.name === name));
+	for (const name of ["new_context", "get_context_remaining", "notes", "history", "bash", "klaud_get_shell", "klaud_patch_shell"]) assert.ok(runner.tools.some(tool => tool.name === name));
 	const messages = await runner.run(user("check status"));
 	assert.equal(runner.toolsMode, "native");
 	assert.ok(messages.some(m => m.role === "toolResult" && !m.isError && m.toolName === "get_context_remaining"));

@@ -64,9 +64,21 @@ curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | 
 ```
 
 Rein runs in the terminal you already use: Ghostty, Terminal, a NodeTerm terminal
-node, or another compatible shell. The installer takes you through setup and,
-when the connection is ready, starts interactive Rein in that same terminal.
-No separate project window or browser activity page is required.
+node, or another compatible shell. On macOS the installer also installs the
+native rein-klaud app and opens it after successful guided setup. On Linux and
+WSL it starts interactive Rein in the current terminal. Neither path requires
+NodeTerm or a browser activity page.
+
+To install only the Mac app from the latest published release, with its own
+runtime and no global Node installation:
+
+```sh
+curl -fsSL https://github.com/Zermo/rein-agent/releases/latest/download/install-macos-app.sh | bash
+```
+
+The app goes into `~/Applications`. Choose **Start local rein serve** in its
+first window. Development releases are ad hoc signed and are not notarized;
+normal macOS approval checks apply. See the [Mac release notes](docs/macos-development-release.md).
 
 Answer six practical questions about your tasks and communication preferences,
 review a suggested workflow pack, then connect a model. You can change answers
@@ -76,7 +88,8 @@ optional follow-ups for a folder you choose and a first task to try.
 Flags after `bash -s --`: `--skip-setup` skips onboarding, model checks, and launch;
 `--yes` runs unattended connection setup without inventing a profile;
 `--no-launch` finishes setup without starting interactive Rein.
-`--terminal-only` explicitly keeps the terminal default. NodeTerm is optional:
+`--no-app` skips the native Mac app; `--app-only` installs just that app.
+`--terminal-only` keeps setup and chat in the current terminal. NodeTerm is optional:
 use `--nodeterm` only when you want its separate native macOS app installed and
 registered. Open it explicitly with `rein desktop open`.
 
@@ -91,6 +104,15 @@ rein desktop status
 The optional NodeTerm installer downloads a verified upstream release on a local
 macOS desktop. See [terminal and desktop integration](docs/nodeterm-desktop.md)
 for supported platforms and native-app limits.
+
+The [rein-klaʊd desktop](docs/klaud.md) adds named bots, saved chat,
+live shell preferences, and approval dialogs over Rein's loopback AG-UI server.
+The Mac app includes the CLI and its runtime. From a development checkout,
+run `npm --prefix apps/klaud ci` once, then `rein klaud`.
+The terminal CLI still has zero runtime dependencies. Ponytail workflows are
+bundled as skill text; `rein train recipe.yaml` can use a separate optional
+Automodel environment. See the desktop guide for setup and limits.
+
 The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM),
 accepts remote hosts, and offers cloud API keys or supported subscription logins.
 It tests API connections and saves `~/.rein/config.json` (or `$REIN_HOME/config.json`).

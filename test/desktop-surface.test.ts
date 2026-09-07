@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { desktopAvailable, preferredSurface, preferSurface, registerRein, REIN_AGENT_ID, shouldOpenDesktop, remoteDesktopSession } from "../src/harness/desktop/surface.ts";
@@ -24,8 +24,11 @@ test("desktop preference does not modify model configuration", () => {
 	const home = mkdtempSync(join(tmpdir(), "rein-desktop-state-"));
 	try {
 		const config = '{"model":"fixture","apiKey":"fixture-only"}\n'; writeFileSync(join(home, "config.json"), config);
-		assert.equal(preferredSurface(home), "terminal");
-		writeFileSync(join(home, "desktop.json"), '{"surface":"invalid"}'); assert.equal(preferredSurface(home), "terminal");
+		assert.equal(preferredSurface(home), "klaud");
+		for (const invalid of ['{"surface":"invalid"}', '{', 'null']) {
+			writeFileSync(join(home, "desktop.json"), invalid); assert.equal(preferredSurface(home), "klaud");
+		}
+		preferSurface("klaud", home); assert.equal(preferredSurface(home), "klaud");
 		preferSurface("terminal", home); assert.equal(preferredSurface(home), "terminal");
 		preferSurface("nodeterm", home); assert.equal(preferredSurface(home), "nodeterm");
 		assert.equal(readFileSync(join(home, "config.json"), "utf8"), config);
@@ -81,5 +84,19 @@ test("registration never rewrites a running app, malformed settings, or a concur
 		await assert.rejects(registerRein({ settingsFile, running: async () => { if (++calls === 2) writeFileSync(settingsFile, '{"concurrent":true}'); return false; } }), /changed during registration/);
 		assert.equal(readFileSync(settingsFile, "utf8"), '{"concurrent":true}');
 		assert.deepEqual(readdirSync(home), ["settings.json"]);
+	} finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("desktop preferences reject ordinary and dangling symlinks without modifying their targets", () => {
+	const home = mkdtempSync(join(tmpdir(), "rein-desktop-symlink-")), file = join(home, "desktop.json"), target = join(home, "target.json");
+	try {
+		writeFileSync(target, '{"surface":"terminal"}');
+		symlinkSync(target, file);
+		assert.throws(() => preferredSurface(home), /symlink/);
+		assert.throws(() => preferSurface("klaud", home), /symlink/);
+		assert.equal(readFileSync(target, "utf8"), '{"surface":"terminal"}');
+		rmSync(target);
+		assert.throws(() => preferredSurface(home), /symlink/);
+		assert.throws(() => preferSurface("klaud", home), /symlink/);
 	} finally { rmSync(home, { recursive: true, force: true }); }
 });

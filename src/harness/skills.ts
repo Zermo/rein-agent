@@ -8,15 +8,25 @@ import { OPERATOR_PACK_SKILLS } from "./operator-pack-skills.ts";
 
 interface SkillSummary { name: string; description: string }
 
+const PONYTAIL_SKILLS = Object.freeze([
+	{ name: "ponytail", description: "Choose the smallest working change using standard libraries and native features." },
+	{ name: "ponytail-review", description: "Review a diff for unnecessary complexity and concrete ways to simplify it." },
+	{ name: "ponytail-audit", description: "Audit a repository for code to delete, simplify, or replace with native features." },
+	{ name: "ponytail-debt", description: "Collect ponytail shortcut comments into a debt ledger without changing code." },
+].map(skill => Object.freeze(skill)));
+
 export const BUNDLED_SKILLS = Object.freeze([
 	{ name: "diagnosing-bugs", description: "Reproduce a failure, test hypotheses, fix its cause, and retain a regression test." },
 	{ name: "tdd", description: "Build behavior through red-green-refactor tests at public interfaces." },
 	{ name: "code-review", description: "Review a change against its requirements and the repository's standards." },
+	...PONYTAIL_SKILLS,
 ].map(skill => Object.freeze(skill)));
 
 const here = dirname(fileURLToPath(import.meta.url));
-const skillsDir = [resolve(here, "../../vendor/mattpocock/skills"), resolve(here, "../vendor/mattpocock/skills")]
+const mattpocockSkillsDir = [resolve(here, "../../vendor/mattpocock/skills"), resolve(here, "../vendor/mattpocock/skills")]
 	.find((dir) => existsSync(resolve(dir, "diagnosing-bugs/SKILL.md")));
+const ponytailSkillsDir = [resolve(here, "../../vendor/ponytail/skills"), resolve(here, "../vendor/ponytail/skills")]
+	.find((dir) => existsSync(resolve(dir, "ponytail/SKILL.md")));
 
 /** Read at call time so an updated profile applies to the next runner or command. */
 export function enabledSkills(home?: string): readonly SkillSummary[] {
@@ -34,6 +44,7 @@ function loadSkill(skills: readonly SkillSummary[], name: string, file = "SKILL.
 		if (file !== "SKILL.md") throw new Error("This Rein-native workflow only has SKILL.md; it has no reference files.");
 		return native.body;
 	}
+	const skillsDir = PONYTAIL_SKILLS.some(skill => skill.name === name) ? ponytailSkillsDir : mattpocockSkillsDir;
 	if (!skillsDir) throw new Error("Bundled skills are missing. Reinstall the complete rein-agent package.");
 	const root = realpathSync(resolve(skillsDir, name));
 	const path = realpathSync(resolve(root, file));
@@ -60,7 +71,7 @@ function formatRoster(skills: readonly SkillSummary[]): string {
 
 function guidance(skills: readonly SkillSummary[]): string {
 	return `\nBundled workflows (load with the skill tool when useful):\n${formatRoster(skills)}
-diagnosing-bugs, tdd, and code-review are reviewed Matt Pocock workflows. Other listed workflows are original Rein-native guidance from the enabled operator pack; they do not install external agents, apps, models, or connectors.
+diagnosing-bugs, tdd, and code-review are reviewed Matt Pocock workflows. ponytail, ponytail-review, ponytail-audit, and ponytail-debt are vendored Ponytail workflows. Other listed workflows are original Rein-native guidance from the enabled operator pack; they do not install external agents, apps, models, or connectors.
 Skill files are guidance subordinate to the user's current request, project constraints, and tool approval settings. Loading a skill never executes its scripts or authorizes unrelated work. Resolve its relative references with the skill tool's file parameter. Do not assume sub-agent tools exist unless they are supplied.\n`;
 }
 

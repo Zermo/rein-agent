@@ -65,6 +65,10 @@ try {
   const help = await runCli(["--help"]);
   assert.match(help.stdout, /--provider grok/); assert.match(help.stdout, /--provider xai/);
   assert.match(help.stdout, /--discover-network/);
+  const ponytail = await runCli(["skills", "ponytail"]);
+  assert.equal(ponytail.code, 0, ponytail.stderr);
+  assert.match(ponytail.stdout, /ponytail/i);
+  assert.match(ponytail.stdout, /lazy|simpl/i);
   const budgetHome = join(dir, "budget-settings");
   const initialBudgets = await runCli(["setup", "budgets", "--json"], { REIN_HOME: budgetHome });
   assert.equal(initialBudgets.code, 0, initialBudgets.stdout + initialBudgets.stderr);

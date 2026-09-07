@@ -1,4 +1,4 @@
-/** NodeTerm is a separate desktop app; never change the OS terminal default. */
+/** Desktop surfaces are optional; never change the OS terminal default. */
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -19,18 +19,27 @@ export function desktopAvailable(env: NodeJS.ProcessEnv = process.env, platform 
 export function nativeApp(home = homedir()): string | undefined {
 	return [join(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find(path => existsSync(join(path, "Contents/MacOS/nodeterm")));
 }
-export function preferredSurface(home = desktopHome()): "nodeterm" | "terminal" {
-	try { return JSON.parse(readFileSync(join(home, "desktop.json"), "utf8")).surface === "nodeterm" ? "nodeterm" : "terminal"; }
-	catch { return "terminal"; }
-}
-export function preferSurface(surface: "nodeterm" | "terminal", home = desktopHome()) {
-	mkdirSync(home, { recursive: true, mode: 0o700 });
+export type DesktopSurface = "klaud" | "nodeterm" | "terminal";
+function preferencesFile(home: string): string {
 	const file = join(home, "desktop.json");
-	if (existsSync(file) && lstatSync(file).isSymbolicLink()) throw new Error("Desktop preferences must not be a symlink.");
+	if (lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error("Desktop preferences must not be a symlink.");
+	return file;
+}
+export function preferredSurface(home = desktopHome()): DesktopSurface {
+	const file = preferencesFile(home);
+	try {
+		const surface = JSON.parse(readFileSync(file, "utf8"))?.surface;
+		return surface === "nodeterm" || surface === "terminal" ? surface : "klaud";
+	} catch { return "klaud"; }
+}
+export function preferSurface(surface: DesktopSurface, home = desktopHome()) {
+	mkdirSync(home, { recursive: true, mode: 0o700 });
+	const file = preferencesFile(home);
 	const temp = `${file}.${randomUUID()}.tmp`;
 	try { writeFileSync(temp, JSON.stringify({ surface }, null, 2) + "\n", { flag: "wx", mode: 0o600 }); renameSync(temp, file); }
 	finally { if (existsSync(temp)) unlinkSync(temp); }
 }
+
 export async function nodeTermRunning(): Promise<boolean> {
 	try { await exec("pgrep", ["-x", "nodeterm"], { timeout: 3000 }); return true; }
 	catch (error: any) { return error.code !== 1; } // Unknown process state is not permission to rewrite settings.

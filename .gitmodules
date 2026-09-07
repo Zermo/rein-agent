@@ -1,0 +1,3 @@
+[submodule "vendor/automodel"]
+	path = vendor/automodel
+	url = https://github.com/NousResearch/Automodel.git

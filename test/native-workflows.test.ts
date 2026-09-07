@@ -7,7 +7,7 @@ import { BUNDLED_SKILLS, readSkill, skillRequest, skillTool } from "../src/harne
 import { analyzeDebugFolder, formatDebugReport } from "../src/harness/debug.ts";
 
 test("native skill references load on demand as text, including inert script templates", async () => {
-	assert.deepEqual(BUNDLED_SKILLS.map(s => s.name), ["diagnosing-bugs", "tdd", "code-review"]);
+	assert.deepEqual(BUNDLED_SKILLS.map(s => s.name), ["diagnosing-bugs", "tdd", "code-review", "ponytail", "ponytail-review", "ponytail-audit", "ponytail-debt"]);
 	assert.match(readSkill("diagnosing-bugs"), /hypotheses/i);
 	assert.match(readSkill("tdd", "tests.md"), /test/i);
 	assert.match(readSkill("diagnosing-bugs", "scripts/hitl-loop.template.sh"), /bash/);

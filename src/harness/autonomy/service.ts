@@ -51,7 +51,10 @@ function configuration(options: ServiceOptions) {
 	const paths = [dirname(nodePath), join(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 	const path = [...new Set(paths.filter(p => isAbsolute(p) && !/[\x00-\x1f\x7f:]/.test(p)))].join(":");
 	const arguments_ = options.kind === "guardian" ? ["autonomy", "guardian", "serve"] : ["autonomy", "daemon"];
-	return { home, userHome, nodePath, cliPath, uid, platform, scope, label, path, arguments_ };
+	// The desktop app's executable is also its bundled Node runtime. Persist
+	// Node mode for service-manager restarts, which do not inherit the app env.
+	const electronNode = Boolean(process.versions.electron) && nodePath === resolve(process.execPath);
+	return { home, userHome, nodePath, cliPath, uid, platform, scope, label, path, arguments_, electronNode };
 }
 
 function xml(value: string): string {
@@ -79,7 +82,7 @@ export function servicePlan(options: ServiceOptions): ServicePlan {
 <key>Label</key><string>${cfg.label}</string>
 <key>ProgramArguments</key><array>${[cfg.nodePath, cfg.cliPath, ...cfg.arguments_].map(value => `<string>${xml(value)}</string>`).join("")}</array>
 <key>WorkingDirectory</key><string>${xml(cfg.home)}</string>
-<key>EnvironmentVariables</key><dict><key>REIN_HOME</key><string>${xml(cfg.home)}</string><key>PATH</key><string>${xml(cfg.path)}</string></dict>
+<key>EnvironmentVariables</key><dict><key>REIN_HOME</key><string>${xml(cfg.home)}</string><key>PATH</key><string>${xml(cfg.path)}</string>${cfg.electronNode ? "<key>ELECTRON_RUN_AS_NODE</key><string>1</string>" : ""}</dict>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ThrottleInterval</key><integer>30</integer>
@@ -102,7 +105,7 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=${unit(cfg.home)}
 Environment=${unit(`REIN_HOME=${cfg.home}`)}
-Environment=${unit(`PATH=${cfg.path}`)}
+Environment=${unit(`PATH=${cfg.path}`)}${cfg.electronNode ? '\nEnvironment="ELECTRON_RUN_AS_NODE=1"' : ""}
 # The ':' executable prefix disables dollar expansion in every argument.
 ExecStart=${unit(`:${cfg.nodePath}`)} ${unit(cfg.cliPath)} ${cfg.arguments_.join(" ")}
 Restart=on-failure

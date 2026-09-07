@@ -22,9 +22,13 @@ import { contextTools } from "./tools/context.ts";
 import { createSkillRuntime } from "./skills.ts";
 import { createMeatTool } from "./meat/tool.ts";
 import { ActivityJournal, activityFile } from "./activity/store.ts";
+import { createKlaudTools } from "./klaud/tools.ts";
+import type { DesktopSurface } from "./desktop/surface.ts";
 
 export interface RunnerOptions {
 	cwd: string;
+	/** Active UI surface, independent of the saved launch preference. */
+	surface?: DesktopSurface;
 	contextWindow?: number;
 	reserveTokens?: number;
 	autoContext?: boolean;
@@ -110,8 +114,9 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	const autoContext = opts.autoContext ?? (withContextTools && config.posthorse?.enabled !== false);
 	const contextGuidance = autoContext ? POSTHORSE_GUIDANCE : POSTHORSE_GUIDANCE.replace("Automatic rollover starts a fresh window without generating a summary.", "Automatic rollover is disabled. Use new_context to start a fresh window without generating a summary.");
 	const skillRuntime = withContextTools ? createSkillRuntime() : undefined;
-	const basePrompt = (opts.systemPrompt ?? buildSystemPrompt(opts.cwd)) + (withContextTools ? contextGuidance + skillRuntime!.guidance : "");
+	const basePrompt = (opts.systemPrompt ?? buildSystemPrompt(opts.cwd, opts.surface)) + (withContextTools ? contextGuidance + skillRuntime!.guidance : "");
 	const tools = [...(opts.tools ?? toolsForCwd(opts.cwd))];
+	if (withContextTools) tools.push(...createKlaudTools());
 	let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
 
 	const steering: AgentMessage[] = [];
