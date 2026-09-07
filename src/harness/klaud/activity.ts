@@ -9,7 +9,9 @@ export interface KlaudActivity {
 }
 
 function owned(stat: Stats): void {
-	if (typeof process.getuid === "function" && stat.uid !== process.getuid() || (stat.mode & 0o022) !== 0) throw new Error("Untrusted autonomy metadata.");
+	// Windows exposes synthetic mode bits; its ACLs, not POSIX write bits,
+	// govern access. Apply these ownership checks only on POSIX platforms.
+	if (typeof process.getuid === "function" && (stat.uid !== process.getuid() || (stat.mode & 0o022) !== 0)) throw new Error("Untrusted autonomy metadata.");
 }
 function directory(path: string): Stats {
 	const stat = lstatSync(path);

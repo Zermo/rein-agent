@@ -158,7 +158,7 @@ test("linked files and metadata writable by other users are not trusted", t => {
 		const linked = join(f.home, "linked-file"); linkSync(path, linked);
 		assert.deepEqual(klaudActivity(f.home), unavailable); rmSync(linked);
 	}
-	for (const path of [f.home, f.directory, f.statePath, f.lockPath]) {
+	for (const path of typeof process.getuid === "function" ? [f.home, f.directory, f.statePath, f.lockPath] : []) {
 		const mode = statSync(path).mode & 0o777;
 		chmodSync(path, mode | 0o020);
 		assert.deepEqual(klaudActivity(f.home), unavailable);

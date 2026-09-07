@@ -197,9 +197,12 @@ test("a terminal-only hanging CLI fails promptly without waiting out the device 
 });
 
 test("unbounded CLI output is stopped with a fixed sanitized error", async t => {
-	const f = fixture(t, { env: { FIXTURE_MODE: "overflow" } });
+	// Exercise the output guard, not child startup latency. Under parallel builds
+	// the shared 1.5s challenge deadline can expire before this CLI gets CPU.
+	// The short no-challenge deadline has its own regression above.
+	const f = fixture(t, { env: { FIXTURE_MODE: "overflow" }, challengeTimeoutMs: 10_000, loginTimeoutMs: 15_000 });
 	const login = f.accounts.start({ provider: "codex" });
-	const failed = await waitFor(() => f.accounts.get(login.id), value => value.status === "failed");
+	const failed = await waitFor(() => f.accounts.get(login.id), value => value.status === "failed", 10_000);
 	assert.match(failed.message, /output limit|unsupported response/); assert.ok(JSON.stringify(failed).length < 500);
 	await f.accounts.close();
 });

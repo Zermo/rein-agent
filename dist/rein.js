@@ -8420,7 +8420,7 @@ var init_settings = __esm({
 import { closeSync as closeSync8, constants as constants12, fstatSync as fstatSync6, lstatSync as lstatSync11, openSync as openSync8, readSync as readSync3 } from "node:fs";
 import { join as join25, resolve as resolve18 } from "node:path";
 function owned(stat3) {
-  if (typeof process.getuid === "function" && stat3.uid !== process.getuid() || (stat3.mode & 18) !== 0) throw new Error("Untrusted autonomy metadata.");
+  if (typeof process.getuid === "function" && (stat3.uid !== process.getuid() || (stat3.mode & 18) !== 0)) throw new Error("Untrusted autonomy metadata.");
 }
 function directory(path2) {
   const stat3 = lstatSync11(path2);
