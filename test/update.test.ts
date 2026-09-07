@@ -296,6 +296,40 @@ test("terminal-only installer saves its opt-out instead of installing a native a
 	} finally { f.close(); }
 });
 
+for (const scenario of ["default", "opt-out", "unavailable", "linux"] as const) test(`combined installer handles native Mac app ${scenario} without affecting the CLI`, posix, async () => {
+	const f = installFixture();
+	try {
+		f.program("uname", `console.log(${JSON.stringify(scenario === "linux" ? "Linux" : "Darwin")});`);
+		mkdirSync(join(f.remote, "scripts"));
+		writeFileSync(join(f.remote, "scripts/install-macos-app.sh"), `#!/bin/bash\nprintf '%s\\n' "$*" > "$REIN_UPDATE_FIXTURE/native-app-called"\nexit ${scenario === "unavailable" ? 1 : 0}\n`);
+		f.gitAt(f.remote, "add", "."); f.gitAt(f.remote, "commit", "-m", "Native app fixture");
+		const result = await f.install(["--skip-setup", ...(scenario === "opt-out" ? ["--no-app"] : [])]);
+		assert.equal(result.code, 0, result.stdout + result.stderr);
+		assert.equal(existsSync(join(f.root, "native-app-called")), scenario !== "opt-out" && scenario !== "linux");
+		if (scenario === "default") assert.equal(readFileSync(join(f.root, "native-app-called"), "utf8").trim(), "--no-launch");
+		if (scenario === "unavailable") assert.match(result.stdout, /CLI is installed.*native app could not be installed/);
+		assert.ok(f.npmCalls().some(args => args.includes("--global")));
+		f.unchanged();
+	} finally { f.close(); }
+});
+
+test("app-only installer downloads the release helper without installing a CLI checkout", posix, async () => {
+	const f = installFixture();
+	try {
+		f.program("uname", "console.log('Darwin');");
+		const helper = '#!/bin/bash\nprintf "%s\\n" "$*" > "$REIN_UPDATE_FIXTURE/native-app-called"\n';
+		f.program("curl", `const fs = require('node:fs'); const args = process.argv.slice(2);
+if (args.at(-1) !== 'https://github.com/Zermo/rein-agent/releases/latest/download/install-macos-app.sh') process.exit(8);
+fs.writeFileSync(args[args.indexOf('--output') + 1], ${JSON.stringify(helper)});`);
+		const result = await f.install(["--app-only", "--no-launch"]);
+		assert.equal(result.code, 0, result.stdout + result.stderr);
+		assert.equal(readFileSync(join(f.root, "native-app-called"), "utf8").trim(), "--no-launch");
+		assert.equal(existsSync(f.checkout), false);
+		assert.equal(existsSync(join(f.root, "npm.jsonl")), false);
+		f.unchanged();
+	} finally { f.close(); }
+});
+
 test("unattended setup never opens a chat and NodeTerm installation requires its explicit flag", posix, async () => {
 	const f = installFixture();
 	try {

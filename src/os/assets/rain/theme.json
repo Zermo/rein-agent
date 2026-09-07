@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "rein-rain",
+  "displayName": "Dareecho",
+  "palette": {
+    "cream": "#f5eddc",
+    "rust": "#b54229",
+    "amber": "#ebbc5c",
+    "green": "#284d3d",
+    "ink": "#252a25"
+  },
+  "motion": {
+    "default": "static",
+    "terminalFramesPerSecond": 8
+  },
+  "supportedSurfaces": [
+    "terminal-preview",
+    "static-wallpaper"
+  ],
+  "desktopIntegration": "not-installed"
+}

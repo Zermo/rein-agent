@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
-import { parseArgs, main } from "../src/cli.ts";
+import { parseArgs, main, resolveServePort } from "../src/cli.ts";
 
 const root = new URL("../", import.meta.url).pathname;
 
@@ -14,6 +14,7 @@ test("boolean CLI flags preserve subcommands, short flags, and positional prompt
 	assert.deepEqual(parseArgs(["--json", "hardware"]), { _: ["hardware"], flags: { json: true } });
 	assert.deepEqual(parseArgs(["--no-auto-context", "--context-window=4096", "--", "-query"]), { _: ["-query"], flags: { "no-auto-context": true, "context-window": "4096" } });
 	assert.equal(parseArgs(["--save=false"]).flags.save, false);
+	assert.deepEqual(parseArgs(["serve", "--mobile", "--host", "192.168.50.12", "--advertise=false", "--trusted-origin", "https://rein.mesh.example"]).flags, { mobile: true, host: "192.168.50.12", advertise: false, "trusted-origin": "https://rein.mesh.example" });
 	assert.equal(parseArgs(["-h"]).flags.h, true);
 });
 
@@ -21,6 +22,20 @@ test("CLI rejects invalid numeric options before resolving a model", async () =>
 	for (const args of [["--max-turns", "garbage"], ["--max-turns", "1x"], ["--context-window", "0"], ["--reserve-tokens", "-1"], ["--temperature"], ["--temperature", "Infinity"], ["--max-iterations", "1.5"], ["--tools", "bad"]]) {
 		await assert.rejects(main(args), /must be/);
 	}
+});
+
+test("mobile serve requires an explicit private bind address before starting a backend", async () => {
+	await assert.rejects(main(["serve", "--mobile"]), /requires --host/);
+	await assert.rejects(main(["serve", "--mobile", "--host", "0.0.0.0"]), /only to loopback, private/);
+	await assert.rejects(main(["serve", "--host", "127.0.0.1"]), /valid only with --mobile/);
+});
+
+test("serve chooses a stable mobile port while preserving explicit and desktop ephemeral ports", () => {
+	assert.equal(resolveServePort({}, true), 4318);
+	assert.equal(resolveServePort({}, false), 0);
+	assert.equal(resolveServePort({ port: "0" }, true), 0);
+	assert.equal(resolveServePort({ port: "4518" }, true), 4518);
+	assert.throws(() => resolveServePort({ port: "65536" }, true), /<= 65535/);
 });
 
 interface ChildResult { code: number | null; stdout: string; stderr: string }

@@ -48,6 +48,10 @@ Usage:
   rein improve [goal]           self-improvement loop on the rein repo
   rein gates [file]             unlazy gates: --mode lint|status|approve|reverify (default approve)
   rein models                   show detected local servers and provider presets
+  rein model help               pinned GGUF downloads, serving and background model services
+  rein model plan <repo> --file <gguf> [--revision <ref>] [--json]
+  rein os plan [--mode host|image] [--json]    native host and OS installation gates
+  rein os prepare --output <dir>             prepare a pinned Omarchy VM overlay kit
   rein skills [name]            list bundled workflows, or read one without running it
   rein profile [--json]         view your operator profile and enabled skill pack
   rein profile pack <name>      enable everyday|ship|ops|study|studio, or none
@@ -57,12 +61,17 @@ Usage:
   rein web fetch <url>           render a page to markdown (--max-chars 20000)
   rein update                   curl the latest installer and update the installed build
   rein desktop install          optional NodeTerm installation and registration
-  rein desktop open|status      explicitly open or inspect NodeTerm
-  rein desktop use terminal     keep future bare rein sessions in the current terminal
+  rein desktop [open|status]    open or inspect the selected desktop surface
+  rein desktop use <surface>   choose klaud, nodeterm, or terminal
+  rein klaud                    open rein-klaʊd with a loopback AG-UI backend
   rein --terminal               stay in this terminal for this session
   rein --visual                 split the terminal into chat and live activity (tmux)
   rein watch <activity-id>       inspect activity inside this terminal
   rein canvas <activity-id>      serve an optional node canvas; --browser opens it
+  rein serve [--port n]          serve the loopback rein-klaʊd AG-UI API
+  rein serve --mobile --host <private-ip> [--port n] [--trusted-origin <https-origin>]
+                                opt-in resumable iOS gateway (default port 4318)
+  rein train <recipe.yaml>       run optional Automodel training
   rein meat [ref [ref]]          review a commit or range with the embedded Meat engine
                                 --staged or --working-tree selects uncommitted changes
   rein tmux start [command]      start a persistent bash shell; returns its session ID
@@ -112,6 +121,8 @@ Options:
   --discover-network[=false]      setup/models: include known LAN and mesh peers
   --discover-hosts <hosts>        setup/models: comma-separated hosts or endpoint URLs
   --discover-ports <ports>        setup/models: additional listening ports
+  --advertise=false              mobile gateway: disable Bonjour/Avahi discovery
+  --trusted-origin <https-url>   mobile gateway: exact private-mesh proxy origin
   --auth <api-key|cli>            setup: API credentials or official subscription CLI
   --api chat-completions         explicit OpenAI-compatible HTTP protocol
   --activity <id>                record a private activity view under a fresh UUID
@@ -139,7 +150,7 @@ interface ParsedArgs {
 	flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only", "discover-network", "browser", "install-runtime", "start-runtime"]);
+const BOOLEAN_FLAGS = new Set(["help", "h", "version", "v", "json", "save", "no-tools", "no-auto-context", "fix", "yes", "status", "init", "device-auth", "no-browser", "allow-writes", "staged", "working-tree", "visual", "view", "silent", "terminal", "no-launch", "if-supported", "connection-only", "discover-network", "browser", "install-runtime", "start-runtime", "mobile", "advertise"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
 	const positional: string[] = [];
@@ -190,6 +201,12 @@ function stringFlag(flags: ParsedArgs["flags"], name: string): string | undefine
 	return value.trim();
 }
 
+export function resolveServePort(flags: ParsedArgs["flags"], mobile: boolean): number {
+	const port = numberFlag(flags, "port", 0) ?? (mobile ? 4318 : 0);
+	if (port > 65535) throw new Error("--port must be <= 65535");
+	return port;
+}
+
 function discoveryFlags(flags: ParsedArgs["flags"]) {
 	const hostText = stringFlag(flags, "discover-hosts");
 	const portText = stringFlag(flags, "discover-ports");
@@ -201,6 +218,20 @@ function discoveryFlags(flags: ParsedArgs["flags"]) {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+	// Forward trainer arguments verbatim; Rein's flag parser must not consume them.
+	if (argv[0] === "train" && !["--help", "-h"].includes(argv[1])) {
+		if (!argv[1]) throw new Error("Usage: rein train <recipe.yaml> [Automodel arguments]");
+		const { automodelAvailable, runTrain } = await import("./harness/klaud/train.ts");
+		if (!automodelAvailable()) {
+			console.error("I need uv on PATH and an Automodel checkout to train.\nInstall uv: https://docs.astral.sh/uv/getting-started/installation/\nClone: git clone https://github.com/NousResearch/Automodel.git ./automodel\nThen set REIN_AUTOMODEL_ROOT to the checkout's absolute path and retry.");
+			process.exitCode = 1;
+			return;
+		}
+		const result = await runTrain(argv[1], argv.slice(2));
+		if (result.log) process.stdout.write(result.log);
+		process.exitCode = result.code;
+		return;
+	}
 	const { _, flags } = parseArgs(argv);
 
 	if (flags.help === true || flags.h === true || _[0] === "help") {
@@ -213,11 +244,54 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 	if (flags.silent !== undefined && !["doctor", "heartbeat", "hb"].includes(_[0])) throw new Error("--silent controls compatibility flags for doctor and heartbeat.");
+	if ((_[0] === "model" || _[0] === "models") && _.length > 1) {
+		const { runModelCommand } = await import("./models/command.ts");
+		await runModelCommand(_.slice(1), flags); return;
+	}
+	if (_[0] === "os") {
+		const { runOSCommand } = await import("./os/command.ts");
+		await runOSCommand(_.slice(1), flags); return;
+	}
 	if (_[0] === "update") {
 		if (_.length !== 1 || Object.keys(flags).length) throw new Error("Usage: rein update");
 		const { runUpdate } = await import("./harness/update.ts");
 		process.exitCode = await runUpdate();
 		return;
+	}
+	if (_[0] === "serve") {
+		const allowed = new Set(["port", "mobile", "host", "advertise", "trusted-origin"]);
+		if (_.length !== 1 || Object.keys(flags).some(key => !allowed.has(key))) throw new Error("Usage: rein serve [--port n] | rein serve --mobile --host <private-ip> [--port n]");
+		const mobile = flags.mobile === true;
+		const port = resolveServePort(flags, mobile);
+		if (!mobile && (flags.host !== undefined || flags.advertise !== undefined || flags["trusted-origin"] !== undefined || flags.mobile === false)) throw new Error("--host, --advertise, --trusted-origin, and --mobile=false are valid only with --mobile.");
+		const handle = mobile
+			? await (async () => {
+				const host = stringFlag(flags, "host");
+				if (!host) throw new Error("rein serve --mobile requires --host with an explicit private interface address.");
+				const { startKlaudMobileGateway } = await import("./harness/klaud/mobile.ts");
+				return startKlaudMobileGateway({ host, port, advertise: flags.advertise === false ? false : undefined, trustedOrigin: stringFlag(flags, "trusted-origin") });
+			})()
+			: await (async () => { const { startKlaudServe } = await import("./harness/klaud/serve.ts"); return startKlaudServe({ port }); })();
+		console.log(`${mobile ? "rein-klaʊd mobile gateway" : "rein-klaʊd"} is listening at ${handle.url}`);
+		console.log(mobile && "tokenFile" in handle && handle.tokenFile
+			? `The reusable mobile bearer token is stored at ${handle.tokenFile}.`
+			: "The bearer token is in $REIN_HOME/klaud/serve-<port>.token, default ~/.rein.");
+		if (mobile && "trustedOrigin" in handle && handle.trustedOrigin) console.log(`The configured private-mesh origin is ${handle.trustedOrigin}.`);
+		await new Promise<void>((resolve, reject) => {
+			const stop = () => {
+				process.removeListener("SIGINT", stop);
+				process.removeListener("SIGTERM", stop);
+				handle.close().then(resolve, reject);
+			};
+			process.once("SIGINT", stop);
+			process.once("SIGTERM", stop);
+		});
+		return;
+	}
+	if (_[0] === "klaud") {
+		if (_.length !== 1 || Object.keys(flags).length) throw new Error("Usage: rein klaud");
+		const { launchKlaud } = await import("./harness/desktop/cli.ts");
+		await launchKlaud(); return;
 	}
 	if (_[0] === "desktop") {
 		const { desktopCommand } = await import("./harness/desktop/cli.ts");

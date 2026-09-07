@@ -11,12 +11,16 @@ function filesUnder(base, prefix = "") {
     return entry.isDirectory() ? filesUnder(base, `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`];
   }).sort();
 }
-for (const name of ["fold", "mattpocock", "meat", "obscura"]) {
+for (const name of ["fold", "mattpocock", "ponytail", "meat", "obscura"]) {
   const base = new URL(`../vendor/${name}/`, import.meta.url);
   const manifest = JSON.parse(readFileSync(new URL("manifest.json", base), "utf8"));
   assert.match(manifest.commit, /^[a-f0-9]{40}$/);
   const snapshot = name === "meat" ? new URL("upstream/", base) : base;
   if (name === "meat") assert.deepEqual(filesUnder(snapshot), Object.keys(manifest.files).sort(), "Meat snapshot contains untracked or missing files.");
+  if (name === "ponytail") {
+    assert.deepEqual(Object.keys(manifest.files).sort(), ["LICENSE", ...["ponytail", "ponytail-review", "ponytail-audit", "ponytail-debt"].map(skill => `skills/${skill}/SKILL.md`)].sort());
+    assert.deepEqual(filesUnder(snapshot), ["manifest.json", ...Object.keys(manifest.files)].sort(), "Ponytail snapshot may only contain the license and four skill texts.");
+  }
   for (const [file, hash] of Object.entries(manifest.files)) {
     assert.ok(!file.split("/").includes("..") && !file.startsWith("/") && !file.includes("\\"));
     const content = readFileSync(new URL(file, snapshot));
@@ -39,7 +43,7 @@ for (const [file, expected] of Object.entries(metadata.licenses)) assert.equal(h
 assert.deepEqual(readFileSync(new URL("LICENSE", meat)), readFileSync(new URL("upstream/LICENSE", meat)));
 const apache = readFileSync(new URL("APACHE-2.0", meat), "utf8");
 assert.ok(apache.length > 10000 && apache.includes("END OF TERMS AND CONDITIONS"), "The complete Apache 2.0 license must accompany Meat.");
-console.log("Native Fold, Matt Pocock and embedded Meat provenance OK");
+console.log("Native Fold, Matt Pocock, Ponytail and embedded Meat provenance OK");
 const obscura = new URL("vendor/obscura/", root);
 const release = JSON.parse(readFileSync(new URL("releases.json", obscura), "utf8"));
 const obscuraSource = JSON.parse(readFileSync(new URL("manifest.json", obscura), "utf8"));

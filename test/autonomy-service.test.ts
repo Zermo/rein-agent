@@ -42,6 +42,25 @@ test("systemd preserves spaces, quotes, backslashes, dollars and literal percent
 	assert.equal(plan.installCommands.at(-1)![2], "restart");
 });
 
+test("desktop-created services persist headless Node mode only for their Electron executable", () => {
+	const descriptor = Object.getOwnPropertyDescriptor(process.versions, "electron");
+	try {
+		Object.defineProperty(process.versions, "electron", { value: "44.2.0", configurable: true });
+		for (const platform of ["darwin", "linux"] as const) for (const kind of ["guardian", "supervisor"] as const) {
+			const options = { home: "/home/operator/.rein", userHome: "/home/operator", cliPath: "/Applications/rein-klaud.app/Contents/Resources/rein/dist/rein.js", platform, kind, uid: 501 };
+			const plan = servicePlan(options);
+			assert.match(plan.content, platform === "darwin" ? /<key>ELECTRON_RUN_AS_NODE<\/key><string>1<\/string>/ : /Environment="ELECTRON_RUN_AS_NODE=1"/);
+			assert.match(servicePlan({ ...options, nodePath: process.execPath }).content, /ELECTRON_RUN_AS_NODE/);
+			assert.doesNotMatch(servicePlan({ ...options, nodePath: "/opt/standalone/node" }).content, /ELECTRON_RUN_AS_NODE/);
+		}
+		delete process.versions.electron;
+		assert.doesNotMatch(servicePlan({ home: "/home/operator/.rein", cliPath: "/opt/rein.js", platform: "linux" }).content, /ELECTRON_RUN_AS_NODE/);
+	} finally {
+		if (descriptor) Object.defineProperty(process.versions, "electron", descriptor);
+		else delete process.versions.electron;
+	}
+});
+
 test("service paths reject control characters and relative executable paths", () => {
 	const options = { home: "/home/u/.rein", cliPath: "/opt/rein.js", nodePath: "/usr/bin/node", userHome: "/home/u", platform: "linux" as const };
 	for (const value of ["relative", "/tmp/rein\nInjected=true", "/tmp/rein\r", "/tmp/rein\0", "/tmp/rein\t"]) {

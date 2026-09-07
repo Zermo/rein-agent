@@ -65,6 +65,17 @@ try {
   const help = await runCli(["--help"]);
   assert.match(help.stdout, /--provider grok/); assert.match(help.stdout, /--provider xai/);
   assert.match(help.stdout, /--discover-network/);
+  assert.match(help.stdout, /rein model help/);
+  const managedHelp = await runCli(["model", "help"]);
+  assert.equal(managedHelp.code, 0, managedHelp.stderr); assert.match(managedHelp.stdout, /service install/);
+  const managedList = await runCli(["model", "list", "--json"]);
+  assert.equal(managedList.code, 0, managedList.stderr); assert.deepEqual(JSON.parse(managedList.stdout), []);
+  const osHelp = await runCli(["os", "help"]);
+  assert.equal(osHelp.code, 0, osHelp.stderr); assert.match(osHelp.stdout, /Omarchy VM overlay/);
+  const ponytail = await runCli(["skills", "ponytail"]);
+  assert.equal(ponytail.code, 0, ponytail.stderr);
+  assert.match(ponytail.stdout, /ponytail/i);
+  assert.match(ponytail.stdout, /lazy|simpl/i);
   const budgetHome = join(dir, "budget-settings");
   const initialBudgets = await runCli(["setup", "budgets", "--json"], { REIN_HOME: budgetHome });
   assert.equal(initialBudgets.code, 0, initialBudgets.stdout + initialBudgets.stderr);

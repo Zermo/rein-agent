@@ -10,7 +10,9 @@
 # Options (after `bash -s --`):
 #   --skip-setup    install only; skip the wizard and connection checks
 #   --yes           non-interactive wizard (first local server / existing config)
-#   --terminal-only keep Rein in your current terminal (the default)
+#   --no-app        install CLI only; skip the native Mac app
+#   --app-only      install the native Mac app without Git, Node, or npm
+#   --terminal-only keep Rein in your current terminal; skip native apps
 #   --nodeterm      also install the optional native NodeTerm app
 #   --no-launch     finish setup without starting the interactive session
 #   --branch NAME   clone a different branch (default: main)
@@ -32,12 +34,18 @@ PREFER_TERMINAL=false
 LAUNCH_SESSION=true
 SETUP_READY=false
 SETUP_TTY=""
+RUN_APP=false
+[ "$(uname -s)" != Darwin ] || RUN_APP=true
+APP_ONLY=false
+APP_READY=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --skip-setup) RUN_SETUP=false ;;
         --yes) ASSUME_YES=true ;;
-        --terminal-only) RUN_DESKTOP=false; PREFER_TERMINAL=true ;;
+        --no-app) RUN_APP=false ;;
+        --app-only) RUN_APP=true; APP_ONLY=true ;;
+        --terminal-only) RUN_APP=false; RUN_DESKTOP=false; PREFER_TERMINAL=true ;;
         --nodeterm) RUN_DESKTOP=true; PREFER_TERMINAL=false ;;
         --no-launch) LAUNCH_SESSION=false ;;
         --branch)
@@ -51,7 +59,9 @@ Rein installer
 Options after bash -s --:
   --skip-setup     Install only; keep saved settings and skip checks
   --yes            Unattended model setup; never invent an operator profile
-  --terminal-only  Stay in the current terminal (the default)
+  --no-app         Install only the CLI; skip the native Mac app
+  --app-only       Install the native Mac app; no Git, Node, or npm needed
+  --terminal-only  Stay in the current terminal; skip native apps
   --nodeterm       Also install the optional native NodeTerm app
   --no-launch      Finish setup without starting a chat session
   --branch NAME    Install a branch, default main
@@ -79,6 +89,25 @@ fail()  { printf '%s✗%s %s\n' "$RED" "$NC" "$*" >&2; exit 1; }
 echo "${BOLD}rein${NC} — minimal local-first agent harness"
 echo "${DIM}repo: $REPO_URL (branch: $BRANCH)${NC}"
 echo ""
+
+# App-only does not need a checkout or a system Node runtime. Download the
+# bounded helper from the same public release origin as the app itself.
+if [ "$APP_ONLY" = true ]; then
+    [ "$RUN_APP" = true ] || fail "--app-only cannot be combined with --no-app or --terminal-only"
+    [ "$(uname -s)" = Darwin ] || fail "The native app is for macOS. Omit --app-only to install the CLI on Linux or WSL."
+    APP_INSTALLER=$(mktemp "${TMPDIR:-/tmp}/rein-app-installer.XXXXXXXX")
+    trap 'rm -f "$APP_INSTALLER"' EXIT
+    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+        --connect-timeout 15 --max-time 60 --max-filesize 131072 \
+        --output "$APP_INSTALLER" https://github.com/Zermo/rein-agent/releases/latest/download/install-macos-app.sh ||
+        fail "The app installer is unavailable. See https://github.com/Zermo/rein-agent/releases."
+    if [ "$LAUNCH_SESSION" = false ] || [ "$RUN_SETUP" = false ] || [ "$ASSUME_YES" = true ] || [ -n "${CI:-}" ]; then
+        bash "$APP_INSTALLER" --no-launch
+    else
+        bash "$APP_INSTALLER"
+    fi
+    exit $?
+fi
 
 # ---- prerequisites ----------------------------------------------------------
 command -v git >/dev/null 2>&1 || fail "git is required (brew install git / apt install git)"
@@ -134,7 +163,18 @@ fi
 ok "$VERSION"
 echo ""
 
-# NodeTerm is an explicit extra. Ordinary installs stay in their current terminal.
+# Native Mac app is an optional addition; a missing app release never removes
+# the working CLI. Keep setup here in the caller's terminal before opening it.
+if [ "$RUN_APP" = true ] && [ "$(uname -s)" = Darwin ]; then
+    step "installing the native rein-klaud app"
+    if [ -f "$REPO_DIR/scripts/install-macos-app.sh" ] && bash "$REPO_DIR/scripts/install-macos-app.sh" --no-launch; then
+        APP_READY=true
+    else
+        warn "Rein CLI is installed. The native app could not be installed; quit an existing app before updating, or retry: curl -fsSL https://github.com/Zermo/rein-agent/releases/latest/download/install-macos-app.sh | bash"
+    fi
+fi
+
+# NodeTerm remains an explicit extra.
 # Use the just-installed bundle, not a potentially stale global executable.
 if [ "$RUN_DESKTOP" = true ]; then
     node "$REPO_DIR/dist/rein.js" desktop install --no-launch ||
@@ -171,6 +211,11 @@ echo "    rein                                     # interactive session"
 echo "    rein models                              # what rein can see"
 echo "    rein setup --status                      # re-check config + connection"
 if [ "$SETUP_READY" = true ] && [ "$LAUNCH_SESSION" = true ] && [ -z "${CI:-}" ]; then
+    if [ "$APP_READY" = true ]; then
+        step "Opening the native rein-klaud app. Choose Start local rein serve to begin."
+        if open -a "${REIN_APP_INSTALL_DIR:-$HOME/Applications}/rein-klaud.app"; then exit 0; fi
+        warn "macOS could not open the app. Open rein-klaud from Finder; continuing in this terminal."
+    fi
     step "Starting Rein in this terminal. Type /help for commands or /quit to exit."
     # Replace the installer so Ctrl-C, EOF and terminal resize go straight to Rein.
     # Keep the caller's directory; installing the repo must not change the workspace.

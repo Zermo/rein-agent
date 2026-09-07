@@ -12,6 +12,9 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { readOperatorGuidance } from "./operator-profile.ts";
+import type { DesktopSurface } from "./desktop/surface.ts";
+import { klaudPrompt } from "./klaud/prompt.ts";
+import { loadKlaudShell } from "./klaud/shell.ts";
 
 const WHO = `You are rein — an agent for everyday organization, learning, creative work, and technical tasks, with a small toolset. You run on local AI by default and are expected to be useful without internet. Use only the capabilities actually supplied in this session.`;
 
@@ -97,7 +100,9 @@ function readLessons(cwd: string): string | undefined {
 	return `Lessons from previous sessions (trust but verify):\n${text.slice(0, 4_000)}`;
 }
 
-export function buildSystemPrompt(cwd: string): string {
+export function buildSystemPrompt(cwd: string, surface?: DesktopSurface): string {
+	// A saved launch preference does not mean this conversation is inside an app.
+	const activeSurface = surface ?? process.env.REIN_SURFACE ?? (process.env.REIN_KLAUD === "1" ? "klaud" : "terminal");
 	const parts = [
 		WHO,
 		"",
@@ -119,9 +124,10 @@ export function buildSystemPrompt(cwd: string): string {
 		"",
 		ENV(cwd, process.platform === "darwin" ? `macOS (${process.arch})` : `${process.platform} (${process.arch})`),
 	];
+	if (activeSurface === "klaud") parts.push("", klaudPrompt(loadKlaudShell()));
 	const operator = readOperatorGuidance();
 	if (operator.diagnostic) console.error(operator.diagnostic);
-	if (operator.text) parts.push("", `Private operator preferences:\nThese are work-style defaults. The latest user request, project constraints, and configured tool approvals take precedence. The autonomy label yolo means initiative within authorized scope; it never bypasses approvals. The supported conversation surface is the current terminal.\n${operator.text.slice(0, 6_000)}`);
+	if (operator.text) parts.push("", `Private operator preferences:\nThese are work-style defaults. The latest user request, project constraints, and configured tool approvals take precedence. The autonomy label yolo means initiative within authorized scope; it never bypasses approvals. The supported conversation surface is ${activeSurface === "klaud" ? "rein-klaʊd" : activeSurface === "nodeterm" ? "a NodeTerm terminal" : "the current terminal"}.\n${operator.text.slice(0, 6_000)}`);
 	const project = readProjectInstructions(cwd);
 	if (project) parts.push("", project);
 	const lessons = readLessons(cwd);

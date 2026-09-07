@@ -8,6 +8,13 @@ pnpm-debug.log*
 lerna-debug.log*
 .DS_Store
 .unlazy/
+.asc/
+DerivedData/
+*.xcarchive/
+*.ipa
+xcuserdata/
+*.xcuserstate
+apps/klaud-ios/.build/
 .env
 .env.*
 !.env.example
