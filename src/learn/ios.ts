@@ -14,14 +14,19 @@ export async function learnIos(deps: LearnDeps = {}): Promise<{ learn: MachineLe
 	};
 
 	const list = record("device-list", "idevice_id -l", await run("idevice_id", ["-l"]));
+	const udids = list.ok ? list.stdout.trim().split("\n").map(u => u.trim()).filter(Boolean) : [];
+	if (deps.udid !== undefined && !udids.includes(deps.udid)) {
+		throw new Error(list.ok
+			? "Requested iOS device was not found. Reconnect it and check --udid; no device was inspected."
+			: "Could not enumerate iOS devices to verify --udid; no device was inspected.");
+	}
 	if (!list.ok || !list.stdout.trim()) {
 		return { learn: frame({
 			notes: [...notes, "No iOS device attached (or libimobiledevice missing). On macOS: brew install libimobiledevice, then unlock the device and trust this computer."],
 			gates: [{ id: "ios-tooling", status: "blocked", detail: list.ok ? "No device listed by idevice_id." : "idevice_id not on PATH; install libimobiledevice." }],
 		}) };
 	}
-	const udids = list.stdout.trim().split("\n").map(u => u.trim()).filter(Boolean);
-	const udid = deps.udid ? udids.find(u => u === deps.udid) ?? udids[0] : udids[0];
+	const udid = deps.udid ?? udids[0];
 	const info = record(`ideviceinfo:${udid}`, `ideviceinfo -u ${udid}`, await run("ideviceinfo", ["-u", udid]));
 	const kv = parseInfo(info.stdout);
 

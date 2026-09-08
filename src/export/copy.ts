@@ -1,22 +1,41 @@
 /** Personal-file export engine. Copies files and folders; never moves or deletes the source. */
-import { copyFile, lstat, mkdir, readdir, stat, utimes } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { copyFile, lstat, mkdir, readdir, realpath, stat, utimes } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export interface CopySummary { files: number; bytes: number; skipped: string[] }
 
 export function isInside(child: string, parent: string): boolean {
 	const rel = relative(resolve(parent), resolve(child));
-	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+	return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-/** A copy into its own source tree would loop forever; refuse it up front. */
+/** Resolve existing ancestors too, since a new destination may sit below a symlink. */
+async function canonicalPath(path: string): Promise<string> {
+	let current = resolve(path);
+	const missing: string[] = [];
+	while (true) {
+		try { return join(await realpath(current), ...missing); }
+		catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(current) === current) throw error;
+			missing.unshift(basename(current));
+			current = dirname(current);
+		}
+	}
+}
+
+/** Reject overlapping roots and aliased destinations before creating any files. */
 export async function assertSafeTarget(sources: string[], target: string): Promise<void> {
-	const t = resolve(target);
+	const t = await canonicalPath(target);
 	for (const raw of sources) {
 		if (!raw) continue;
-		const s = resolve(raw);
-		if (isInside(t, s)) throw new Error(`Export target ${t} is inside source ${s}; choose a different destination.`);
-		if (isInside(s, t)) throw new Error(`Source ${s} is inside the export target ${t}; choose a different destination.`);
+		const s = await realpath(resolve(raw));
+		// Existing per-source destination entries can themselves be symlink aliases.
+		const destinations = [t, await canonicalPath(join(target, basename(resolve(raw))))];
+		for (const dest of destinations) {
+			if (dest === s) throw new Error(`Export target ${dest} is the same as source ${s}; choose a different destination.`);
+			if (isInside(dest, s)) throw new Error(`Export target ${dest} is inside source ${s}; choose a different destination.`);
+			if (isInside(s, dest)) throw new Error(`Source ${s} is inside the export target ${dest}; choose a different destination.`);
+		}
 	}
 }
 

@@ -80,18 +80,19 @@ explicitly approved.
 - Air-gapped capable: Ollama, LM Studio, any OpenAI-compatible server.
 - **No BIOS/UEFI/firmware skill exists in its 7,600.** That is the gap we author.
 
-### The machines (both Apple Silicon Mac mini, Mac16,10)
+### Synthetic hardware examples
 
-| Host | macOS | Chip | RAM | SIP | Red-team access |
-| --- | --- | --- | --- | --- | --- |
-| Host A (thebrain) | 26.6.2 | M4 | 24 GB | **disabled** | Full: DTrace, machook, keychain |
-| Host B (macserver) | 26.5 | M4 | 16 GB | enabled | Read-only + Recovery-mode pass |
+These examples describe supported classes of hardware, not an operator's
+installation. Hostnames, OS versions, RAM, firmware settings, access methods,
+and serving profiles belong in a private machine dossier.
 
-Apple Silicon means the "BIOS" is the Apple boot chain of trust:
-BootROM (immutable) → Apple firmware → Secure Boot (amfi/`csrutil`) → EFI boot entry
-(`bless`/bootpath) → kernel. The "Colonel structure" is that chain: who trusts whom,
-what is signed, where an unsigned payload can enter, and what survives a reboot.
-Serials and hostnames stay out of committed fixtures (AGENTS.md: synthetic hosts in tests).
+| Example | Hardware class | What the read-only profile establishes |
+| --- | --- | --- |
+| `desktop-a.example` | Apple Silicon desktop | Installed OS, boot security, and available userland tools |
+| `desktop-b.example` | x86-64 desktop | Installed OS, actual BIOS/UEFI mode, and available userland tools |
+
+Do not infer a machine's security or access posture from its hardware class.
+Public tests use synthetic fixtures; real profiling output stays local.
 
 ### ChromeOS
 
@@ -127,7 +128,7 @@ Serials and hostnames stay out of committed fixtures (AGENTS.md: synthetic hosts
 
 ### Phase 0 — Groundwork (day 1)
 
-- Install CyberStrike on Host A: `npm i -g @cyberstrike-io/cyberstrike`; verify
+- Install CyberStrike in an isolated test environment: `npm i -g @cyberstrike-io/cyberstrike`; verify
   `cyberstrike run --help` and one trivial agent run.
 - Point CyberStrike at the existing local OpenAI-compatible server (same priority Rein
   already probes: Ollama → LM Studio → llama.cpp → vLLM). No cloud, no new API key.
@@ -145,14 +146,14 @@ One pass per host, all read-only, run under Rein's shell budget:
 1. **machook recon**: `system_info`, `process_enum`, `network_enum`, `user_enum`,
    `installed_apps`, `security_framework`, `launchd_enum`.
 2. **Credential surface** (read): `keychain_dump`, `ssh_keys`, `cloud_creds`,
-   `icloud_tokens`. On Host B this needs Recovery mode or a documented gap.
+   `icloud_tokens`. If system protections block a probe, record the gap without changing those protections.
 3. **Privesc and persistence surface**: `tcc_bypass`, `dylib_hijack`,
    `launchd_plist_abuse`, `sudo_misconfig`, `authorization_db`, `pkg_abuse`.
 4. **CVE pass** via cve-mcp on everything `installed_apps` and the firmware version report.
 5. **Firmware and boot chain** (the new plugin, per host):
    - Apple Silicon: `nvram -p`, `bless --info`, `csrutil status`, `fdesetup status`,
      `spctl --status`, `ioreg` secure-boot keys, `softwareupdate --list-full-installers`,
-     Asahi support matrix lookup for Mac16,10.
+     Asahi support matrix lookup for the selected hardware model.
    - x86 targets (later fleet): `efibootmgr -v`, UEFI variable dump, Secure Boot db/dbx,
      ESP mount and listing, CoreBoot vs vendor firmware.
 6. Write the dossier. Review it with the commander before anything else.
@@ -164,7 +165,7 @@ The dossier maps to four Dareecho injection paths, in ascending risk:
 | Path | What it is | Evidence the dossier must show |
 | --- | --- | --- |
 | A — Overlay | Keep macOS; Rein harness + MLX/Metal model + Omarchy VM kit (current `codex/rein-os` host mode) | Runtime fit, memory headroom, no blocking CVE |
-| B — Boot media | Dareecho image on USB, picked in the boot picker; no firmware writes | Asahi matrix for Mac16,10 (or an x86 target), verified ISO, working boot |
+| B — Boot media | Dareecho image on USB, picked in the boot picker; no firmware writes | Support matrix for the selected hardware model, verified ISO, working boot |
 | C — Boot entry | Signed boot entry (`bless`) pointing at Dareecho; survives reboot, removable | SIP state, `bless` write access, rollback entry tested |
 | D — Firmware | CoreBoot or custom firmware | x86 + CoreBoot-verified board only. Apple Silicon: closed firmware, stays a gate |
 
@@ -175,8 +176,8 @@ is the evidence pack behind them.
 
 ### Phase 3 — Execute and verify (each step gated)
 
-1. Dry-run pass on Host A; dossier reviewed and committed (redacted).
-2. Same pass on Host B; document the SIP-on delta explicitly.
+1. Dry-run pass on an authorized test machine; keep the real dossier private and commit only synthetic fixtures.
+2. Repeat on a second authorized test platform; record observed security differences in its private dossier.
 3. Boot Dareecho from media on a disposable x86 VM or spare machine; complete a real
    Rein model/tool round trip; reboot and repeat (existing gate 1).
 4. Only then: propose a physical injection (A → B → C order) for a commander-approved
@@ -191,16 +192,18 @@ its host, or it says why the residual risk is accepted.
 
 ## Dossier spec (schemaVersion 1)
 
+The following values are synthetic placeholders, not collected observations.
+
 ```json
 {
   "schemaVersion": 1,
-  "host": { "os": "macos", "arch": "arm64", "model": "Mac16,10",
-            "sw": "26.6.2", "sip": "disabled", "hostname": "host-a" },
+  "host": { "os": "macos", "arch": "arm64", "model": "ExampleArm64Desktop",
+            "sw": "example-version", "sip": "unknown", "hostname": "desktop-a.example" },
   "facts": [ { "id": "MAC-SYSINFO-001", "source": "machook",
                "evidence": "sw_vers", "sha256": "…" } ],
   "surface": {
-    "credentials": [ { "store": "keychain", "entries": 42, "extracted": true } ],
-    "persistence": [ { "kind": "launchd", "third_party": 17, "writable": 1 } ],
+    "credentials": [ { "store": "keychain", "entries": 0, "extracted": false } ],
+    "persistence": [ { "kind": "launchd", "third_party": 0, "writable": 0 } ],
     "cves": [ { "product": "…", "version": "…", "id": "CVE-…", "epss": 0.0 } ]
   },
   "boot_chain": [
@@ -250,18 +253,13 @@ is checkable, not an assertion. No serials, no credentials, no personal paths.
 
 ## Attribution and use of CyberStrike
 
-- Prepared with Qwen3.8-27B-Uncensored (local-studio, reasoning max), working through
-  the rein-agent and CyberStrike trees on 2026-09-07.
-- CyberStrike (CyberStrikeus/CyberStrike, AGPL-3.0) served as inspiration and training
-  for this work: its skill methodology and platform playbooks helped bring the learn,
-  export, and rebuild engines up to intelligence. We took the shape of the knowledge,
-  not its code.
-- The "weaponized" portions of CyberStrike — its offensive tooling, post-exploitation,
-  and credential-harvesting surface (machook and kin) — are muted in this work. None of
-  it runs inside Rein's bundle, none of it is imported, and nothing in the learn,
-  export, or OS-kit paths executes it. It stays a separate process or vendored data.
-- This is a note of use, not a license grant: CyberStrike remains AGPL-3.0 and
-  credited to its maintainers wherever its text or ideas ship.
+CyberStrike is an upstream reference for tool orchestration and security review.
+Its code remains subject to its own license. Rein's integration must pin the
+upstream revision, preserve required attribution, and follow the licensing and
+process constraints above.
+
+Machine-specific research notes, local model choices, and serving profiles are
+private working data and are not part of this public plan.
 
 ## Open questions (need the commander's call)
 
@@ -269,7 +267,7 @@ is checkable, not an assertion. No serials, no credentials, no personal paths.
    Secure Boot → boot entry → kernel). Correct?
 2. "Commander" = the human operator, or the Rein agent itself? If the agent, the
    llm-security skill (prompt injection, tool abuse) becomes a Phase 1 item, not Phase 4.
-3. First injection target: Host A (SIP off, 24 GB), or a spare x86 machine for the
-   Omarchy path?
-4. Model: CyberStrike's agent quality wants a strong model. Same local model as Rein,
-   or a dedicated bigger one on Host A?
+3. First test target: a disposable virtual machine, or spare hardware with a
+   verified backup and an approved recovery plan?
+4. Model: use an existing compatible provider or a separate test endpoint? Keep
+   the selected host, model, and serving profile in private configuration.

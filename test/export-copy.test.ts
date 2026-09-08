@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exportFiles, formatBytes, isInside } from "../src/export/copy.ts";
@@ -43,6 +43,48 @@ test("export refuses a target inside the source and vice versa", async () => {
 	await assert.rejects(() => exportFiles([inner], outer), /inside the export target/i);
 });
 
+test("export rejects equal roots and symlink aliases before creating recursive copies", async t => {
+	const base = await mkdtemp(join(tmpdir(), "export-same-target-"));
+	t.after(() => rm(base, { recursive: true, force: true }));
+	const docs = join(base, "Documents"), alias = join(base, "alias");
+	await mkdir(docs);
+	await writeFile(join(docs, "keep.txt"), "original");
+	await symlink(docs, alias);
+	for (const target of [docs, join(docs, "."), alias]) {
+		await assert.rejects(exportFiles([docs], target), /same as source/);
+		assert.deepEqual(await readdir(docs), ["keep.txt"]);
+	}
+	for (const target of [join(alias, "new", "nested"), join(docs, "..cache")]) {
+		await assert.rejects(exportFiles([docs], target), /inside source/);
+		assert.deepEqual(await readdir(docs), ["keep.txt"]);
+	}
+	assert.equal(await readFile(join(docs, "keep.txt"), "utf8"), "original");
+});
+
+test("export rejects a per-source destination aliased back to the source", async t => {
+	const base = await mkdtemp(join(tmpdir(), "export-entry-alias-"));
+	t.after(() => rm(base, { recursive: true, force: true }));
+	const docs = join(base, "Documents"), target = join(base, "backup");
+	await mkdir(docs); await mkdir(target);
+	await writeFile(join(docs, "keep.txt"), "original");
+	await symlink(docs, join(target, "Documents"));
+	await assert.rejects(exportFiles([docs], target), /same as source/);
+	assert.deepEqual(await readdir(docs), ["keep.txt"]);
+	assert.equal(await readFile(join(docs, "keep.txt"), "utf8"), "original");
+});
+
+test("export permits an unrelated destination reached through a symlink", async t => {
+	const base = await mkdtemp(join(tmpdir(), "export-separate-alias-"));
+	t.after(() => rm(base, { recursive: true, force: true }));
+	const docs = join(base, "Documents"), backup = join(base, "backup"), alias = join(base, "alias");
+	await mkdir(docs); await mkdir(backup);
+	await writeFile(join(docs, "keep.txt"), "original");
+	await symlink(backup, alias);
+	assert.equal((await exportFiles([docs], join(alias, "new"))).files, 1);
+	assert.equal(await readFile(join(backup, "new", "Documents", "keep.txt"), "utf8"), "original");
+	assert.equal(await readFile(join(docs, "keep.txt"), "utf8"), "original");
+});
+
 test("isInside resolves relative and absolute paths", () => {
 	assert.equal(isInside("/a/b/c", "/a/b"), true);
 	assert.equal(isInside("a/b/c", "a/b"), true);
@@ -50,6 +92,7 @@ test("isInside resolves relative and absolute paths", () => {
 	assert.equal(isInside("/a/bc", "/a/b"), false);
 	assert.equal(isInside("b/c", "a"), false);
 	assert.equal(isInside("/a", "/a"), false);
+	assert.equal(isInside("/a/..cache", "/a"), true);
 });
 
 test("formatBytes keeps human sizes", () => {

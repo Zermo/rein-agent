@@ -183,12 +183,12 @@ export async function learnMachine(deps: LearnDeps = {}): Promise<Outcome> {
 		);
 		}
 	} else if (platform === "win32") {
-		const [ver, systeminfo, bios, secureboot, legacy, cpu, ram, hypervisor, tpm] = await Promise.all([
+		const [ver, systeminfo, bios, secureboot, firmware, cpu, ram, hypervisor, tpm] = await Promise.all([
 			out("ver", "ver", []),
 			out("systeminfo", "systeminfo", []),
 			out("bios", "powershell", ["-NoProfile", "-Command", "(Get-CimInstance Win32_BIOS).SMBIOSBIOSVersion"]),
 			out("secure-boot", "powershell", ["-NoProfile", "-Command", "Confirm-SecureBootUEFI"]),
-			out("legacy-boot", "powershell", ["-NoProfile", "-Command", "Test-Path $env:SystemRoot\\System32"]),
+			out("firmware-mode", "powershell", ["-NoProfile", "-Command", "(Get-ComputerInfo -Property BiosFirmwareType -ErrorAction Stop).BiosFirmwareType"]),
 			out("cpu", "powershell", ["-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"]),
 			out("ram", "powershell", ["-NoProfile", "-Command", "[int64](Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"]),
 			out("hypervisor", "powershell", ["-NoProfile", "-Command", "[bool](Get-CimInstance Win32_ComputerSystem).HypervisorPresent"]),
@@ -198,16 +198,19 @@ export async function learnMachine(deps: LearnDeps = {}): Promise<Outcome> {
 		machine.cpu = firstLine(cpu.stdout) ?? "unknown";
 		machine.ramBytes = Number.parseInt(firstLine(ram.stdout) ?? "", 10) || undefined;
 		machine.kernel = firstLine(systeminfo.stdout) ?? undefined;
-		const isLegacy = legacy.stdout.trim() === "True";
+		// BiosFirmwareType reports the boot mode, not merely installed firmware.
+		const firmwareType = firmware.ok ? firmware.stdout.trim().toLowerCase() : "";
+		const firmwareMode = firmwareType === "bios" ? "legacy BIOS" : firmwareType === "uefi" ? "UEFI" : "unknown";
 		const sbOn = secureboot.stdout.trim() === "True";
 		machine.virtualized = hypervisor.stdout.trim() === "True" ? "vm" : "physical";
 		bootChain.push(
-			{ stage: "firmware", trust: isLegacy ? "legacy BIOS" : "UEFI", evidence: "Win32_BIOS", notes: `BIOS ${firstLine(bios.stdout) ?? "version unknown"}.` },
+			{ stage: "firmware", trust: firmwareMode, evidence: firmwareMode === "unknown" ? undefined : "Get-ComputerInfo BiosFirmwareType", notes: `BIOS ${firstLine(bios.stdout) ?? "version unknown"}.${firmwareMode === "unknown" ? " Boot mode could not be determined." : ""}` },
 			{ stage: "secure-boot", trust: secureboot.ok ? (sbOn ? "enabled" : "disabled") : "unknown", evidence: secureboot.ok ? "Confirm-SecureBootUEFI" : undefined, notes: secureboot.ok ? "State read." : "Secure Boot state not read." },
 			{ stage: "boot-manager", trust: "bcd", notes: "bcdedit entries need elevation; not read in this pass." },
 			{ stage: "kernel", trust: "windows-loader", evidence: "ver", notes: machine.release || "release unknown." },
 		);
 		gates.push(
+			{ id: "firmware-mode", status: firmwareMode === "unknown" ? "required" : "verified", detail: firmwareMode === "unknown" ? "BIOS/UEFI boot mode is unknown; verify it before planning a boot change." : `Boot mode ${firmwareMode}.` },
 			{ id: "secure-boot", status: secureboot.ok ? "verified" : "required", detail: `Secure Boot ${secureboot.ok ? (sbOn ? "enabled" : "disabled") : "unknown"}.` },
 			{ id: "tpm", status: tpm.ok ? "verified" : "required", detail: `TPM ${tpm.ok ? firstLine(tpm.stdout) : "state unknown"}.` },
 		);

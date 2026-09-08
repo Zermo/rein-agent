@@ -150,6 +150,39 @@ test("Windows learn pass runs on any host and degrades cleanly when probes are m
 	assert.deepEqual(learn.bootChain.map(s => s.stage), ["firmware", "secure-boot", "boot-manager", "kernel"]);
 	assert.ok(learn.gates.length >= 3);
 	assert.ok(learn.notes.length > 0, "failed probes are recorded as notes, not thrown");
+	assert.equal(learn.bootChain.find(s => s.stage === "firmware")?.trust, "unknown");
+	assert.equal(learn.gates.find(g => g.id === "firmware-mode")?.status, "required");
+});
+
+test("Windows firmware mode comes from BiosFirmwareType, independently of Secure Boot", async () => {
+	for (const [value, expected] of [["Bios\r\n", "legacy BIOS"], ["Uefi\r\n", "UEFI"]]) {
+		const { learn } = await learnMachine({
+			platform: "win32", hostname: () => "fixture-windows",
+			run: fakeRun({
+				"powershell -NoProfile -Command (Get-ComputerInfo -Property BiosFirmwareType -ErrorAction Stop).BiosFirmwareType": ok(value),
+				"powershell -NoProfile -Command Confirm-SecureBootUEFI": ok("False"),
+			}),
+		});
+		assert.equal(learn.bootChain.find(s => s.stage === "firmware")?.trust, expected);
+		assert.equal(learn.bootChain.find(s => s.stage === "firmware")?.evidence, "Get-ComputerInfo BiosFirmwareType");
+		assert.equal(learn.gates.find(g => g.id === "firmware-mode")?.status, "verified");
+		assert.equal(learn.bootChain.find(s => s.stage === "secure-boot")?.trust, "disabled");
+		assert.equal(learn.probes.some(p => p.command.includes("Test-Path")), false);
+	}
+});
+
+test("Windows firmware mode remains unknown for failed, empty, or unrecognized evidence", async () => {
+	for (const result of [ok(""), ok("Unknown"), ok("True"), { ...fail("Access denied"), stdout: "Uefi" }]) {
+		const { learn } = await learnMachine({
+			platform: "win32", hostname: () => "fixture-windows",
+			run: fakeRun({
+				"powershell -NoProfile -Command (Get-ComputerInfo -Property BiosFirmwareType -ErrorAction Stop).BiosFirmwareType": result,
+			}),
+		});
+		assert.equal(learn.bootChain.find(s => s.stage === "firmware")?.trust, "unknown");
+		assert.equal(learn.bootChain.find(s => s.stage === "firmware")?.evidence, undefined);
+		assert.equal(learn.gates.find(g => g.id === "firmware-mode")?.status, "required");
+	}
 });
 
 test("unknown platform yields a blocked gate instead of throwing", async () => {
@@ -162,8 +195,9 @@ test("unknown platform yields a blocked gate instead of throwing", async () => {
 	assert.equal(learn.gates.find(g => g.id === "platform")?.status, "blocked");
 });
 
-test("real macOS pass on this machine produces five boot stages and a verified evidence gate", async () => {
-	if (process.platform !== "darwin") return;
+test("real macOS pass on this machine produces five boot stages and a verified evidence gate", {
+	skip: process.platform !== "darwin" || process.env.REIN_LEARN_HOST_TESTS !== "1",
+}, async () => {
 	const { learn } = await learnMachine({ now: () => new Date("2026-01-01T00:00:00Z") });
 	assert.equal(learn.machine.os, "macos");
 	assert.equal(learn.bootChain.length, 5);
