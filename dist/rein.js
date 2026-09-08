@@ -16625,8 +16625,14 @@ async function runDoctor(opts = {}) {
   let binPath;
   let repo;
   {
-    const { out } = run4("sh", ["-c", "command -v rein"]);
-    binPath = out.trim() || void 0;
+    try {
+      binPath = execFileSync4("sh", ["-c", "command -v rein"], {
+        encoding: "utf8",
+        timeout: 15e3,
+        stdio: ["pipe", "pipe", "pipe"]
+      }).trim() || void 0;
+    } catch {
+    }
     if (!binPath) {
       checks.push({ name: "bin", status: "fail", detail: "rein not on PATH", fix: "curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash" });
     } else {
