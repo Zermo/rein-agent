@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,9 +53,9 @@ test("silent compatibility flags never suppress actual warnings or failed runtim
 
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../bin/rein.js", import.meta.url));
-function fixture() {
+function fixture(installName = "installed", homeName = "state") {
 	const root = mkdtempSync(join(tmpdir(), "rein-doctor-flags-"));
-	const home = join(root, "state"), bin = join(root, "bin"), install = join(root, "installed");
+	const home = join(root, homeName), bin = join(root, "bin"), install = join(root, installName);
 	for (const path of [home, bin, join(install, "dist")]) mkdirSync(path, { recursive: true });
 	writeFileSync(join(install, "package.json"), JSON.stringify({ name: "rein-agent" }));
 	writeFileSync(join(install, "dist", "rein.js"), "#!/bin/sh\nexit 1\n");
@@ -79,8 +79,48 @@ esac
 			return { code: error.code, stdout: String(error.stdout), stderr: String(error.stderr) };
 		}
 	};
-	return { root, home, run, close: () => rmSync(root, { recursive: true, force: true }) };
+	return { root, home, bin, install, run, close: () => rmSync(root, { recursive: true, force: true }) };
 }
+
+test("doctor checks and repairs treat paths with shell syntax as literal arguments", async () => {
+	const f = fixture("repo $(touch injected-dollar) `touch injected-backtick` 'quoted'", "state $(touch injected-config)");
+	try {
+		mkdirSync(join(f.install, ".git"));
+		mkdirSync(join(f.install, "src"));
+		writeFileSync(join(f.install, "src", "fixture.ts"), "// fixture\n");
+		utimesSync(join(f.install, "dist", "rein.js"), 1, 1);
+		const log = join(f.root, "commands.jsonl");
+		for (const command of ["git", "npm"]) {
+			writeFileSync(join(f.bin, command), `#!${process.execPath}
+const fs = require("node:fs"), args = process.argv.slice(2);
+fs.appendFileSync(process.env.REIN_FIXTURE_COMMAND_LOG, JSON.stringify({command: ${JSON.stringify(command)}, args}) + "\\n");
+if (args[2] === "rev-parse") console.log("1111111");
+if (args[2] === "ls-remote") console.log("2222222 refs/heads/main");
+`);
+			chmodSync(join(f.bin, command), 0o700);
+		}
+		const config = join(f.home, "config.json");
+		writeFileSync(config, JSON.stringify({ provider: "codex", auth: { type: "cli", provider: "codex" }, baseUrl: "cli://codex", model: "default", apiKey: "synthetic-credential" }));
+		chmodSync(config, 0o644);
+		const moduleUrl = new URL("../src/harness/doctor.ts", import.meta.url).href;
+		const result = await exec(process.execPath, ["--input-type=module", "-e", `
+const {runDoctor} = await import(${JSON.stringify(moduleUrl)});
+const result = await runDoctor({fix: true, quiet: true});
+await result.checks.find(check => check.name === "perms").autoFix();
+console.log(JSON.stringify(result.fixed));
+`], { cwd: f.root, env: { ...process.env, HOME: f.root, REIN_HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin`, REIN_FIXTURE_COMMAND_LOG: log, REIN_FIXTURE_AUTH_FAIL: "0", REIN_API_KEY: "", REIN_BASE_URL: "", REIN_MODEL: "" }, timeout: 15_000 });
+		assert.deepEqual(JSON.parse(result.stdout), ["repo", "bundle"]);
+		const repo = realpathSync(f.install);
+		assert.deepEqual(readFileSync(log, "utf8").trim().split("\n").map(line => JSON.parse(line)), [
+			{ command: "git", args: ["-C", repo, "rev-parse", "HEAD"] },
+			{ command: "git", args: ["-C", repo, "ls-remote", "origin", "main"] },
+			{ command: "git", args: ["-C", repo, "pull", "--ff-only"] },
+			{ command: "npm", args: ["run", "bundle", "--prefix", repo] },
+		]);
+		assert.equal(statSync(config).mode & 0o777, 0o600);
+		for (const name of ["injected-dollar", "injected-backtick", "injected-config"]) assert.equal(existsSync(join(f.root, name)), false);
+	} finally { f.close(); }
+});
 
 test("doctor reports malformed config and invalid budgets in JSON without leaking credentials", async () => {
 	const f = fixture();
