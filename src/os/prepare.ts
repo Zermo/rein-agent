@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OMARCHY_BASE } from "./plan.ts";
 import { ARGENT_BASE } from "../argent/inventory.ts";
+import { RAINMETER_BASE } from "./rainmeter.ts";
 
 export const OS_THEME_FILES = ["src/os/assets/rain/theme.json", "src/os/assets/rain/wallpaper.svg"] as const;
 export const OS_SKIN_FILES = ["src/os/assets/skins/dareecho.ini"] as const;
@@ -20,6 +21,8 @@ export interface OSKitManifest {
 	omarchy?: typeof OMARCHY_BASE;
 	/** Pinned upstream for the built-in device toolkit (rein argent). */
 	argent: typeof ARGENT_BASE;
+	/** Pinned upstream for the terminal skin engine (rein os skin). */
+	rainmeter: typeof RAINMETER_BASE;
 	files: { path: string; sha256: string; bytes: number }[];
 }
 
@@ -84,6 +87,7 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 		reinVersion: pkg.version,
 		...(target === "omarchy" ? { omarchy: OMARCHY_BASE } : {}),
 		argent: ARGENT_BASE,
+		rainmeter: RAINMETER_BASE,
 		files: [...payload].sort(([a], [b]) => a.localeCompare(b)).map(([path, data]) => ({ path, sha256: sha(data), bytes: data.length })),
 	};
 	// Exclusive creation preserves an existing output even if it appears during staging.
@@ -137,7 +141,7 @@ export function validateTarget(platform, arch, version) {
 }
 async function verifyPayload() {
   const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
-  if (manifest.schemaVersion !== 1 || manifest.kind !== 'omarchy-post-install-overlay' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent) fail('Invalid kit manifest.');
+  if (manifest.schemaVersion !== 1 || manifest.kind !== 'omarchy-post-install-overlay' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent || !manifest.rainmeter) fail('Invalid kit manifest.');
   const seen = new Set();
   const result = [];
   const payloadRoot = await lstat(join(kit, 'payload'));
@@ -161,19 +165,23 @@ async function verifyPayload() {
 }
 export async function main(args) {
   if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-overlay.mjs --verify | --check | --install');
-  if (args[0] === '--help') { console.log('Dareecho overlay. Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
+  if (args[0] === '--help') { console.log('Dareecho clean install. Verify checks the exported files; check validates the base; install creates a new user-local Dareecho installation with its OS identity. No model downloads, setup, or services are started.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = homedir();
   if (process.getuid?.() === 0) fail('Run this as the target desktop user, without sudo.');
   await checkInstallParents(userHome);
   const versionPath = join(userHome, '.local/share/omarchy/version');
-  validateTarget(process.platform, process.arch, await readFile(versionPath, 'utf8').catch(() => ''));
+  const baseVersion = (await readFile(versionPath, 'utf8').catch(() => '')).trim();
+  validateTarget(process.platform, process.arch, baseVersion);
   const destination = join(userHome, '.local/share/rein-os');
   const launcher = join(userHome, '.local/bin/rein');
+  const identity = join(userHome, '.local/bin/dareecho');
   await absent(destination);
   await absent(launcher);
+  await absent(identity);
   if (args[0] === '--check') { console.log('REIN_OS_TARGET_READY'); return; }
+  const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
   await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
   await mkdir(dirname(launcher), { recursive: true, mode: 0o700 });
   await mkdir(destination, { mode: 0o700 });
@@ -185,7 +193,10 @@ export async function main(args) {
   const entry = join(destination, 'dist/rein.js');
   const wrapper = '#!/usr/bin/env node\n' + 'import("node:child_process").then(({spawn})=>{\n' + 'const child=spawn(process.execPath,[' + JSON.stringify(entry) + ',...process.argv.slice(2)],{stdio:"inherit"});\n' + 'child.on("error",e=>{console.error(e.message);process.exitCode=1});\nchild.on("exit",(code,signal)=>{if(signal)process.kill(process.pid,signal);else process.exitCode=code??1});\n});\n';
   await writeFile(launcher, wrapper, { flag: 'wx', mode: 0o700 });
-  console.log('REIN_OS_OVERLAY_INSTALLED\nRun ~/.local/bin/rein --version, then ~/.local/bin/rein setup. Configuration and sessions were preserved.');
+  await writeFile(join(destination, 'dareecho-release'), JSON.stringify({ name: 'Dareecho', version: manifest.reinVersion, base: { name: 'Omarchy', installed: baseVersion }, pins: { omarchy: manifest.omarchy, argent: manifest.argent, rainmeter: manifest.rainmeter } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  const dareechoScript = '#!/usr/bin/env node\n' + 'import("node:fs/promises").then(({readFile})=>{readFile((process.env.HOME||"") + "/.local/share/rein-os/dareecho-release", "utf8").then(text=>{const release=JSON.parse(text);if(process.argv[2]==="--json"){console.log(JSON.stringify(release,null,2));}else{console.log(release.name+" "+release.version+" (base: "+release.base.name+" "+release.base.installed+")");}}).catch(error=>{console.error("Dareecho installation not found: "+error.message);process.exitCode=1;});});\n';
+  await writeFile(identity, dareechoScript, { flag: 'wx', mode: 0o700 });
+  console.log('REIN_OS_OVERLAY_INSTALLED\nThe machine now identifies as Dareecho. Run ~/.local/bin/dareecho for the OS identity, then ~/.local/bin/rein --version and ~/.local/bin/rein setup. Configuration and sessions were preserved.');
 }
 const invoked = process.argv[1] && await realpath(process.argv[1]).catch(() => '');
 if (invoked === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
@@ -232,7 +243,7 @@ export async function chromeosUserHome() {
 }
 async function verifyPayload() {
   const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
-  if (manifest.schemaVersion !== 1 || manifest.kind !== 'chromeos-user-overlay' || manifest.target !== 'chromeos' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent) fail('Invalid ChromeOS kit manifest.');
+  if (manifest.schemaVersion !== 1 || manifest.kind !== 'chromeos-user-overlay' || manifest.target !== 'chromeos' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent || !manifest.rainmeter) fail('Invalid ChromeOS kit manifest.');
   const seen = new Set();
   const result = [];
   const payloadRoot = await lstat(join(kit, 'payload'));
@@ -364,9 +375,16 @@ Skins render in the current terminal only; the terminal device provider drives a
 ChromeOS ships verified boot (dm-verity) and A/B partitions. A deeper replacement of the rootfs itself is a separate image-level project (coreboot/firmware and \`chromeos-image\` territory) and is not what this kit does. No BIOS or kernel exploit can substitute for those requirements.
 `;
 
-const KIT_README = `# Dareecho VM overlay kit
+const KIT_README = `# Dareecho clean install kit
 
-This kit installs the bundled terminal harness into an already installed Omarchy 4.0.2 VM. It is a development payload, not a bootable image or an OS installer. The native Rein klaud desktop package is not included in this first overlay.
+Dareecho is a replacement OS for an empty machine. The pinned base system (Omarchy 4.0.2) performs the full clean install onto the empty disk — partitioning, kernel, userspace, desktop — and this kit adds Dareecho's userland: the Rein harness payload, the rain theme, the Rainmeter-rebuilt skin engine, and the Argent device toolkit. After the installer runs, the machine identifies as Dareecho:
+
+\`\`\`sh
+~/.local/bin/dareecho
+Dareecho 0.14.2 (base: Omarchy 4.0.2)
+\`\`\`
+
+\`~/.local/share/rein-os/dareecho-release\` records the version, the detected base, and every pinned upstream (Omarchy, Argent, Rainmeter). The kit itself is not a bootable image; the base ISO is the installation media. A fully Dareecho-built image — own base system, kernel, and bootable media — remains a build gate; this kit is the clean-install path for an empty machine today. The native Rein klaud desktop package is not included in this first release.
 
 Dareecho is the OS build's display name. The CLI remains \`rein os\`; existing installation paths and manifest fields remain stable for compatibility.
 
@@ -395,18 +413,19 @@ node fetch-upstream.mjs ./omarchy-source
 
 That command downloads the exact Omarchy source revision and checks the result. It does not run upstream scripts or build an ISO. A source checkout alone is not bootable installation media.
 
-## Apply the Dareecho overlay in the VM
+## Complete the Dareecho install in the VM
 
 Run without sudo:
 
 \`\`\`sh
 node install-overlay.mjs --check
 node install-overlay.mjs --install
+~/.local/bin/dareecho
 ~/.local/bin/rein --version
 ~/.local/bin/rein setup
 \`\`\`
 
-The installer creates ~/.local/share/rein-os and ~/.local/bin/rein, refusing to overwrite either. Existing ~/.rein configuration, accounts and sessions remain intact. Add ~/.local/bin to PATH if your shell does not already include it. Setup remains interactive; no background inference, cloud account, system service, model, or network listener is enabled by the overlay.
+The installer creates ~/.local/share/rein-os, ~/.local/bin/rein and ~/.local/bin/dareecho, refusing to overwrite any of them. It also writes ~/.local/share/rein-os/dareecho-release with the OS identity: the Dareecho version, the detected Omarchy base, and the Omarchy/Argent/Rainmeter pins. Existing ~/.rein configuration, accounts and sessions remain intact. Add ~/.local/bin to PATH if your shell does not already include it. Setup remains interactive; no background inference, cloud account, system service, model, or network listener is enabled by the install.
 
 ## Rain theme preview
 

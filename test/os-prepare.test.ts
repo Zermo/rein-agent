@@ -36,6 +36,8 @@ test("export produces an offline verifiable overlay, not a bootable image", asyn
 	assert.equal(result.manifest.bootable, false);
 	assert.equal(result.manifest.reinVersion, "1.2.3");
 	assert.equal(result.manifest.omarchy.commit, "346e69e1cec6c4e8924531874af6ba010a1bc99e");
+	assert.equal(result.manifest.rainmeter.license, "GPL-2.0");
+	assert.match(result.manifest.rainmeter.commit, /^[0-9a-f]{40}$/);
 	assert.ok(result.files.includes("install-overlay.mjs"));
 	assert.ok(result.files.includes("fetch-upstream.mjs"));
 	assert.doesNotMatch(await readFile(join(f.output, "payload/package.json"), "utf8"), /secret|must-not-export/);
@@ -130,10 +132,37 @@ test("bootstrap installs only fixture user files, starts a valid launcher, and p
 	assert.match((await exec(process.execPath, [runner, "--install"], { env })).stdout, /REIN_OS_OVERLAY_INSTALLED/);
 	const launcher = join(user, ".local/bin/rein");
 	assert.match((await exec(process.execPath, [launcher, "--version"], { env })).stdout, /fixture-rein --version/);
+	const identity = join(user, ".local/bin/dareecho");
+	assert.match((await exec(process.execPath, [identity], { env })).stdout, /Dareecho 1\.2\.3 \(base: Omarchy 4\.0\.2\)/);
+	const release = JSON.parse(await readFile(join(user, ".local/share/rein-os/dareecho-release"), "utf8"));
+	assert.equal(release.name, "Dareecho");
+	assert.equal(release.version, "1.2.3");
+	assert.equal(release.base.name, "Omarchy");
+	assert.equal(release.base.installed, "4.0.2");
+	assert.equal(release.pins.omarchy.commit, "346e69e1cec6c4e8924531874af6ba010a1bc99e");
+	assert.equal(release.pins.argent.license, "Apache-2.0");
+	assert.equal(release.pins.rainmeter.license, "GPL-2.0");
 	assert.equal(await readFile(join(user, ".rein/config.json"), "utf8"), "preserve-me");
 	assert.equal(await readFile(join(user, ".config/omarchy/themes/existing/theme.json"), "utf8"), "existing-desktop-theme");
 	for (const path of OS_THEME_FILES) assert.deepEqual(await readFile(join(user, ".local/share/rein-os", path)), await readFile(join(f.root, path)));
 	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
+	assert.deepEqual(await readFile(join(user, ".local/share/rein-os/dareecho-release"), "utf8"), JSON.stringify(release, null, 2) + "\n");
+});
+
+test("an existing Dareecho identity is preserved, never rewritten", async t => {
+	const f = await fixture(t);
+	await prepareReinOS({ output: f.output, bundleRoot: f.root });
+	const user = join(f.base, "user");
+	await mkdir(join(user, ".local/share/omarchy"), { recursive: true });
+	await mkdir(join(user, ".local/bin"), { recursive: true });
+	await writeFile(join(user, ".local/share/omarchy/version"), "4.0.2\n");
+	await writeFile(join(user, ".local/bin/dareecho"), "not-mine\n");
+	const runner = join(f.base, "fixture-runner.mjs");
+	await writeFile(runner, `Object.defineProperty(process,'platform',{value:'linux'}); Object.defineProperty(process,'arch',{value:'x64'}); process.getuid=()=>1000; const {main}=await import(${JSON.stringify(pathToFileURL(join(f.output, "install-overlay.mjs")).href)}); await main(process.argv.slice(2));`);
+	const env = { ...process.env, HOME: user, USERPROFILE: user };
+	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
+	assert.equal(await readFile(join(user, ".local/bin/dareecho"), "utf8"), "not-mine\n");
+	await assert.rejects(access(join(user, ".local/share/rein-os")));
 });
 
 test("rain assets are required hashed payloads and same-size tampering is rejected", async t => {

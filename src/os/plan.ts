@@ -79,7 +79,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 		plan.status = candidate ? "candidate" : "unsupported";
 		plan.adapter = "omarchy-x86_64-vm-overlay";
 		plan.runtimes = ["llama.cpp", "existing OpenAI-compatible server", "vLLM after GPU validation"];
-		plan.facts.push("The preparation command exports a Dareecho overlay for an installed Omarchy VM. It does not build a bootable ISO or certify this machine for installation.");
+		plan.facts.push("Dareecho is a clean-install OS for an empty machine: the pinned Omarchy base performs the full clean install, and the Dareecho kit adds the userland and OS identity. The kit does not build a bootable ISO or certify this machine for installation.");
 		plan.facts.push(`The reviewed Omarchy base is ${OMARCHY_BASE.tag} (${OMARCHY_BASE.commit}). Its supported installation starts with the upstream ISO.`);
 		if (!candidate) {
 			plan.facts.push(apple ? "Omarchy does not directly support M-series Macs. Native macOS is the current path; a Linux port depends on model-specific Asahi support." : "This preparation path targets x86-64 PCs and VMs. No image target is defined for this OS and architecture.");
@@ -89,7 +89,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 		plan.gates.push(
 			{ id: "hardware", status: "required", detail: "Verify the target's firmware boot mode, graphics, storage, network, input devices, and upstream hardware support. CPU architecture alone is insufficient." },
 			{ id: "media", status: "required", detail: "Acquire and verify the upstream installation ISO separately. The source commit pins reviewed code, not an ISO checksum." },
-			{ id: "vm", status: "required", detail: "Install Omarchy in a disposable x86-64 VM using its wizard and only that VM's virtual disk, then apply and test the Dareecho overlay." },
+			{ id: "vm", status: "required", detail: "Install the Omarchy base in a disposable x86-64 VM (its wizard, only that VM's empty virtual disk), then complete the Dareecho install with the kit and verify the machine identifies as Dareecho." },
 			{ id: "migration", status: "required", detail: "Before any physical-machine installation, review backups, recovery, exact target disk, encryption, and owner approval in a separate installer." },
 		);
 		plan.sources.push(OMARCHY_BASE.installation, OMARCHY_BASE.macSupport, OMARCHY_BASE.unattended);
