@@ -47,6 +47,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 			plan.runtimes.push("vLLM (verify GPU, driver, and runtime compatibility)");
 		}
 		plan.facts.push("Host mode keeps the installed OS. Runtime names are candidates, not installed or benchmarked capabilities.");
+		plan.facts.push("Platform components ship in the same bundle: the Rainmeter-rebuilt terminal skin engine (rein os skin) and the Argent-rebuilt device toolkit (rein argent). Both are offline; device targets beyond the terminal provider are parity gates.");
 		if (apple) {
 			plan.facts.push("Apple Silicon uses native macOS and its shared memory pool; an Omarchy Linux replacement is a separate hardware port.");
 			plan.sources.push("https://github.com/ml-explore/mlx-lm", OMARCHY_BASE.macSupport);

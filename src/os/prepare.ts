@@ -4,9 +4,11 @@ import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/pr
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OMARCHY_BASE } from "./plan.ts";
+import { ARGENT_BASE } from "../argent/inventory.ts";
 
 export const OS_THEME_FILES = ["src/os/assets/rain/theme.json", "src/os/assets/rain/wallpaper.svg"] as const;
-const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES];
+export const OS_SKIN_FILES = ["src/os/assets/skins/dareecho.ini"] as const;
+const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES, ...OS_SKIN_FILES];
 const VENDOR = ["meat", "mattpocock", "ponytail", "unlazy", "obscura", "fold", "pi-posthorse"];
 export type OSTarget = "omarchy" | "chromeos";
 export interface OSKitManifest {
@@ -16,6 +18,8 @@ export interface OSKitManifest {
 	target: "linux-x64" | "chromeos";
 	reinVersion: string;
 	omarchy?: typeof OMARCHY_BASE;
+	/** Pinned upstream for the built-in device toolkit (rein argent). */
+	argent: typeof ARGENT_BASE;
 	files: { path: string; sha256: string; bytes: number }[];
 }
 
@@ -51,7 +55,7 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 	const pkg = JSON.parse((await regularFile(join(root, "package.json"))).toString("utf8"));
 	if (typeof pkg.version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?$/.test(pkg.version)) throw new Error("The Rein package version is invalid.");
 	const payload = new Map<string, Buffer>();
-	for (const directory of ["src", "src/os", "src/os/assets", "src/os/assets/rain"]) {
+	for (const directory of ["src", "src/os", "src/os/assets", "src/os/assets/rain", "src/os/assets/skins"]) {
 		const stat = await lstat(join(root, directory));
 		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("OS theme assets must be in ordinary payload directories without symlinks.");
 	}
@@ -79,6 +83,7 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 		target: target === "omarchy" ? "linux-x64" : "chromeos",
 		reinVersion: pkg.version,
 		...(target === "omarchy" ? { omarchy: OMARCHY_BASE } : {}),
+		argent: ARGENT_BASE,
 		files: [...payload].sort(([a], [b]) => a.localeCompare(b)).map(([path, data]) => ({ path, sha256: sha(data), bytes: data.length })),
 	};
 	// Exclusive creation preserves an existing output even if it appears during staging.
@@ -132,7 +137,7 @@ export function validateTarget(platform, arch, version) {
 }
 async function verifyPayload() {
   const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
-  if (manifest.schemaVersion !== 1 || manifest.kind !== 'omarchy-post-install-overlay' || manifest.bootable !== false || !Array.isArray(manifest.files)) fail('Invalid kit manifest.');
+  if (manifest.schemaVersion !== 1 || manifest.kind !== 'omarchy-post-install-overlay' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent) fail('Invalid kit manifest.');
   const seen = new Set();
   const result = [];
   const payloadRoot = await lstat(join(kit, 'payload'));
@@ -151,7 +156,7 @@ async function verifyPayload() {
     if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
     result.push([entry.path, data]);
   }
-  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini']) if (!seen.has(name)) fail('Required payload missing: ' + name);
   return result;
 }
 export async function main(args) {
@@ -227,7 +232,7 @@ export async function chromeosUserHome() {
 }
 async function verifyPayload() {
   const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
-  if (manifest.schemaVersion !== 1 || manifest.kind !== 'chromeos-user-overlay' || manifest.target !== 'chromeos' || manifest.bootable !== false || !Array.isArray(manifest.files)) fail('Invalid ChromeOS kit manifest.');
+  if (manifest.schemaVersion !== 1 || manifest.kind !== 'chromeos-user-overlay' || manifest.target !== 'chromeos' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent) fail('Invalid ChromeOS kit manifest.');
   const seen = new Set();
   const result = [];
   const payloadRoot = await lstat(join(kit, 'payload'));
@@ -246,7 +251,7 @@ async function verifyPayload() {
     if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
     result.push([entry.path, data]);
   }
-  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini']) if (!seen.has(name)) fail('Required payload missing: ' + name);
   return result;
 }
 export async function main(args) {
@@ -334,6 +339,20 @@ The installer confirms the machine identifies as Chrome OS, then creates the two
 
 The verified payload includes \`src/os/assets/rain/theme.json\` and \`wallpaper.svg\`, with the field guide's cream, rust, amber and forest-green palette. After installation these files live under \`~/.local/share/rein-os/src/os/assets/rain/\`. This installer never selects a wallpaper or changes Chrome settings.
 
+## Dareecho skin engine and Argent toolkit
+
+The payload also ships the terminal skin engine (Rainmeter rebuild) and the Argent device toolkit (pin recorded in \`manifest.json\`):
+
+\`\`\`sh
+~/.local/bin/rein os skin render ~/.local/share/rein-os/src/os/assets/skins/dareecho.ini
+~/.local/bin/rein os rainmeter
+~/.local/bin/rein argent status
+~/.local/bin/rein argent flow run <flow.json>
+~/.local/bin/rein argent diff baseline.png actual.png
+\`\`\`
+
+Skins render in the current terminal only; the terminal device provider drives a persistent tmux pane. Neither starts a service, and device targets (iOS, Android, TV, desktop) remain parity gates until driven end to end on real hardware.
+
 ## Acceptance gates before treating ChromeOS as a supported target
 
 - Boot twice after enabling developer mode; confirm shell, network, storage and display.
@@ -399,6 +418,35 @@ The installer creates ~/.local/share/rein-os and ~/.local/bin/rein, refusing to 
 Animation runs only in the current interactive terminal, at eight frames per second. Press q or Ctrl-C to restore the screen and input mode. REIN_REDUCED_MOTION=1 keeps even an animated request static; NO_COLOR disables ANSI palette colors. The default preview and --static are plain text and work in pipes.
 
 The verified payload includes src/os/assets/rain/theme.json and wallpaper.svg, with the field guide's cream, rust, amber and forest-green palette. The wallpaper is a static 1920-by-1080 SVG. After installation these files live under ~/.local/share/rein-os/src/os/assets/rain/. They provide a theme basis for later desktop integration; this installer never selects a wallpaper, changes terminal preferences, writes Omarchy theme settings, or installs an animated desktop background.
+
+## Dareecho skin engine (Rainmeter rebuild)
+
+The payload ships the terminal skin engine rebuilt from Rainmeter's skin model (pinned GPL-2.0 source is the reviewed reference, not copied code) and a sample skin, installed at ~/.local/share/rein-os/src/os/assets/skins/dareecho.ini:
+
+\`\`\`sh
+~/.local/bin/rein os skin render ~/.local/share/rein-os/src/os/assets/skins/dareecho.ini
+~/.local/bin/rein os skin render ~/.local/share/rein-os/src/os/assets/skins/dareecho.ini --frames 16
+~/.local/bin/rein os skin install <skin-directory>
+~/.local/bin/rein os skin list
+~/.local/bin/rein os rainmeter
+\`\`\`
+
+Render is static by default and pipe-safe; --frames animates on the alternate screen (q or Ctrl-C restores it). Skins are INI: [Measure*] sections compute values, [Meter*] sections render them, [Variables] and styles are shared. The installer never starts a service for this; skins run when you render them.
+
+## Argent device toolkit
+
+The same bundle carries the Argent device toolkit (pinned Apache-2.0 upstream, recorded in manifest.json): provider contract, record & replay flows, and pure-TS PNG capture and diffing.
+
+\`\`\`sh
+~/.local/bin/rein argent status
+~/.local/bin/rein argent rebuild
+~/.local/bin/rein argent flow validate <flow.json>
+~/.local/bin/rein argent flow run <flow.json>
+~/.local/bin/rein argent screenshot --out shot.png
+~/.local/bin/rein argent diff baseline.png actual.png
+\`\`\`
+
+The terminal provider drives a persistent Rein tmux pane (type, key, screenshot, capture-text). iOS, Android, TV and desktop targets are parity gates: the contract and flows are device-agnostic, and a target counts as supported only once a real device has been driven end to end.
 
 ## Acceptance gates before making a reusable image
 

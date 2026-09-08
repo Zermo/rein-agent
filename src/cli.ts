@@ -50,6 +50,13 @@ Usage:
   rein model plan <repo> --file <gguf> [--revision <ref>] [--json]
   rein os plan [--mode host|image] [--json]    native host and OS installation gates
   rein os prepare --output <dir>             prepare a pinned Omarchy VM overlay kit
+  rein os skin render <file|dir> [--frames n]  Rainmeter-rebuilt skin engine, static by default
+  rein os skin install|list [--dir <target>]   stage and list terminal skins
+  rein os rainmeter [--json]                 Rainmeter rebuild report: pin, mapping, gates
+  rein argent status|rebuild [--json]        Argent device toolkit: providers, rebuild report
+  rein argent flow validate|run <flow.json>  record & replay interaction flows
+  rein argent screenshot --out f.png         capture a terminal pane as a PNG
+  rein argent diff <a.png> <b.png>           visual regression pixel diff
   rein skills [name]            list bundled workflows, or read one without running it
   rein profile [--json]         view your operator profile and enabled skill pack
   rein profile pack <name>      enable everyday|ship|ops|study|studio, or none
@@ -242,6 +249,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 	if (_[0] === "os") {
 		const { runOSCommand } = await import("./os/command.ts");
 		await runOSCommand(_.slice(1), flags); return;
+	}
+	if (_[0] === "argent") {
+		const { runArgentCommand } = await import("./argent/command.ts");
+		await runArgentCommand(_.slice(1), flags); return;
 	}
 	if (_[0] === "update") {
 		if (_.length !== 1 || Object.keys(flags).length) throw new Error("Usage: rein update");

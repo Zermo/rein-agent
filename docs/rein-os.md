@@ -63,6 +63,39 @@ The exported kit includes checksum-verified [theme metadata](../src/os/assets/ra
 
 These assets are the basis for a future desktop theme. This stage does not activate an Omarchy theme, install an animated wallpaper, or add a boot animation. Desktop selection, reduced motion, reboot persistence and recovery still require validation against the actual Omarchy target.
 
+## Rainmeter rebuild (terminal skin engine)
+
+Rainmeter (`rainmeter/rainmeter.git` @ `be2afe7e`, GPL-2.0) is the Windows skin engine: INI-defined skins built from measures (value providers) and meters (visuals), with variables, styles and conditional behavior. Dareecho rebuilds that model clean-room for the terminal: no GPL-2.0 code is copied, and the pinned commit is the reviewed reference, the way Omarchy and Argent are pinned.
+
+```sh
+rein os rainmeter
+rein os skin render src/os/assets/skins/dareecho.ini
+rein os skin render src/os/assets/skins/dareecho.ini --frames 16
+rein os skin install <skin-directory> [--dir <target>]
+rein os skin list
+```
+
+`rein os skin render` is static by default; `--frames n` animates on the alternate screen, and q or Ctrl-C restores it. `REIN_REDUCED_MOTION=1` keeps skins still, matching the rain preview. Implemented measures: Time, Uptime, SysInfo, String, Loop and Calc (with `[measure]` and `#variable#` references). Meters: String, Bar, Gauge and Line, with IfMeasureName/IfCondition. Windows-API measures (CPU, Net, Ping, WebParser, Registry, NowPlaying) and raster/vector meters are parity gates, not claims: they need their own validation before counting as rebuilt. `rein os rainmeter` prints the full module-by-module mapping.
+
+A terminal dashboard skin ships with the engine and with every exported kit (the kit manifest pins the Rainmeter commit alongside Omarchy and Argent).
+
+## Argent integration (device flows)
+
+Argent (`software-mansion/argent.git` @ `aa90873b`, Apache-2.0; upstream `@swmansion/argent@0.24.0`) is a device-action toolkit: a frozen v1 provider contract (external `ext:` providers with capability tokens), recorded device flows with pass/fail/skip/error step reports, and PNG-based visual verification. Dareecho rebuilds the contract, the flow engine and the PNG pipeline with zero runtime dependencies, and adds the one provider this machine has: the terminal.
+
+```sh
+rein argent rebuild
+rein argent status
+rein argent flow validate <file.json>
+rein argent flow run <file.json>
+rein argent screenshot <id|image-file> --out <new.png>
+rein argent diff <a.png> <b.png> [--threshold n]
+```
+
+Flow files follow the upstream v1 schema: steps with `action` (tap, swipe, type, key, screenshot, wait, assert) and `x`, `y`, `x2`, `y2`, `text`, `delayMs`. The built-in terminal provider is honest about its surface: it can type, press keys, wait, capture text and diff screenshots, but has no pointer, so tap and swipe steps skip rather than fail. A step whose provider lacks a mechanism is reported as skipped with the reason, never silently passed.
+
+`rein argent screenshot` renders a terminal surface into a deterministic pixel grid (the same renderer the diff uses), so a flow can capture a terminal state and verify it image-wise. The provider contract is reimplemented against the pinned upstream, so external `ext:` providers and recorded flows keep their shapes.
+
 ## Gates to a distributable OS
 
 1. Boot and test the VM desktop, input, network and storage on a fresh base, then reboot and repeat.

@@ -161,6 +161,12 @@ export class TmuxShells {
 		if (text) await this.command(["send-keys", "-t", target, "-l", "--", text], signal);
 		if (enter) await this.command(["send-keys", "-t", target, "Enter"], signal);
 	}
+	/** Press one named key (tmux key names: Enter, Tab, Escape, C-c, Up, ...). */
+	async sendKey(id: string, key: string, signal?: AbortSignal): Promise<void> {
+		if (typeof key !== "string" || !key.length || key.length > 32 || key.includes("\0") || key.includes(" ") || key.includes("--")) throw new Error("A key must be a single tmux key name such as Enter, Tab, C-c or Up.");
+		const target = await this.owned(id, signal);
+		await this.command(["send-keys", "-t", target, "--", key], signal);
+	}
 	async interrupt(id: string, signal?: AbortSignal): Promise<void> {
 		await this.command(["send-keys", "-t", await this.owned(id, signal), "C-c"], signal);
 	}

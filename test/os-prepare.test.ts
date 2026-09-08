@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { OS_THEME_FILES, prepareReinOS } from "../src/os/prepare.ts";
+import { OS_THEME_FILES, OS_SKIN_FILES, prepareReinOS } from "../src/os/prepare.ts";
 const exec = promisify(execFile);
 
 async function fixture(t: any) {
@@ -17,7 +17,9 @@ async function fixture(t: any) {
 	await mkdir(join(root, "dist"), { recursive: true });
 	await mkdir(join(root, "vendor/meat"), { recursive: true });
 	await mkdir(join(root, "src/os/assets/rain"), { recursive: true });
+	await mkdir(join(root, "src/os/assets/skins"), { recursive: true });
 	for (const path of OS_THEME_FILES) await writeFile(join(root, path), await readFile(new URL(`../${path}`, import.meta.url)));
+	for (const path of OS_SKIN_FILES) await writeFile(join(root, path), await readFile(new URL(`../${path}`, import.meta.url)));
 	await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.2.3", secret: "must-not-export" }));
 	await writeFile(join(root, "dist/rein.js"), 'console.log("fixture-rein", process.argv.slice(2).join("|"));\n');
 	await writeFile(join(root, "dist/meat-worker.js"), "// fixture worker\n");
@@ -163,6 +165,8 @@ test("the ChromeOS kit exports a userland installer, not the Omarchy fetch", asy
 	assert.equal(kit.manifest.kind, "chromeos-user-overlay");
 	assert.equal(kit.manifest.target, "chromeos");
 	assert.equal(kit.manifest.omarchy, undefined);
+	assert.equal(kit.manifest.argent.repository, "https://github.com/software-mansion/argent.git");
+	assert.equal(kit.manifest.argent.license, "Apache-2.0");
 	assert.ok(kit.files.includes("install-chromeos.mjs"));
 	assert.ok(!kit.files.includes("install-overlay.mjs"));
 	assert.ok(!kit.files.includes("fetch-upstream.mjs"));
