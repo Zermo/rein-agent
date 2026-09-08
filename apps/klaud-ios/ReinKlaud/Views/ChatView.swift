@@ -46,7 +46,7 @@ struct ChatView: View {
         HStack(alignment: .center, spacing: 12) {
             if let bot = store.selectedBot {
                 Button { editingBot = bot } label: {
-                    BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), phase: store.avatarPhase(for: bot)).frame(width: 56, height: 64)
+                    BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), phase: store.avatarPhase(for: bot), botID: bot.id).frame(width: 56, height: 64)
                 }.buttonStyle(.plain).accessibilityLabel("Change \(bot.name)’s avatar")
             }
             VStack(alignment: .leading, spacing: 2) {

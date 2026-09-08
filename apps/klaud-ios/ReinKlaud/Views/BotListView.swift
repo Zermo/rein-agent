@@ -28,7 +28,7 @@ struct BotListView: View {
                                 HStack(spacing: 0) {
                                     Button { store.sounds.play(.click); Task { await store.chooseBot(bot.id) } } label: {
                                         HStack(spacing: 12) {
-                                            BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), phase: store.avatarPhase(for: bot)).frame(width: 56, height: 64).accessibilityHidden(true)
+                                            BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), phase: store.avatarPhase(for: bot), botID: bot.id).frame(width: 56, height: 64).accessibilityHidden(true)
                                             VStack(alignment: .leading, spacing: 3) {
                                                 Text(bot.name).font(.reinBody(.headline, weight: .bold))
                                                 Text(store.avatarPhase(for: bot).label.uppercased()).font(.reinMono(.caption2)).foregroundStyle(theme.muted)

@@ -72,8 +72,9 @@ Setup does not enable background autonomy or send the suggested first message.
 Each bot has one of six rust-colored hats with floating eyewear and expressive
 eyebrows: Aviator, Rider, Builder, Slugger, Medic, or Explorer. The eyebrows follow
 reported activity and approval requests. Old bots receive a stable default hat;
-changing headwear preserves their conversations. Motion stops when the app is
-hidden and respects reduced motion.
+changing headwear preserves their conversations. Active portraits have continuous
+procedural drift, tilt, and moving eyewear and brows. They settle when idle,
+pause when hidden or offscreen, and stay still with reduced motion.
 
 The displayed name is **klaʊdbot**. The existing bundle identifier and
 `rein-klaud.app` filename stay stable for installation and updates. Read the

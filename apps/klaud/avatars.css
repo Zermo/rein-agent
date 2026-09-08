@@ -9,20 +9,13 @@
   overflow: visible;
 }
 :root[data-dark="true"] .bot-avatar { --avatar-rust: var(--color-night-accent); }
+.bot-avatar-portrait, .bot-avatar-glasses,
+.bot-avatar-brow-left, .bot-avatar-brow-right { transform-box: view-box; }
+.bot-avatar-portrait { transform-origin: 64px 64px; }
+.bot-avatar-glasses { transform-origin: 64px 80px; }
 .bot-avatar-brow-left { transform-origin: 48px 63px; }
 .bot-avatar-brow-right { transform-origin: 80px 63px; }
-.bot-avatar[data-state="working"] .bot-avatar-brows,
-.bot-avatar[data-state="tool"] .bot-avatar-brows { animation: avatar-focus 2.8s var(--ease-in-out) infinite; }
-.bot-avatar[data-state="thinking"] .bot-avatar-brow-right { animation: avatar-consider 3.4s var(--ease-in-out) infinite; }
-.bot-avatar[data-state="responding"] .bot-avatar-brows { animation: avatar-reply 1.8s var(--ease-in-out) infinite; }
-.bot-avatar[data-state="journaling"] .bot-avatar-brows { animation: avatar-note 2.4s var(--ease-in-out) infinite; }
-.bot-avatar[data-state="autonomy"] .bot-avatar-brows { animation: avatar-focus 3.8s var(--ease-in-out) infinite; }
-.bot-avatar[data-paused="true"] .bot-avatar-brows,
-.bot-avatar[data-paused="true"] .bot-avatar-brow-right { animation-play-state: paused; }
-@keyframes avatar-focus { 0%, 65%, 100% { transform: translateY(0); } 80% { transform: translateY(1.5px); } }
-@keyframes avatar-consider { 0%, 60%, 100% { transform: rotate(0); } 75% { transform: rotate(-6deg); } }
-@keyframes avatar-reply { 0%, 55%, 100% { transform: translateY(0); } 70% { transform: translateY(-1.5px); } }
-@keyframes avatar-note { 0%, 65%, 100% { transform: translate(0, 0); } 80% { transform: translate(1px, 1px); } }
+.bot-avatar[data-animated="true"] .bot-avatar-portrait { will-change: transform; }
 .avatar-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: var(--space-xs); }
 .avatar-choice {
   position: relative;
@@ -50,6 +43,7 @@
   .avatar-choice:not(:disabled):active { transform: translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bot-avatar .bot-avatar-brows, .bot-avatar .bot-avatar-brow-right { animation: none !important; }
+  .bot-avatar-portrait, .bot-avatar-glasses,
+  .bot-avatar-brow-left, .bot-avatar-brow-right { transform: none !important; will-change: auto !important; }
   .avatar-choice { transform: none !important; }
 }

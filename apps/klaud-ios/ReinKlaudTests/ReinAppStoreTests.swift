@@ -859,6 +859,32 @@ final class ReinAppStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testPublicProgressUpdatesRunningAvatarWithoutBecomingAFrontendError() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let runID = "33333333-3333-4333-8333-333333333333"
+        var state = appState(accent: "rain")
+        state.bots.append(.init(id: "bot-2", name: "Second bot", sessionId: "thread-2"))
+        let client = StoreMockClient(snapshot: snapshot(runID: runID), state: state)
+        let store = makeStore(defaults: defaults, client: client, makeRunID: { runID })
+        await store.connect(rawURL: gatewayOrigin, token: token)
+        XCTAssertTrue(store.send("Check this synthetic task"))
+        await waitUntil { !client.resumeCalls.isEmpty }
+        await store.chooseBot("bot-2")
+        for (index, phase) in [BotAvatarPhase.thinking, .journaling, .autonomy, .tool, .responding].enumerated() {
+            let data = Data("{\"type\":\"CUSTOM\",\"name\":\"klaud.progress\",\"value\":{\"phase\":\"\(phase.rawValue)\",\"turn\":1}}".utf8)
+            let event = try JSONDecoder().decode(GatewayEvent.self, from: data)
+            client.emit(.init(runID: runID, sequence: index + 1, event: event))
+            await waitUntil { store.activityPhase == phase }
+            XCTAssertEqual(store.avatarPhase(for: state.bots[0]), phase)
+            XCTAssertEqual(store.avatarPhase(for: state.bots[1]), .ready)
+            XCTAssertNil(store.errorMessage)
+            XCTAssertTrue(client.toolAnswers.isEmpty)
+        }
+        store.disconnect()
+    }
+
+    @MainActor
     private func makeStore(
         defaults: UserDefaults,
         cursor: RunEventCursor? = nil,
@@ -1165,6 +1191,11 @@ private final class StoreMockClient: ReinGatewayClientProtocol, @unchecked Senda
             if let error { continuation.finish(throwing: error); return }
             self.lock.withLock { self.resumeContinuations.append(continuation) }
         }
+    }
+
+    func emit(_ event: RunStreamEvent) {
+        let listeners = lock.withLock { resumeContinuations }
+        for listener in listeners { listener.yield(event) }
     }
 
     func cancel(runID: String) async throws {

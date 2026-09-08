@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { AVATAR_BROWS, AVATAR_STATES, AVATAR_STYLES, avatarForBot } from "./avatar-catalog.mjs";
+import { attachAvatarMotion, seedForAvatar } from "./avatar-motion.mjs";
 
 const ink = "var(--avatar-ink)", rust = "var(--avatar-rust)", paper = "var(--avatar-paper)", gold = "var(--avatar-gold)";
 
@@ -20,7 +21,7 @@ function Headwear({ avatar }) {
       <path d="M35 84 Q64 94 95 84" fill="none" stroke={gold} strokeWidth="2"/>
       <circle cx="29" cy="61" r="4" fill={paper} stroke={ink} strokeWidth="2"/>
       <circle cx="101" cy="61" r="4" fill={paper} stroke={ink} strokeWidth="2"/>
-      <path d="M40 79 H54 M74 79 H88" fill="none" stroke={ink} strokeWidth="3"/>
+      <g className="bot-avatar-glasses"><path d="M40 79 H54 M74 79 H88" fill="none" stroke={ink} strokeWidth="3"/></g>
     </>;
     case "builder": return <>
       <path d="M27 56 V49 C27 31 43 23 64 23 C85 23 101 32 101 49 V56 Z" fill={rust} stroke={ink} strokeWidth="3"/>
@@ -74,13 +75,21 @@ export function BotAvatar({ avatar, botId, state = "ready", size = 48, decorativ
   const label = AVATAR_STYLES.find(style => style.id === choice).label;
   const dimension = typeof size === "number" && Number.isFinite(size) ? Math.max(16, Math.min(512, size)) : 48;
   const brows = AVATAR_BROWS[phase];
-  return <svg className="bot-avatar" viewBox="0 0 128 128" width={dimension} height={dimension}
+  const svg = useRef(null), motion = useRef(null);
+  const seed = seedForAvatar(botId ?? choice);
+  useEffect(() => {
+    motion.current = attachAvatarMotion(svg.current);
+    return () => { motion.current?.destroy(); motion.current = null; };
+  }, [choice]);
+  useEffect(() => { motion.current?.update({ phase, seed, paused }); }, [choice, phase, seed, paused]);
+  return <svg ref={svg} className="bot-avatar" viewBox="0 0 128 128" width={dimension} height={dimension}
     data-avatar={choice} data-state={phase} data-paused={paused ? "true" : "false"}
     role={decorative ? undefined : "img"} aria-hidden={decorative ? "true" : undefined}
     aria-label={decorative ? undefined : `${label} avatar — ${AVATAR_STATES[phase]}`} focusable="false">
     <g className="bot-avatar-portrait"><Headwear avatar={choice}/>
       <g className="bot-avatar-brows" fill="none" stroke={ink} strokeWidth="4" strokeLinecap="round">
-        <path className="bot-avatar-brow-left" d={brows[0]}/><path className="bot-avatar-brow-right" d={brows[1]}/>
+        <g className="bot-avatar-brow-left"><path d={brows[0]}/></g>
+        <g className="bot-avatar-brow-right"><path d={brows[1]}/></g>
       </g>
     </g>
   </svg>;

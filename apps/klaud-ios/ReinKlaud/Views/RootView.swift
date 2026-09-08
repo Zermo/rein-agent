@@ -57,7 +57,7 @@ private struct TabletShell: View {
                     Section("Field units") {
                         ForEach(store.state.bots) { bot in
                             Button { Task { await store.chooseBot(bot.id) } } label: {
-                                HStack { BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), phase: store.avatarPhase(for: bot)).frame(width: 36, height: 44).accessibilityHidden(true); Text(bot.name); Spacer(); if store.selectedBotID == bot.id { Image(systemName: "arrow.right") } }
+                                HStack { BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), phase: store.avatarPhase(for: bot), botID: bot.id).frame(width: 36, height: 44).accessibilityHidden(true); Text(bot.name); Spacer(); if store.selectedBotID == bot.id { Image(systemName: "arrow.right") } }
                             }.buttonStyle(.plain).frame(minHeight: 44)
                         }
                     }

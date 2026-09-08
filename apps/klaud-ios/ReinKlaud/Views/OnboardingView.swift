@@ -134,7 +134,7 @@ struct BotSetupView: View {
                             Task { await store.chooseBot(bot.id); if store.errorMessage == nil { store.completeBotSetup() }; saving = false }
                         } label: {
                             HStack(spacing: 14) {
-                                BotAvatarView(style: .resolve(bot.avatar, botID: bot.id)).frame(width: 56, height: 64).accessibilityHidden(true)
+                                BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), botID: bot.id).frame(width: 56, height: 64).accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 4) { Text(bot.name).font(.reinBody(.headline, weight: .bold)); Text("Continue this conversation").font(.reinBody(.footnote)).foregroundStyle(theme.muted) }
                                 Spacer(); Image(systemName: "arrow.right")
                             }.padding(12).background(theme.raised).overlay(Rectangle().stroke(theme.strongRule))

@@ -60,8 +60,11 @@ A named four-point scale lives in `tokens.css`. App styles use those names rathe
 - Bot eyebrows reflect ready, working, thinking, replying, tool execution,
   journaling, autonomy work, approval, and error states. They express reported
   activity, not an inferred emotion. Ready and attention states remain still;
-  working states may use small brow movements. Pause motion while hidden, and
-  keep static expressions with reduced motion.
+  active portraits drift, tilt, and breathe continuously, with a slight lag in
+  the eyewear and independent brow movement. Use deterministic motion per bot,
+  blend between activities, and settle into stillness when work ends. Pause
+  motion while hidden or offscreen and keep static expressions with reduced
+  motion. Desktop vectors and the native iOS canvas share the same motion model.
 - Rain is klaʊdbot's ambient motif: sparse square drops, a pixel cloud, and
   the established rust/paper/amber palette. Keep it in frame or wallpaper areas,
   away from reading and input surfaces. Provide an off switch, pause while hidden,

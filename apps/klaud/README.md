@@ -168,8 +168,12 @@ The phase stays visible in Replies view when the activity signal is enabled.
 Reduced motion replaces animation with static symbols and readable labels.
 Avatar eyebrows follow those same runtime states, including waiting for approval
 and errors. They represent reported activity, not inferred feelings. Ready,
-approval, and error portraits remain still; active brow movement stops when the
-activity ends, pauses while hidden, and is disabled with reduced motion.
+approval, and error portraits settle into stillness. During work, the whole
+portrait drifts, tilts, and breathes, while eyewear and brows move independently.
+Each bot has a stable motion pattern; phase changes blend from its current pose.
+The desktop uses the existing SVG artwork and a shared animation scheduler,
+with no 3D dependency. Hidden and offscreen portraits suspend their updates;
+reduced motion keeps a static expression.
 
 **Rain effects** adds sparse pixel rain and a small cloud in a separate console
 frame above the masthead. It never covers conversation or input. The device-local

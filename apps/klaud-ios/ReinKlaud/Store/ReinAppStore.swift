@@ -579,14 +579,7 @@ final class ReinAppStore: ObservableObject {
         guard isCurrentConnection(context) else { return }
         do {
             activityBotID = botID
-            switch event.type {
-            case "RUN_STARTED", "TOOL_CALL_END": activityPhase = .working
-            case "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT": activityPhase = .responding
-            case "TOOL_CALL_START": activityPhase = .tool
-            case "RUN_ERROR": activityPhase = .error
-            case "RUN_FINISHED": activityPhase = .ready
-            default: break
-            }
+            if let reported = BotAvatarPhase.reported(by: event) { activityPhase = reported }
             if event.type == "RUN_STARTED" { currentRunID = event.runId }
             if event.type == "RUN_STARTED", let id = event.runId { persistActiveRun(id, origin: context.origin) }
             if event.type == "TEXT_MESSAGE_START" { sounds.play(.reply) }
@@ -606,6 +599,8 @@ final class ReinAppStore: ObservableObject {
 
     private func handleFrontend(_ event: GatewayEvent, context: StoreConnectionContext) async throws {
         try requireCurrentConnection(context)
+        // Public progress and future custom events are not frontend tool requests.
+        guard event.name == "klaud.approval" || event.name == "klaud.frontend_tool" else { return }
         guard let value = event.value?.objectValue,
               let runID = value["runId"]?.stringValue else { throw StateReducerError.invalidPatch }
         let identifier = value["toolCallId"]?.stringValue ?? value["id"]?.stringValue

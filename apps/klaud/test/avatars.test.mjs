@@ -64,11 +64,12 @@ test("picker uses labelled native controls with a single persisted selection", (
   assert.equal(selected, "explorer");
 });
 
-test("idle and approval remain still; reduced-motion and hidden-page pauses cover animated brows", async () => {
+test("motion has one procedural driver and reduced motion overrides portrait transforms", async () => {
   const css = await readFile(new URL("../avatars.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /data-state="(?:ready|approval|error)"/);
   assert.match(css, /prefers-reduced-motion: reduce/);
-  assert.match(css, /animation: none !important/);
-  assert.match(css, /data-paused="true"/);
-  assert.match(css, /animation-play-state: paused/);
+  assert.match(css, /transform: none !important/);
+  assert.doesNotMatch(css, /@keyframes|animation:/);
+  assert.match(css, /data-animated="true"/);
+  assert.match(css, /transform-origin: 64px 64px/);
 });
