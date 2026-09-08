@@ -414,7 +414,7 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			}
 		}
 		if (event.type === "TOOL_CALL_RESULT" && typeof event.toolCallId === "string") {
-			run.pending.delete(event.toolCallId);
+			run.pending.delete(typeof event.providerToolCallId === "string" ? event.providerToolCallId : event.toolCallId);
 			if (run.status === "waiting" && run.pending.size === 0) run.status = "running";
 		}
 		if (event.type === "STATE_SNAPSHOT" && object(event.snapshot) && Array.isArray(event.snapshot.approvals)) {
@@ -534,6 +534,9 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			}
 			if (req.method === "POST" && [`${API_ROOT}/state`, `${API_ROOT}/bots`, `${API_ROOT}/prefs`].includes(parsed.pathname)) {
 				await proxy(res, "POST", relative, await requestBody(req)); return;
+			}
+			if (req.method === "PATCH" && /^\/v1\/mobile\/bots\/[^/]+$/.test(parsed.pathname)) {
+				await proxy(res, "PATCH", relative, await requestBody(req)); return;
 			}
 			if (req.method === "POST" && parsed.pathname === `${API_ROOT}/runs`) {
 				const input = await requestBody(req); validateRunInput(input);

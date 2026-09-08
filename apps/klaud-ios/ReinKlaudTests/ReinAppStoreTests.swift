@@ -781,6 +781,110 @@ final class ReinAppStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testAssistedSetupIsCompletedPerHostAndPreservesSavedConnection() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let client = StoreMockClient(snapshot: snapshot(runID: "run"))
+        let store = makeStore(defaults: defaults, client: client)
+        await store.connect(rawURL: gatewayOrigin, token: token, assistedSetup: true)
+        XCTAssertTrue(store.showBotSetup)
+        XCTAssertEqual(store.selectedBot?.id, "bot-1")
+        store.completeBotSetup()
+        XCTAssertFalse(store.showBotSetup)
+        XCTAssertEqual(store.section, .chat)
+        store.disconnect()
+        XCTAssertEqual(store.savedURL, gatewayOrigin)
+        await store.connect(rawURL: gatewayOrigin, token: token, assistedSetup: true)
+        XCTAssertFalse(store.showBotSetup)
+        store.disconnect()
+        await store.connect(rawURL: "http://127.0.0.2:4318", token: token, assistedSetup: true)
+        XCTAssertTrue(store.showBotSetup)
+        store.disconnect()
+    }
+
+    @MainActor
+    func testEmptyHostRequiresBotBeforeSetupCanFinishAndSavesChosenAvatar() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let client = StoreMockClient(snapshot: snapshot(runID: "run"), state: .empty)
+        let store = makeStore(defaults: defaults, client: client)
+        await store.connect(rawURL: gatewayOrigin, token: token, assistedSetup: true)
+        store.completeBotSetup()
+        XCTAssertTrue(store.showBotSetup)
+        let created = await store.createBot(name: "Day planner", avatar: "explorer")
+        XCTAssertTrue(created)
+        XCTAssertEqual(store.selectedBot?.name, "Day planner")
+        XCTAssertEqual(store.selectedBot?.avatar, "explorer")
+        store.completeBotSetup()
+        XCTAssertFalse(store.showBotSetup)
+        store.disconnect()
+    }
+
+    @MainActor
+    func testChangingAvatarPreservesBotSessionAndConversation() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let client = StoreMockClient(snapshot: snapshot(runID: "run"))
+        client.messagePage = .init(messages: [.init(id: "greeting", role: .user, content: "Plan my day")], before: nil)
+        let store = makeStore(defaults: defaults, client: client)
+        await store.connect(rawURL: gatewayOrigin, token: token)
+        let original = try XCTUnwrap(store.selectedBot)
+        let updated = await store.updateBotAvatar(original, avatar: .builder)
+        XCTAssertTrue(updated)
+        XCTAssertEqual(store.selectedBot?.avatar, "builder")
+        XCTAssertEqual(store.selectedBot?.sessionId, original.sessionId)
+        XCTAssertEqual(store.selectedMessages.first?.content, "Plan my day")
+        store.disconnect()
+    }
+
+    @MainActor
+    func testAvatarActivityStaysWithRunningBotWhenSelectionChanges() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let runID = "22222222-2222-4222-8222-222222222222"
+        var state = appState(accent: "rain")
+        state.bots.append(.init(id: "bot-2", name: "Second bot", sessionId: "thread-2"))
+        let client = StoreMockClient(snapshot: snapshot(runID: runID), state: state)
+        let store = makeStore(defaults: defaults, client: client, makeRunID: { runID })
+        await store.connect(rawURL: gatewayOrigin, token: token)
+        XCTAssertEqual(store.avatarPhase(for: state.bots[0]), .ready)
+        XCTAssertTrue(store.send("Check this synthetic task"))
+        await waitUntil { !client.resumeCalls.isEmpty }
+        await store.chooseBot("bot-2")
+        XCTAssertEqual(store.selectedBotID, "bot-2")
+        XCTAssertEqual(store.avatarPhase(for: state.bots[0]), .working)
+        XCTAssertEqual(store.avatarPhase(for: state.bots[1]), .ready)
+        store.disconnect()
+        XCTAssertEqual(store.avatarPhase(for: state.bots[0]), .ready)
+    }
+
+    @MainActor
+    func testPublicProgressUpdatesRunningAvatarWithoutBecomingAFrontendError() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let runID = "33333333-3333-4333-8333-333333333333"
+        var state = appState(accent: "rain")
+        state.bots.append(.init(id: "bot-2", name: "Second bot", sessionId: "thread-2"))
+        let client = StoreMockClient(snapshot: snapshot(runID: runID), state: state)
+        let store = makeStore(defaults: defaults, client: client, makeRunID: { runID })
+        await store.connect(rawURL: gatewayOrigin, token: token)
+        XCTAssertTrue(store.send("Check this synthetic task"))
+        await waitUntil { !client.resumeCalls.isEmpty }
+        await store.chooseBot("bot-2")
+        for (index, phase) in [BotAvatarPhase.thinking, .journaling, .autonomy, .tool, .responding].enumerated() {
+            let data = Data("{\"type\":\"CUSTOM\",\"name\":\"klaud.progress\",\"value\":{\"phase\":\"\(phase.rawValue)\",\"turn\":1}}".utf8)
+            let event = try JSONDecoder().decode(GatewayEvent.self, from: data)
+            client.emit(.init(runID: runID, sequence: index + 1, event: event))
+            await waitUntil { store.activityPhase == phase }
+            XCTAssertEqual(store.avatarPhase(for: state.bots[0]), phase)
+            XCTAssertEqual(store.avatarPhase(for: state.bots[1]), .ready)
+            XCTAssertNil(store.errorMessage)
+            XCTAssertTrue(client.toolAnswers.isEmpty)
+        }
+        store.disconnect()
+    }
+
+    @MainActor
     private func makeStore(
         defaults: UserDefaults,
         cursor: RunEventCursor? = nil,
@@ -1050,7 +1154,18 @@ private final class StoreMockClient: ReinGatewayClientProtocol, @unchecked Senda
     }
     func bots() async throws -> [ReinBot] { lock.withLock { stateValue.bots } }
     func messages(botID: String, before: Int?) async throws -> MessagePage { messagePage }
-    func createBot(name: String) async throws -> ReinBot { .init(id: "new-bot", name: name, sessionId: "new-thread") }
+    func createBot(name: String, avatar: String?) async throws -> ReinBot {
+        let bot = ReinBot(id: "new-bot", name: name, sessionId: "new-thread", avatar: avatar)
+        lock.withLock { stateValue.bots.append(bot) }
+        return bot
+    }
+    func updateBotAvatar(botID: String, avatar: String) async throws -> ReinBot {
+        try lock.withLock {
+            guard let index = stateValue.bots.firstIndex(where: { $0.id == botID }) else { throw GatewayClientError.invalidResponse }
+            stateValue.bots[index].avatar = avatar
+            return stateValue.bots[index]
+        }
+    }
     func patchShell(_ patch: [ShellPatch]) async throws -> ReinState {
         if let patchGate { await patchGate.waitForRelease() }
         return lock.withLock { stateValue }
@@ -1076,6 +1191,11 @@ private final class StoreMockClient: ReinGatewayClientProtocol, @unchecked Senda
             if let error { continuation.finish(throwing: error); return }
             self.lock.withLock { self.resumeContinuations.append(continuation) }
         }
+    }
+
+    func emit(_ event: RunStreamEvent) {
+        let listeners = lock.withLock { resumeContinuations }
+        for listener in listeners { listener.yield(event) }
     }
 
     func cancel(runID: String) async throws {

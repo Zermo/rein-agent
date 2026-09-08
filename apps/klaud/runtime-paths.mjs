@@ -9,14 +9,14 @@ function outsideAppBundle(path) {
 }
 
 /** The installed app contains immutable code; all server writes belong to the user. */
-export function prepareLocalRuntime({ packaged, appDirectory, resourcesPath, userHome, reinHome }) {
+export function prepareLocalRuntime({ packaged, appDirectory, resourcesPath, userHome, reinHome, isolated = false }) {
   const root = packaged ? join(resourcesPath, "rein") : resolve(appDirectory, "../..");
   const bundled = join(root, "dist/rein.js");
   const entry = !packaged && !existsSync(bundled) ? join(root, "bin/rein.js") : bundled;
-  if (!existsSync(entry)) throw new Error(packaged ? "The app is missing its Rein runtime. Reinstall rein-klaʊd." : "I couldn't find Rein. Run this app from the Rein checkout.");
+  if (!existsSync(entry)) throw new Error(packaged ? "The app is missing its Rein runtime. Reinstall klaʊdbot." : "I couldn't find Rein. Run this app from the Rein checkout.");
   const home = resolve(reinHome || join(userHome, ".rein"));
-  const cwd = packaged ? join(home, "workspace") : root;
-  if (packaged) {
+  const cwd = packaged || isolated ? join(home, "workspace") : root;
+  if (packaged || isolated) {
     outsideAppBundle(home);
     outsideAppBundle(cwd);
     mkdirSync(cwd, { recursive: true, mode: 0o700 });

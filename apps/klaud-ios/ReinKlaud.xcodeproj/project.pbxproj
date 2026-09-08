@@ -29,10 +29,12 @@
 		5FACA1A48231C406C5D5758F /* CloudAccountStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029C549A59E8072AF7853CBF /* CloudAccountStoreTests.swift */; };
 		601ECB605C996739C1D050D6 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D1438FE07AC90610B8B608 /* ChatView.swift */; };
 		622AF61C439AEF776AD807FF /* error.wav in Resources */ = {isa = PBXBuildFile; fileRef = B5612826AB3E223B823E136B /* error.wav */; };
+		6B8622FC5CC96C509AF442E6 /* BotAvatarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8CF266111807CBFD3E9BF9F /* BotAvatarTests.swift */; };
 		74D33E60426967CAE854DC39 /* ReinKlaudApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19B14278E637A23E4740849 /* ReinKlaudApp.swift */; };
 		779610AA3342E74B7A992A85 /* StateReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29543BDC7398C036AA7672D0 /* StateReducerTests.swift */; };
 		89E5A8ACA12A593649F98F0E /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00BE4643750CA241316E87F0 /* OnboardingView.swift */; };
 		9748912CAB95AC8A23B0BED2 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9B6AAE627B14F761E84FE7 /* JSONValue.swift */; };
+		9A75F247D6F28DB6A3159966 /* BotAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD9DE78D27205CEF94E2F4AE /* BotAvatarView.swift */; };
 		9B5F837F51D2EA81ED6130E4 /* CloudWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 192EC1BA42B2A043410DDCDA /* CloudWorkspaceTests.swift */; };
 		9BDE4FF1B9AAD8DD701AE0AB /* ready.wav in Resources */ = {isa = PBXBuildFile; fileRef = 52F65A4FA3E7D65310AE651F /* ready.wav */; };
 		A0AF7264549A0C25DAE5EEB1 /* ReinGatewayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBCD637233F46AFD6121D7A5 /* ReinGatewayClient.swift */; };
@@ -104,8 +106,10 @@
 		B5612826AB3E223B823E136B /* error.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = error.wav; sourceTree = "<group>"; };
 		B707BA9C9B483081FD83A136 /* RunEventCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunEventCursor.swift; sourceTree = "<group>"; };
 		BBC1409D3BB66821853758DE /* ReinDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReinDiscovery.swift; sourceTree = "<group>"; };
+		C8CF266111807CBFD3E9BF9F /* BotAvatarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotAvatarTests.swift; sourceTree = "<group>"; };
 		C8D1438FE07AC90610B8B608 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		DD7ACBEDFBC13A313B925EF3 /* CloudAccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAccountStore.swift; sourceTree = "<group>"; };
+		DD9DE78D27205CEF94E2F4AE /* BotAvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotAvatarView.swift; sourceTree = "<group>"; };
 		E1C65706CF7A0503D80D3696 /* SSEDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEDecoder.swift; sourceTree = "<group>"; };
 		E307C681D36B1E39760805D4 /* CloudWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudWorkspace.swift; sourceTree = "<group>"; };
 		E5693241E912D9278376E267 /* reply.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = reply.wav; sourceTree = "<group>"; };
@@ -159,6 +163,7 @@
 		388A6550B50770EF9545E11B /* ReinKlaudTests */ = {
 			isa = PBXGroup;
 			children = (
+				C8CF266111807CBFD3E9BF9F /* BotAvatarTests.swift */,
 				029C549A59E8072AF7853CBF /* CloudAccountStoreTests.swift */,
 				192EC1BA42B2A043410DDCDA /* CloudWorkspaceTests.swift */,
 				271B41D5D969667BF205B785 /* ConnectionValidatorTests.swift */,
@@ -261,6 +266,7 @@
 		EEC7E8388C02DA934BCB80A7 /* Design */ = {
 			isa = PBXGroup;
 			children = (
+				DD9DE78D27205CEF94E2F4AE /* BotAvatarView.swift */,
 				1BC80AC8B103C2AFDE155185 /* ReinTheme.swift */,
 			);
 			path = Design;
@@ -369,6 +375,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6B8622FC5CC96C509AF442E6 /* BotAvatarTests.swift in Sources */,
 				5FACA1A48231C406C5D5758F /* CloudAccountStoreTests.swift in Sources */,
 				9B5F837F51D2EA81ED6130E4 /* CloudWorkspaceTests.swift in Sources */,
 				1A2F15819FF92445A0DB5C0C /* ConnectionValidatorTests.swift in Sources */,
@@ -386,6 +393,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FD595885F61087D58D51B748 /* APIModels.swift in Sources */,
+				9A75F247D6F28DB6A3159966 /* BotAvatarView.swift in Sources */,
 				C7F405F94EBEC686E922E50D /* BotListView.swift in Sources */,
 				601ECB605C996739C1D050D6 /* ChatView.swift in Sources */,
 				F656F8CA41B47E0FC753BE13 /* CloudAccount.swift in Sources */,

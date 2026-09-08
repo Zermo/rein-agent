@@ -64,17 +64,18 @@ test("failed spawn and normal child shutdown resolve without an exit event", asy
 });
 
 // Evaluate the actual main functions with Electron startup disabled. No GUI or server starts.
-async function mainHarness(ownsInstance = false, appOverrides = {}) {
+async function mainHarness(ownsInstance = false, appOverrides = {}, overrides = {}) {
   const sourceUrl = new URL("../main.mjs", import.meta.url);
   const source = readFileSync(sourceUrl, "utf8").replace(/^import .*;\n/gm, "").replaceAll("import.meta.url", JSON.stringify(sourceUrl.href));
   const context = {
-    app: { setName() {}, setAppUserModelId() {}, requestSingleInstanceLock: () => ownsInstance, quit() {}, on() {}, whenReady: () => new Promise(() => {}), ...appOverrides },
+    app: { getPath: name => `/fixture/${name}`, setPath() {}, setName() {}, setAppUserModelId() {}, requestSingleInstanceLock: () => ownsInstance, quit() {}, on() {}, whenReady: () => new Promise(() => {}), ...appOverrides },
+    homedir: () => "/fixture/home", createOnboarding: () => ({ inspect: () => ({ version: 1, prepared: false, completed: false }) }),
     dirname, join, resolve, fileURLToPath, pathToFileURL, randomUUID, process: { ...process, env: {}, on() {} },
     applyDelta, applyShellPatch, frontendTools, replayEvents, requestRoute, sseEvents, validateConnection, validateMessages, validateState, stopChild,
-    Buffer, AbortSignal, AbortController, setTimeout, clearTimeout, setImmediate, structuredClone, Map, Promise,
+    Buffer, AbortSignal, AbortController, setTimeout, clearTimeout, setImmediate, structuredClone, Map, Promise, ...overrides,
   };
   await vm.runInNewContext(`(async () => { ${source}\n globalThis.hooks = {
-    connect, startRun, answerTool, trusted,
+    connect, startRun, answerTool, trusted, http,
     configure(options) { if (options.stop) stopOwnedServe = options.stop; if (options.start) startLocal = options.start; if (options.json) json = options.json; if (options.http) http = options.http; if (options.tray) updateTray = options.tray; if (options.state) state = options.state; if (options.window) window = options.window; if (options.connection) connection = options.connection; },
     quit() { quitting = true; },
     current() { return { run: activeRun, state, sequence }; }
@@ -90,21 +91,22 @@ test("ESM entry finishes loading before Electron emits ready", async () => {
   } finally { clearTimeout(timer); }
 });
 
-test("desktop chrome and package metadata consistently use the rein-klaʊd name", async () => {
-  let nativeName;
-  await mainHarness(false, { setName(value) { nativeName = value; } });
-  assert.equal(nativeName, "rein-klaʊd", "the macOS application menu must not inherit Electron's name");
+test("desktop chrome uses klaʊdbot while preserving the previous application storage", async () => {
+  let nativeName, savedPath;
+  await mainHarness(false, { setName(value) { nativeName = value; }, setPath(name, value) { savedPath = [name, value]; } });
+  assert.deepEqual(savedPath, ["userData", "/fixture/appData/rein-klaʊd"]);
+  assert.equal(nativeName, "klaʊdbot", "the macOS application menu must not inherit Electron's name");
 
   const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const metadata = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8"));
-  assert.equal(metadata.productName, "rein-klaʊd");
-  assert.equal(metadata.build.productName, "rein-klaʊd");
-  assert.match(readFileSync(join(appRoot, "index.html"), "utf8"), /<title>rein-klaʊd<\/title>/);
+  assert.equal(metadata.productName, "klaʊdbot");
+  assert.equal(metadata.build.productName, "klaʊdbot");
+  assert.match(readFileSync(join(appRoot, "index.html"), "utf8"), /<title>klaʊdbot<\/title>/);
 
   const main = readFileSync(join(appRoot, "main.mjs"), "utf8");
-  assert.match(main, /process\.title = "rein-klaʊd"/);
-  assert.match(main, /new BrowserWindow\(\{[\s\S]*?title: "rein-klaʊd"/);
-  assert.match(main, /label: "rein-klaʊd", submenu:/);
+  assert.match(main, /process\.title = "klaʊdbot"/);
+  assert.match(main, /new BrowserWindow\(\{[\s\S]*?title: "klaʊdbot"/);
+  assert.match(main, /label: "klaʊdbot", submenu:/);
   assert.doesNotMatch(main, /label: "Electron"|title: "Electron"/);
 });
 
@@ -178,7 +180,7 @@ test("run reload retains a pre-run baseline and replays only unresolved frontend
   assert.equal(run.events.length, 0);
   assert.equal(run.controller.signal.aborted, false, "the UI replay bound cannot stop the agent run");
   assert.equal(replayEvents(run)[0].value.toolCallId, "call-2", "pending actions remain available after replay truncation");
-  push({ type: "TOOL_CALL_RESULT", toolCallId: "call-2", content: "Timed out" });
+  push({ type: "TOOL_CALL_RESULT", toolCallId: "display-scope-call-2", providerToolCallId: "call-2", content: "Timed out" });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(replayEvents(run).length, 0, "expired frontend actions cannot reopen after reload");
   push({ type: "RUN_FINISHED", runId }); controller.close();
@@ -195,4 +197,70 @@ test("IPC rejects subframes and a renderer navigated away from the packaged page
   assert.throws(() => hooks.trusted({ sender: contents, senderFrame: { url: frame.url } }), /Untrusted/);
   frame.url = "http://127.0.0.1:4317";
   assert.throws(() => hooks.trusted({ sender: contents, senderFrame: frame }), /Untrusted/);
+});
+
+
+test("setup and account validation errors stay actionable while ordinary errors remain opaque", async () => {
+  let response;
+  const hooks = await mainHarness(false, {}, { fetch: async () => response });
+  hooks.configure({ connection: { url: "http://127.0.0.1:4317", token: "runtime-fixture-token" } });
+  for (const path of ["/setup", "/setup/probe", "/setup/discover", "/accounts", "/accounts/provider", "/accounts/logins", "/accounts/logins/1234-abcd"]) {
+    response = new Response(JSON.stringify({ error: "The profile changed. Reload setup before saving." }), { status: 409, headers: { "Content-Type": "application/json; charset=utf-8" } });
+    await assert.rejects(hooks.http("POST", path, {}), /profile changed. Reload setup/);
+  }
+  for (const path of ["/run", "/bots", "/setup/arbitrary", "/accounts/private", "/settings"]) {
+    response = new Response(JSON.stringify({ error: "private model response" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    await assert.rejects(hooks.http("POST", path, {}), error => /HTTP 400/.test(error.message) && !error.message.includes("private model"));
+  }
+});
+
+test("setup error parser redacts credentials and bounds untrusted bodies", async () => {
+  let response;
+  const hooks = await mainHarness(false, {}, { fetch: async () => response });
+  hooks.configure({ connection: { url: "http://127.0.0.1:4317", token: "runtime-fixture-token" } });
+  response = new Response(JSON.stringify({ error: "Bad fixture-api-key and runtime-fixture-token; access_token=another-secret" }), { status: 400, headers: { "Content-Type": "application/json" } });
+  await assert.rejects(hooks.http("PUT", "/accounts/provider", { apiKey: "fixture-api-key" }), error => error.message.includes("[redacted]") && !/fixture-api-key|runtime-fixture-token|another-secret/.test(error.message));
+  for (const text of ["not JSON", JSON.stringify({ error: "x".repeat(2049) }), JSON.stringify({ error: "valid", extra: "secret" }), JSON.stringify({ error: ["secret"] }), " ".repeat(8193) + JSON.stringify({ error: "too large" })]) {
+    response = new Response(text, { status: 400, headers: { "Content-Type": "application/json" } });
+    await assert.rejects(hooks.http("POST", "/setup", {}), /HTTP 400/);
+  }
+  let cancelled = false;
+  response = new Response(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(8193)); }, cancel() { cancelled = true; } }), { status: 400, headers: { "Content-Type": "application/json" } });
+  await assert.rejects(hooks.http("POST", "/setup", {}), /HTTP 400/);
+  assert.equal(cancelled, true);
+});
+
+
+test("startup resumes unfinished onboarding locally before honoring an attached gateway", async () => {
+  for (const { prepared, completed, attached, expectedUrl, expectedStarts } of [
+    { prepared: false, completed: false, attached: true, expectedUrl: undefined, expectedStarts: 0 },
+    { prepared: true, completed: false, attached: true, expectedUrl: "http://127.0.0.1:4317", expectedStarts: 1 },
+    { prepared: true, completed: true, attached: true, expectedUrl: "http://127.0.0.1:5317", expectedStarts: 0 },
+    { prepared: true, completed: true, attached: false, expectedUrl: "http://127.0.0.1:4317", expectedStarts: 1 },
+  ]) {
+    let ready, window, starts = 0;
+    const readyPromise = new Promise(resolve => { ready = resolve; }), handlers = new Map();
+    const hooks = await mainHarness(true, { whenReady: () => readyPromise }, {
+      createOnboarding: () => ({ inspect: () => ({ version: 1, prepared, completed }) }),
+      process: { ...process, env: attached ? { REIN_KLAUD_URL: "http://127.0.0.1:5317", REIN_KLAUD_TOKEN: "fixture-attached-token" } : {}, on() {} },
+      nativeImage: { createFromPath: () => ({ isEmpty: () => true }) },
+      Menu: { buildFromTemplate: items => items, setApplicationMenu() {} },
+      ipcMain: { handle(name, callback) { handlers.set(name, callback); } },
+      BrowserWindow: class {
+        constructor() {
+          window = this;
+          this.webContents = { mainFrame: { url: "" }, setWindowOpenHandler() {}, on() {}, session: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } };
+        }
+        on() {} show() {} focus() {} isDestroyed() { return false; }
+        async loadURL(url) { this.webContents.mainFrame.url = url; }
+      },
+    });
+    hooks.configure({ stop: async () => {}, start: async () => { starts++; return { url: "http://127.0.0.1:4317", token: "fixture-local-token" }; }, json: async () => baseline(), tray() {} });
+    ready(); await new Promise(resolve => setImmediate(resolve));
+    const status = await handlers.get("klaud:status")({ sender: window.webContents, senderFrame: window.webContents.mainFrame });
+    assert.equal(status.error, undefined);
+    assert.equal(status.url, expectedUrl);
+    assert.equal(status.connected, !!expectedUrl);
+    assert.equal(starts, expectedStarts);
+  }
 });

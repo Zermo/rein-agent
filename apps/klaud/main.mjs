@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants, lstatSync, openSync, closeSync, readFileSync, fstatSync } from "node:fs";
@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyDelta, applyShellPatch, frontendTools, replayEvents, requestRoute, sseEvents, validateConnection, validateMessages, validateState } from "./model.mjs";
 import { stopChild } from "./lifecycle.mjs";
 import { localRuntimeEnvironment, prepareLocalRuntime } from "./runtime-paths.mjs";
+import { accountVerificationUrl, createOnboarding, onboardingEnvironment } from "./onboarding.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const rendererUrl = pathToFileURL(join(directory, "dist/index.html")).href;
@@ -15,10 +16,13 @@ const appIconPath = join(directory, "icon.png");
 const trayIconPath = busy => join(directory, `tray-${busy ? "working" : "ready"}${process.platform === "darwin" ? "Template" : ""}.png`);
 const environment = process.env.REIN_KLAUD_URL && process.env.REIN_KLAUD_TOKEN ? { mode: "remote", url: process.env.REIN_KLAUD_URL, token: process.env.REIN_KLAUD_TOKEN } : undefined;
 delete process.env.REIN_KLAUD_TOKEN;
-process.title = "rein-klaʊd";
-app.setName("rein-klaʊd");
+// Product rename must preserve the existing Electron cookies, preferences and storage.
+app.setPath("userData", join(app.getPath("appData"), "rein-klaʊd"));
+process.title = "klaʊdbot";
+app.setName("klaʊdbot");
 app.setAppUserModelId("org.zermo.rein-klaud");
-let window, tray, connection, state, activeRun, ownedServe, starting, sequence = 0, quitting = false, shutdown = false;
+const onboarding = createOnboarding({ userHome: homedir(), userData: app.getPath("userData"), sourceHome: process.env.REIN_HOME });
+let window, tray, connection, state, activeRun, ownedServe, starting, onboardingPreparing = false, sequence = 0, quitting = false, shutdown = false;
 const send = event => { event.sequence = ++sequence; if (window && !window.isDestroyed()) window.webContents.send("klaud:event", event); };
 const show = () => { if (window && !window.isDestroyed()) { window.show(); window.focus(); } };
 const safeError = error => String(error?.message || "Request failed.").replaceAll(connection?.token || "\0", "[redacted]").slice(0, 1000);
@@ -34,11 +38,11 @@ function updateTray() {
   const busy = mode === "normal" && !!activeRun;
   if (!tray) { tray = new Tray(trayIcon(busy)); tray.on("click", show); }
   tray.setImage(trayIcon(busy));
-  tray.setToolTip(busy ? "rein-klaʊd · Running" : "rein-klaʊd");
+  tray.setToolTip(busy ? "klaʊdbot · Running" : "klaʊdbot");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Open rein-klaʊd", click: show },
+    { label: "Open klaʊdbot", click: show },
     ...(mode === "normal" ? [{ label: activeRun ? "Running" : "Ready", enabled: false }] : []),
-    { type: "separator" }, { label: "Quit rein-klaʊd", click: () => app.quit() },
+    { type: "separator" }, { label: "Quit klaʊdbot", click: () => app.quit() },
   ]));
 }
 function adoptState(value, publish = false) {
@@ -58,8 +62,34 @@ async function http(method, path, body, signal = AbortSignal.timeout(15_000)) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error(`rein serve returned HTTP ${response.status}. ${response.status === 401 ? "Check the bearer token." : response.status === 501 ? "This backend does not support that operation yet." : "The request was rejected."}`);
+    // These authenticated setup endpoints return deliberately safe validation errors.
+    // Keep ordinary model/tool responses opaque; they may contain private content.
+    let detail;
+    if (/^\/(?:setup(?:\/(?:probe|discover))?|accounts(?:\/provider|\/logins(?:\/[a-f0-9-]+)?)?)$/.test(path)
+      && response.headers.get("content-type")?.split(";")[0].trim() === "application/json" && response.body) {
+      const reader = response.body.getReader();
+      const chunks = []; let bytes = 0;
+      try {
+        while (true) {
+          const next = await reader.read();
+          if (next.done) break;
+          bytes += next.value.byteLength;
+          if (bytes > 8192) break;
+          chunks.push(Buffer.from(next.value));
+        }
+        if (bytes <= 8192) {
+          const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 1
+            && typeof value.error === "string" && value.error.trim() && value.error.length <= 2048) {
+            detail = value.error.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+            for (const secret of [connection?.token, body?.apiKey]) if (typeof secret === "string" && secret) detail = detail.replaceAll(secret, "[redacted]");
+            detail = detail.replace(/\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization)\s*[:=]\s*[^\s,;]+/gi, "credential=[redacted]");
+          }
+        }
+      } catch { /* Malformed, oversized, or interrupted responses use the generic failure. */ }
+      finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    } else await response.body?.cancel();
+    throw new Error(detail || `rein serve returned HTTP ${response.status}. ${response.status === 401 ? "Check the bearer token." : response.status === 501 ? "This backend does not support that operation yet." : "The request was rejected."}`);
   }
   return response;
 }
@@ -84,9 +114,9 @@ async function stopOwnedServe() {
 }
 async function startLocal() {
   if (quitting) throw new Error("The app is quitting.");
-  const { entry, cwd, home } = prepareLocalRuntime({ packaged: app.isPackaged, appDirectory: directory, resourcesPath: process.resourcesPath, userHome: homedir(), reinHome: process.env.REIN_HOME });
+  const { entry, cwd, home } = prepareLocalRuntime({ packaged: app.isPackaged, appDirectory: directory, resourcesPath: process.resourcesPath, userHome: homedir(), reinHome: onboarding.home(), isolated: true });
   const child = spawn(process.execPath, [entry, "serve", "--port", "0"], {
-    cwd, env: localRuntimeEnvironment({ packaged: app.isPackaged, environment: process.env, home, userHome: homedir() }), stdio: ["ignore", "pipe", "pipe"],
+    cwd, env: localRuntimeEnvironment({ packaged: app.isPackaged, environment: onboardingEnvironment(process.env), home, userHome: homedir() }), stdio: ["ignore", "pipe", "pipe"],
   });
   ownedServe = child;
   // Output is parsed privately. Neither stdout nor stderr is copied into app logs.
@@ -175,7 +205,7 @@ async function startRun(input) {
           if (event.name === "klaud.frontend_tool" && !frontendTools.some(tool => tool.name === value.toolName)) throw new Error("Unknown frontend tool.");
           run.pending.set(id, { ...value, kind: event.name, event });
         }
-        if (event.type === "TOOL_CALL_RESULT") run.pending.delete(event.toolCallId);
+        if (event.type === "TOOL_CALL_RESULT") run.pending.delete(event.providerToolCallId ?? event.toolCallId);
         if (["RUN_FINISHED", "RUN_ERROR"].includes(event.type)) run.terminal = true;
         if (!run.replayTruncated) {
           run.events.push(event); run.eventBytes += JSON.stringify(event).length;
@@ -221,7 +251,7 @@ async function confirmPending(id) {
     const action = pending.kind === "klaud.approval" ? pending.summary : pending.args?.action;
     if (typeof action !== "string" || action.length > 4000) throw new Error("Invalid confirmation text.");
     const { response } = await dialog.showMessageBox(window, {
-      type: "question", title: "rein-klaʊd", message: pending.kind === "klaud.approval" ? `Allow ${String(pending.tool).slice(0, 100)}?` : "Confirm this action?",
+      type: "question", title: "klaʊdbot", message: pending.kind === "klaud.approval" ? `Allow ${String(pending.tool).slice(0, 100)}?` : "Confirm this action?",
       detail: action, buttons: ["Deny", "Allow"], defaultId: 0, cancelId: 0, noLink: true,
     });
     if (activeRun !== run || !run.pending.has(id)) throw new Error("This action is no longer pending.");
@@ -257,11 +287,11 @@ else {
   const appIcon = nativeImage.createFromPath(appIconPath);
   if (process.platform === "darwin" && !appIcon.isEmpty()) app.dock.setIcon(appIcon);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: "rein-klaʊd", submenu: [{ label: "Open rein-klaʊd", click: show }, { type: "separator" }, { role: "quit", label: "Quit rein-klaʊd" }] },
+    { label: "klaʊdbot", submenu: [{ label: "Open klaʊdbot", click: show }, { type: "separator" }, { role: "quit", label: "Quit klaʊdbot" }] },
     { role: "editMenu" }, { role: "windowMenu" },
   ]));
   window = new BrowserWindow({
-    width: 1100, height: 780, minWidth: 720, minHeight: 520, title: "rein-klaʊd", backgroundColor: "#151b22", icon: appIcon,
+    width: 1100, height: 780, minWidth: 720, minHeight: 520, title: "klaʊdbot", backgroundColor: "#151b22", icon: appIcon,
     webPreferences: { preload: join(directory, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, webviewTag: false },
   });
   window.on("close", event => { if (!quitting) { event.preventDefault(); window.hide(); } });
@@ -270,7 +300,30 @@ else {
   window.webContents.on("will-attach-webview", event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   window.webContents.session.setPermissionCheckHandler(() => false);
-  const initialConnection = environment ? connect(environment).catch(error => ({ error: safeError(error) })) : Promise.resolve();
+  const initialConnection = (async () => {
+    const setup = onboarding.inspect();
+    // Resume local onboarding against its owned home until the final step is saved.
+    if (setup.prepared) return connect(setup.completed && environment ? environment : { mode: "local" });
+  })().catch(error => ({ error: safeError(error) }));
+  handle("onboarding-inspect", () => onboarding.inspect());
+  handle("onboarding-prepare", async input => {
+    if (!input || Object.keys(input).length !== 1 || !["migrate", "fresh"].includes(input.choice)) throw new Error("Choose migration or a fresh setup.");
+    if (activeRun || onboardingPreparing || starting) throw new Error("Wait for the current operation before preparing setup.");
+    const setup = onboarding.inspect();
+    if (setup.completed) throw new Error("Initial setup is complete. Use Settings to change your bot.");
+    if (connection && (!ownedServe || !setup.prepared || setup.choice !== input.choice)) throw new Error("Disconnect before preparing a different home.");
+    onboardingPreparing = true;
+    try {
+      await onboarding.prepare(input.choice);
+      if (connection && ownedServe) return { connected: true, url: connection.url, state, run: null };
+      return await connect({ mode: "local" });
+    } finally { onboardingPreparing = false; }
+  });
+  handle("onboarding-complete", () => {
+    if (!connection || !ownedServe || !state?.bots.length || activeRun || onboardingPreparing || starting) throw new Error("Connect your local home and create or select a bot before finishing setup.");
+    return onboarding.complete();
+  });
+  handle("open-account-auth", async url => { await shell.openExternal(accountVerificationUrl(url)); return { opened: true }; });
   handle("status", async () => {
     const initial = await initialConnection;
     await activeRun?.ready;

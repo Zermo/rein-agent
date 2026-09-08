@@ -1,4 +1,4 @@
-# rein-klaʊd for iPhone and iPad
+# klaʊdbot for iPhone and iPad
 
 This is the native SwiftUI operator console for Rein. The agent loop, model,
 shell tools, durable sessions, and headless autonomy stay on the operator's Rein
@@ -10,7 +10,7 @@ when a host is unavailable or the operator chooses an API account.
 The interface follows the same Rein field guide as the desktop app: cream paper,
 charcoal rules, rust actions, mustard activity, terminal-green tool records,
 condensed headings, and a numbered transcript ledger. Every exchange identifies
-`OPERATOR INPUT`, `REIN / AGENT REPLY`, or `TOOL CALL / EXEC`. Light and Night
+`OPERATOR INPUT`, `klaʊdbot / AGENT REPLY`, or `TOOL CALL / EXEC`. Light and Night
 themes, density, signal color, and activity settings follow the shared host
 state. Eight short 48 kHz PCM cues reproduce the desktop cue frequencies and
 timing without a runtime dependency. Sounds are on by default and the switch is
@@ -146,7 +146,7 @@ routing, protected direct transcripts, and the device-local sound preference.
 ## Signing
 
 The proposed bundle identifier is `org.zermo.rein-klaud.ios` and the display
-name is `rein-klaʊd`. No personal team identifier is committed. In Xcode, choose
+name is `klaʊdbot`. No personal team identifier is committed. In Xcode, choose
 the intended Apple Developer team under **Signing & Capabilities**, or provide
 it to `xcodebuild` as a build setting:
 
@@ -192,3 +192,14 @@ Text uses Dynamic Type-relative fonts, controls keep a 44-point minimum target,
 role and status labels are available to VoiceOver, and Reduce Motion replaces
 the transcript scroll animation with an immediate update. Color and sound repeat
 information already present in text.
+
+
+## Bot identity and guided setup
+
+klaʊdbot is the new visible name. The existing bundle ID, Keychain services, Bonjour service, and preference keys stay unchanged so installed copies retain their settings.
+
+Onboarding offers a Rein host or a direct model account. A saved host stays available for reconnection. After the first successful link to a host, setup lists its existing bots and offers a name and avatar for a new one. Completing this step is remembered separately for each host. The iOS app can discover advertised gateways; it does not inspect another computer’s filesystem or migrate a desktop installation.
+
+Every bot has a vintage headwear avatar: Aviator, Rider, Builder, Slugger, Medic, or Explorer. Existing bots without an avatar get the same stable selection as the desktop app. The picker saves appearance to the gateway, so it follows that bot on other clients. It leaves sessions, model settings, and permissions unchanged.
+
+During reported work, the native Canvas portrait moves continuously with the same procedural sway, bob, eyewear lag, and independent eyebrows as desktop. Each bot's ID seeds its cadence. Public gateway progress distinguishes thinking, replies, tool execution, note writing, and autonomy work; no private thought content is inspected. The expression stays with the running bot when the operator selects another one. Ready, approval, and error states settle to still portraits. The animation timeline stops when settled, outside its scroll viewport, off screen, or while the app is inactive. Reduce Motion renders a static expression immediately.

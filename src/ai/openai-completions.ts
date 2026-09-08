@@ -30,6 +30,7 @@ import type {
 import { parseArgsSalvaged } from "../util/json-salvage.ts";
 import { withSshTunnel } from "./ssh.ts";
 import { postChatCompletion } from "./chat-request.ts";
+import { applyReasoningRequest, reasoningRequestFields } from "./reasoning.ts";
 
 type OpenAIMessage = {
 	role: "system" | "user" | "assistant" | "tool";
@@ -155,6 +156,8 @@ export function stream(
 	if (model.sshHost) {
 		void (async () => {
 			try {
+				// Validate the logical provider before SSH rewrites its network origin.
+				reasoningRequestFields(model, options.reasoningEffort !== undefined ? options.reasoningEffort : model.reasoningEffort);
 				let final: AssistantMessageEvent | undefined;
 				await withSshTunnel(model.baseUrl, model.sshHost, async baseUrl => {
 					const promptCacheKey = `${model.provider}\u0000ssh:${model.sshHost}\u0000${model.baseUrl}`;
@@ -228,6 +231,7 @@ export function stream(
 					function: { name: t.name, description: t.description, parameters: t.parameters },
 				}));
 			}
+			applyReasoningRequest(body, model, options.reasoningEffort !== undefined ? options.reasoningEffort : model.reasoningEffort);
 
 			const headers: Record<string, string> = {
 				"Content-Type": "application/json",
