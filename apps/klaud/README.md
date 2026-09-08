@@ -1,6 +1,6 @@
-# Klaudbot
+# klaʊdbot
 
-Display name: **Klaudbot**. The app is still powered by the Rein agent harness.
+Display name: **klaʊdbot**. The app is still powered by the Rein agent harness.
 The bundle id remains `org.zermo.rein-klaud`, and the installed app filename
 remains `rein-klaud.app`, so existing installations and curl updates retain
 their identity.
@@ -22,7 +22,7 @@ bundle identity, architecture and code-signature integrity, then installs into
 replace a running, modified, or unrelated app. Quit before updating and rerun
 the same command. Add `--no-launch` after `bash -s --` to leave the app closed.
 App updates preserve configuration and conversations. First-run setup can copy
-an earlier Rein installation into Klaudbot's separate home as described below.
+an earlier Rein installation into klaʊdbot's separate home as described below.
 Development releases have an ad hoc signature and are not notarized; normal
 macOS approval still applies. The installer never changes system protections.
 
@@ -84,7 +84,7 @@ token from `~/.klaudbot/klaud/serve-<port>.token`. Tokens stay in the main proce
 and are not logged or sent to the renderer.
 
 For an app-owned gateway, `REIN_HOME` selects the migration source, not the new
-Klaudbot home. Model-routing and API-key environment overrides are stripped
+klaʊdbot home. Model-routing and API-key environment overrides are stripped
 before launching that gateway; use assisted setup or `~/.klaudbot/config.json`
 to configure it. This prevents a fresh setup from silently inheriting the old
 connection. Neither packaged nor source runs write user work into the app bundle
@@ -114,7 +114,7 @@ and lockfile; it does not add dependencies to the Rein CLI package.
 
 Closing the window hides it and keeps the connection and any owned local server
 running. Open the tray menu or click the macOS Dock icon to return. Launching the
-app again also shows the existing window. **Quit Klaudbot** in the tray or app
+app again also shows the existing window. **Quit klaʊdbot** in the tray or app
 menu exits the app and stops the server it started. An external server remains
 owned by its launcher. The app does not install a login item or background service.
 

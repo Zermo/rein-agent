@@ -106,7 +106,7 @@ function zip(target) {
 }
 
 try {
-  console.log(`Building rein-klaʊd ${metadata.version} for macOS ${arch}.`);
+  console.log(`Building klaʊdbot ${metadata.version} for macOS ${arch}.`);
   run(process.execPath, [join(directory, "build.mjs")]);
   // ditto retains the Electron binaries, framework symlinks and signatures. The
   // complete app is then signed from the inside out under its own identity.
@@ -147,8 +147,8 @@ try {
   renameSync(join(app, "Contents/MacOS/Electron"), join(app, "Contents/MacOS/rein-klaud"));
   // Electron's native helper lookup reads CFBundleName before JavaScript runs.
   // Keep it aligned with the ASCII executable/helper names; the display name
-  // and the app's own menu use Klaudbot branding.
-  for (const [key, value] of Object.entries({ CFBundleIdentifier: "org.zermo.rein-klaud", CFBundleName: "rein-klaud", CFBundleDisplayName: "Klaudbot", CFBundleExecutable: "rein-klaud", CFBundleIconFile: "rein.icns", CFBundleVersion: metadata.version, CFBundleShortVersionString: metadata.version, NSHumanReadableCopyright: "Copyright Zermo. MIT License." })) plistSet(info, key, value);
+  // and the app's own menu use klaʊdbot branding.
+  for (const [key, value] of Object.entries({ CFBundleIdentifier: "org.zermo.rein-klaud", CFBundleName: "rein-klaud", CFBundleDisplayName: "klaʊdbot", CFBundleExecutable: "rein-klaud", CFBundleIconFile: "rein.icns", CFBundleVersion: metadata.version, CFBundleShortVersionString: metadata.version, NSHumanReadableCopyright: "Copyright Zermo. MIT License." })) plistSet(info, key, value);
   plistDelete(info, "ElectronAsarIntegrity");
   for (const suffix of ["", " (GPU)", " (Plugin)", " (Renderer)"]) {
     const oldName = `Electron Helper${suffix}`, newName = `rein-klaud Helper${suffix}`;

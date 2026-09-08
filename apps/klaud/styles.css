@@ -263,7 +263,7 @@ h2 { margin-bottom: var(--space-md); font-size: var(--text-xl); }
   font-size: var(--text-lg);
   letter-spacing: -0.015em;
   line-height: 1;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .edition,
@@ -806,3 +806,5 @@ pre { max-width: 68ch; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere
   .rain-frame .rain-drops i { animation: none !important; transform: translateY(5px); opacity: 0.4; }
   .rain-frame .rain-drops i:nth-child(even) { transform: translateY(11px); }
 }
+
+.phonetic-name { text-transform: none; }

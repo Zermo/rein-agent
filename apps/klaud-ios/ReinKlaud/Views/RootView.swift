@@ -88,7 +88,7 @@ struct BrandMasthead: View {
         HStack(spacing: 10) {
             Image("ReinMark").resizable().scaledToFit().frame(width: compact ? 36 : 44, height: compact ? 36 : 44)
             VStack(alignment: .leading, spacing: 0) {
-                Text("Klaudbot").font(.reinDisplay(.title2)).textCase(.uppercase)
+                Text("klaʊdbot").font(.reinDisplay(.title2))
                 Text("FIELD CONSOLE / iOS").font(.reinMono(.caption2)).tracking(1.1).foregroundStyle(theme.muted)
             }
             Spacer()

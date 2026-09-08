@@ -160,7 +160,7 @@ struct MessageLedgerRow: View {
     private var label: String {
         switch message.role {
         case .user: "OPERATOR INPUT"
-        case .assistant: "KLAUDBOT \(replyMarker) / AGENT REPLY" + (presented.purpose == .message ? "" : " · \(presented.purpose.rawValue)")
+        case .assistant: "klaʊdbot \(replyMarker) / AGENT REPLY" + (presented.purpose == .message ? "" : " · \(presented.purpose.rawValue)")
         case .tool: "TOOL CALL / EXEC"
         }
     }
@@ -168,7 +168,7 @@ struct MessageLedgerRow: View {
     private var accessibleLabel: String {
         switch message.role {
         case .user: "Operator input"
-        case .assistant: "Klaudbot agent reply" + (presented.purpose == .message ? "" : ", \(presented.purpose.rawValue.lowercased())")
+        case .assistant: "klaʊdbot agent reply" + (presented.purpose == .message ? "" : ", \(presented.purpose.rawValue.lowercased())")
         case .tool: "Tool call or execution"
         }
     }

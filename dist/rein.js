@@ -9612,7 +9612,7 @@ Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, na
         return;
       }
       res.setHeader("Connection", "close");
-      json(res, error instanceof HttpError || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError || error instanceof MobileAccountError ? error.message : "Klaudbot request failed." });
+      json(res, error instanceof HttpError || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError || error instanceof MobileAccountError ? error.message : "kla\u028Adbot request failed." });
     });
   });
   server.requestTimeout = 15e3;

@@ -1,4 +1,4 @@
-# Klaudbot for iPhone and iPad
+# klaʊdbot for iPhone and iPad
 
 This is the native SwiftUI operator console for Rein. The agent loop, model,
 shell tools, durable sessions, and headless autonomy stay on the operator's Rein
@@ -10,7 +10,7 @@ when a host is unavailable or the operator chooses an API account.
 The interface follows the same Rein field guide as the desktop app: cream paper,
 charcoal rules, rust actions, mustard activity, terminal-green tool records,
 condensed headings, and a numbered transcript ledger. Every exchange identifies
-`OPERATOR INPUT`, `KLAUDBOT / AGENT REPLY`, or `TOOL CALL / EXEC`. Light and Night
+`OPERATOR INPUT`, `klaʊdbot / AGENT REPLY`, or `TOOL CALL / EXEC`. Light and Night
 themes, density, signal color, and activity settings follow the shared host
 state. Eight short 48 kHz PCM cues reproduce the desktop cue frequencies and
 timing without a runtime dependency. Sounds are on by default and the switch is
@@ -146,7 +146,7 @@ routing, protected direct transcripts, and the device-local sound preference.
 ## Signing
 
 The proposed bundle identifier is `org.zermo.rein-klaud.ios` and the display
-name is `rein-klaʊd`. No personal team identifier is committed. In Xcode, choose
+name is `klaʊdbot`. No personal team identifier is committed. In Xcode, choose
 the intended Apple Developer team under **Signing & Capabilities**, or provide
 it to `xcodebuild` as a build setting:
 
@@ -196,7 +196,7 @@ information already present in text.
 
 ## Bot identity and guided setup
 
-Klaudbot is the new visible name. The existing bundle ID, Keychain services, Bonjour service, and preference keys stay unchanged so installed copies retain their settings.
+klaʊdbot is the new visible name. The existing bundle ID, Keychain services, Bonjour service, and preference keys stay unchanged so installed copies retain their settings.
 
 Onboarding offers a Rein host or a direct model account. A saved host stays available for reconnection. After the first successful link to a host, setup lists its existing bots and offers a name and avatar for a new one. Completing this step is remembered separately for each host. The iOS app can discover advertised gateways; it does not inspect another computer’s filesystem or migrate a desktop installation.
 

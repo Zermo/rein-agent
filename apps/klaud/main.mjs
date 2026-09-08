@@ -18,8 +18,8 @@ const environment = process.env.REIN_KLAUD_URL && process.env.REIN_KLAUD_TOKEN ?
 delete process.env.REIN_KLAUD_TOKEN;
 // Product rename must preserve the existing Electron cookies, preferences and storage.
 app.setPath("userData", join(app.getPath("appData"), "rein-klaʊd"));
-process.title = "Klaudbot";
-app.setName("Klaudbot");
+process.title = "klaʊdbot";
+app.setName("klaʊdbot");
 app.setAppUserModelId("org.zermo.rein-klaud");
 const onboarding = createOnboarding({ userHome: homedir(), userData: app.getPath("userData"), sourceHome: process.env.REIN_HOME });
 let window, tray, connection, state, activeRun, ownedServe, starting, onboardingPreparing = false, sequence = 0, quitting = false, shutdown = false;
@@ -38,11 +38,11 @@ function updateTray() {
   const busy = mode === "normal" && !!activeRun;
   if (!tray) { tray = new Tray(trayIcon(busy)); tray.on("click", show); }
   tray.setImage(trayIcon(busy));
-  tray.setToolTip(busy ? "Klaudbot · Running" : "Klaudbot");
+  tray.setToolTip(busy ? "klaʊdbot · Running" : "klaʊdbot");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Open Klaudbot", click: show },
+    { label: "Open klaʊdbot", click: show },
     ...(mode === "normal" ? [{ label: activeRun ? "Running" : "Ready", enabled: false }] : []),
-    { type: "separator" }, { label: "Quit Klaudbot", click: () => app.quit() },
+    { type: "separator" }, { label: "Quit klaʊdbot", click: () => app.quit() },
   ]));
 }
 function adoptState(value, publish = false) {
@@ -251,7 +251,7 @@ async function confirmPending(id) {
     const action = pending.kind === "klaud.approval" ? pending.summary : pending.args?.action;
     if (typeof action !== "string" || action.length > 4000) throw new Error("Invalid confirmation text.");
     const { response } = await dialog.showMessageBox(window, {
-      type: "question", title: "Klaudbot", message: pending.kind === "klaud.approval" ? `Allow ${String(pending.tool).slice(0, 100)}?` : "Confirm this action?",
+      type: "question", title: "klaʊdbot", message: pending.kind === "klaud.approval" ? `Allow ${String(pending.tool).slice(0, 100)}?` : "Confirm this action?",
       detail: action, buttons: ["Deny", "Allow"], defaultId: 0, cancelId: 0, noLink: true,
     });
     if (activeRun !== run || !run.pending.has(id)) throw new Error("This action is no longer pending.");
@@ -287,11 +287,11 @@ else {
   const appIcon = nativeImage.createFromPath(appIconPath);
   if (process.platform === "darwin" && !appIcon.isEmpty()) app.dock.setIcon(appIcon);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: "Klaudbot", submenu: [{ label: "Open Klaudbot", click: show }, { type: "separator" }, { role: "quit", label: "Quit Klaudbot" }] },
+    { label: "klaʊdbot", submenu: [{ label: "Open klaʊdbot", click: show }, { type: "separator" }, { role: "quit", label: "Quit klaʊdbot" }] },
     { role: "editMenu" }, { role: "windowMenu" },
   ]));
   window = new BrowserWindow({
-    width: 1100, height: 780, minWidth: 720, minHeight: 520, title: "Klaudbot", backgroundColor: "#151b22", icon: appIcon,
+    width: 1100, height: 780, minWidth: 720, minHeight: 520, title: "klaʊdbot", backgroundColor: "#151b22", icon: appIcon,
     webPreferences: { preload: join(directory, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, webviewTag: false },
   });
   window.on("close", event => { if (!quitting) { event.preventDefault(); window.hide(); } });

@@ -1,9 +1,11 @@
-# Design — Klaudbot
+# Design — klaʊdbot
 
-This is the shared visual system for **Klaudbot**, the bot app powered by Rein.
+This is the shared visual system for **klaʊdbot**, the bot app powered by Rein.
 App views retain the vintage typography, palette, and sounds of Rein's public
-installation guide and repository artwork. The visible app name is Klaudbot;
-existing bundle identifiers and distribution filenames remain compatible with
+installation guide and repository artwork. The visible app name is `klaʊdbot`, using the original phonetic `ʊ` (U+028A).
+Keep this spelling lowercase in wordmarks so automatic uppercasing does not
+replace the phonetic glyph.
+Existing bundle identifiers and distribution filenames remain compatible with
 rein-klaud installations.
 
 ## Genre
@@ -60,7 +62,7 @@ A named four-point scale lives in `tokens.css`. App styles use those names rathe
   activity, not an inferred emotion. Ready and attention states remain still;
   working states may use small brow movements. Pause motion while hidden, and
   keep static expressions with reduced motion.
-- Rain is Klaudbot's ambient motif: sparse square drops, a pixel cloud, and
+- Rain is klaʊdbot's ambient motif: sparse square drops, a pixel cloud, and
   the established rust/paper/amber palette. Keep it in frame or wallpaper areas,
   away from reading and input surfaces. Provide an off switch, pause while hidden,
   and use static rain with reduced motion. Ambient rain does not imply agent work.
@@ -91,7 +93,7 @@ typography, and reduced-motion behavior above; a reference is not a new theme or
 
 ## Navigation and control voice
 
-- Masthead: N6 newspaper masthead adapted to native desktop chrome. The Klaudbot name and Rein mark anchor the left; Bots, Chat, and Settings read as a numbered field index.
+- Masthead: N6 newspaper masthead adapted to native desktop chrome. The klaʊdbot name and Rein mark anchor the left; Bots, Chat, and Settings read as a numbered field index.
 - Primary actions: square rust controls with paper text and direct verbs.
 - Secondary actions: paper controls with an ink rule.
 - No footer is added to the desktop app.
@@ -140,7 +142,7 @@ status labels.
 
 ## What every view shares
 
-- The R/horse monogram and `Klaudbot` name.
+- The R/horse monogram and `klaʊdbot` name.
 - Cream, charcoal, rust, mustard, and terminal green.
 - Condensed display type, plain body type, and mono operational labels.
 - Square controls, hard rules, and numbered identity labels.

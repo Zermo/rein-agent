@@ -91,22 +91,22 @@ test("ESM entry finishes loading before Electron emits ready", async () => {
   } finally { clearTimeout(timer); }
 });
 
-test("desktop chrome uses Klaudbot while preserving the previous application storage", async () => {
+test("desktop chrome uses klaʊdbot while preserving the previous application storage", async () => {
   let nativeName, savedPath;
   await mainHarness(false, { setName(value) { nativeName = value; }, setPath(name, value) { savedPath = [name, value]; } });
   assert.deepEqual(savedPath, ["userData", "/fixture/appData/rein-klaʊd"]);
-  assert.equal(nativeName, "Klaudbot", "the macOS application menu must not inherit Electron's name");
+  assert.equal(nativeName, "klaʊdbot", "the macOS application menu must not inherit Electron's name");
 
   const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const metadata = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8"));
-  assert.equal(metadata.productName, "Klaudbot");
-  assert.equal(metadata.build.productName, "Klaudbot");
-  assert.match(readFileSync(join(appRoot, "index.html"), "utf8"), /<title>Klaudbot<\/title>/);
+  assert.equal(metadata.productName, "klaʊdbot");
+  assert.equal(metadata.build.productName, "klaʊdbot");
+  assert.match(readFileSync(join(appRoot, "index.html"), "utf8"), /<title>klaʊdbot<\/title>/);
 
   const main = readFileSync(join(appRoot, "main.mjs"), "utf8");
-  assert.match(main, /process\.title = "Klaudbot"/);
-  assert.match(main, /new BrowserWindow\(\{[\s\S]*?title: "Klaudbot"/);
-  assert.match(main, /label: "Klaudbot", submenu:/);
+  assert.match(main, /process\.title = "klaʊdbot"/);
+  assert.match(main, /new BrowserWindow\(\{[\s\S]*?title: "klaʊdbot"/);
+  assert.match(main, /label: "klaʊdbot", submenu:/);
   assert.doesNotMatch(main, /label: "Electron"|title: "Electron"/);
 });
 

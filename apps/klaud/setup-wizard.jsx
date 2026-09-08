@@ -99,7 +99,7 @@ export function SetupWizard({ api, inspection, connection, bots = [], selectedBo
   const pack = setup?.packs?.[focusPacks[answers.q2]];
   return <main className="setup-workbench">
     <section className="setup-companion" aria-label="Your bot preview">
-      <p className="eyebrow">Klaudbot / first meeting</p>
+      <p className="eyebrow"><span className="phonetic-name">klaʊdbot</span> / first meeting</p>
       <BotAvatar avatar={selectedBot ? selectedBot.avatar : avatar} botId={selectedBot?.id} state="ready" size={220}/>
       <h1>{step < 3 ? "A little help.\nYour way." : selectedBot?.name || name || "Your new bot"}</h1>
       <p>{step === 0 ? "Your work has a past. Your bot can bring it along." : step === 1 ? "Choose where your bot thinks. Your own machine, your network, or a connected cloud account." : step === 2 ? "Small steps or the full picture. Tell your bot what helps you get going." : "A familiar face. Well, almost. Pick the hat that feels right."}</p>
@@ -113,7 +113,7 @@ export function SetupWizard({ api, inspection, connection, bots = [], selectedBo
       {step === 0 && <>
         {inspection.existing.found && <div className="setup-found" role="status"><strong>We found your Rein installation.</strong><span>{inspection.existing.sessionCount} saved sessions · {inspection.existing.botCount} bots{inspection.existing.profileFound ? " · work-style profile" : ""}{inspection.existing.configured ? " · model configured" : ""}</span></div>}
         <fieldset className="setup-options"><legend>Your starting point</legend>
-          {inspection.existing.found && <label className="setup-option"><input type="radio" name="starting-point" checked={choice === "migrate"} onChange={() => setChoice("migrate")}/><span><strong>Bring my Rein with me</strong><small>Copy settings, notes, and saved conversations into Klaudbot. Your original Rein installation stays available.</small></span></label>}
+          {inspection.existing.found && <label className="setup-option"><input type="radio" name="starting-point" checked={choice === "migrate"} onChange={() => setChoice("migrate")}/><span><strong>Bring my Rein with me</strong><small>Copy settings, notes, and saved conversations into klaʊdbot. Your original Rein installation stays available.</small></span></label>}
           <label className="setup-option"><input type="radio" name="starting-point" checked={choice === "fresh"} onChange={() => setChoice("fresh")}/><span><strong>Start fresh</strong><small>A separate bot space with its own model connection and preferences. Your existing work stays where it is.</small></span></label>
         </fieldset>
         <button className="primary" disabled={working} onClick={prepare}>{working ? "Preparing your space…" : choice === "migrate" ? "Bring my work over" : "Create my bot space"}</button>

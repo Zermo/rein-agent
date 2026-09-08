@@ -504,7 +504,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		})().catch(error => {
 			if (res.headersSent || res.destroyed) { if (!res.destroyed) res.destroy(); return; }
 			res.setHeader("Connection", "close");
-			json(res, error instanceof HttpError || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError || error instanceof MobileAccountError ? error.message : "Klaudbot request failed." });
+			json(res, error instanceof HttpError || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError || error instanceof MobileAccountError ? error.message : "klaʊdbot request failed." });
 		});
 	});
 	server.requestTimeout = 15_000; server.headersTimeout = 5000;

@@ -1,4 +1,4 @@
-# Klaudbot desktop
+# klaʊdbot desktop
 
 The optional desktop uses the same Rein runner, model configuration, budgets,
 tools, and Posthorse sessions as the terminal. Each named bot keeps its own
@@ -75,7 +75,7 @@ reported activity and approval requests. Old bots receive a stable default hat;
 changing headwear preserves their conversations. Motion stops when the app is
 hidden and respects reduced motion.
 
-The displayed name is **Klaudbot**. The existing bundle identifier and
+The displayed name is **klaʊdbot**. The existing bundle identifier and
 `rein-klaud.app` filename stay stable for installation and updates. Read the
 [desktop README](../apps/klaud/README.md) for migration safeguards and storage.
 

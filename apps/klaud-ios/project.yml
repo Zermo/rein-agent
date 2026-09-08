@@ -23,8 +23,8 @@ targets:
     info:
       path: ReinKlaud/Info.plist
       properties:
-        CFBundleDisplayName: Klaudbot
-        CFBundleName: Klaudbot
+        CFBundleDisplayName: klaʊdbot
+        CFBundleName: klaʊdbot
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
@@ -32,7 +32,7 @@ targets:
           NSAllowsLocalNetworking: true
         NSBonjourServices:
           - _rein-klaud._tcp
-        NSLocalNetworkUsageDescription: Klaudbot finds and connects to a Rein gateway you choose on your local network.
+        NSLocalNetworkUsageDescription: klaʊdbot finds and connects to a Rein gateway you choose on your local network.
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen:
           UIColorName: LaunchBackground

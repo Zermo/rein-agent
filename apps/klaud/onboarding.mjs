@@ -15,7 +15,7 @@ const plainObject = value => value && typeof value === "object" && !Array.isArra
 const absent = error => error?.code === "ENOENT";
 function inspectPath(path, kind, optional = false) {
   let stat;
-  try { stat = lstatSync(path); } catch (error) { if (optional && absent(error)) return; throw new Error("Klaudbot could not read its private setup storage."); }
+  try { stat = lstatSync(path); } catch (error) { if (optional && absent(error)) return; throw new Error("klaʊdbot could not read its private setup storage."); }
   if (stat.isSymbolicLink() || !(kind === "directory" ? stat.isDirectory() : stat.isFile()) || process.getuid && stat.uid !== process.getuid()) throw new Error("Setup requires ordinary files and directories owned by this user; symbolic links are not migrated.");
   return stat;
 }
@@ -106,7 +106,7 @@ function inspectExisting(root) {
   return { found, configured: typeof config?.model === "string" && !!config.model.trim() && (typeof config.baseUrl === "string" && !!config.baseUrl.trim() || config.auth?.type === "cli"), sessionCount: sessions, botCount: bots, profileFound };
 }
 function validateMarker(value) {
-  if (!value || value.version !== 1 || !["migrate", "fresh"].includes(value.choice) || typeof value.completed !== "boolean" || typeof value.prepared !== "boolean" || !/^[a-f0-9-]{36}$/.test(value.transaction) || value.completed && !value.prepared) throw new Error("Klaudbot's setup record needs repair. Existing data has been preserved.");
+  if (!value || value.version !== 1 || !["migrate", "fresh"].includes(value.choice) || typeof value.completed !== "boolean" || typeof value.prepared !== "boolean" || !/^[a-f0-9-]{36}$/.test(value.transaction) || value.completed && !value.prepared) throw new Error("klaʊdbot's setup record needs repair. Existing data has been preserved.");
   return value;
 }
 
@@ -125,11 +125,11 @@ export function createOnboarding({ userHome, userData, sourceHome, beforePublish
     const saved = marker();
     if (!saved) return;
     if (!inspectPath(target, "directory", true)) {
-      if (saved.prepared) throw new Error("Klaudbot's prepared home is missing. Restore it before continuing.");
+      if (saved.prepared) throw new Error("klaʊdbot's prepared home is missing. Restore it before continuing.");
       return saved;
     }
     const value = receipt();
-    if (!value || value.transaction !== saved.transaction || value.choice !== saved.choice) throw new Error("The existing Klaudbot home does not belong to this setup. It has been preserved.");
+    if (!value || value.transaction !== saved.transaction || value.choice !== saved.choice) throw new Error("The existing klaʊdbot home does not belong to this setup. It has been preserved.");
     return { ...saved, prepared: true };
   };
   const saveMarker = value => { mkdirSync(data, { recursive: true, mode: 0o700 }); privateWrite(data, markerName, value); };
@@ -182,9 +182,9 @@ export function createOnboarding({ userHome, userData, sourceHome, beforePublish
       if (saved?.completed) throw new Error("Initial setup is complete. Use Settings to change your bot.");
       if (saved && saved.choice !== choice) throw new Error("This setup already has a home. Continue the selected setup; existing data will not be reset.");
       if (saved?.prepared) return target;
-      if (source === target || source.startsWith(target + sep) || target.startsWith(source + sep)) throw new Error("The previous harness and Klaudbot need separate private homes.");
+      if (source === target || source.startsWith(target + sep) || target.startsWith(source + sep)) throw new Error("The previous harness and klaʊdbot need separate private homes.");
       inspectPath(resolve(userHome), "directory");
-      if (inspectPath(target, "directory", true)) throw new Error("A Klaudbot home already exists. It has been preserved; no automatic reset is allowed.");
+      if (inspectPath(target, "directory", true)) throw new Error("A klaʊdbot home already exists. It has been preserved; no automatic reset is allowed.");
       const transaction = saved?.transaction ?? randomUUID();
       stage = join(userHome, `.klaudbot-setup-${transaction}`);
       let pending = saved;
@@ -223,7 +223,7 @@ export function createOnboarding({ userHome, userData, sourceHome, beforePublish
         await beforePublish?.(); // Test injection only: fail before publishing, never accepted from IPC.
         saveMarker(pending);
       }
-      if (inspectPath(target, "directory", true)) throw new Error("A Klaudbot home appeared during setup. It has been preserved.");
+      if (inspectPath(target, "directory", true)) throw new Error("A klaʊdbot home appeared during setup. It has been preserved.");
       renameSync(stage, target); stage = undefined;
       saveMarker({ ...pending, prepared: true });
       return target;
@@ -231,12 +231,12 @@ export function createOnboarding({ userHome, userData, sourceHome, beforePublish
       // Once a durable intent exists, leave its staging directory available for safe resume.
       if (stage && !marker()) rmSync(stage, { recursive: true, force: true });
       if (error instanceof Error && !error.code) throw error;
-      throw new Error("Klaudbot could not prepare its private home. The original harness is unchanged; retry setup.");
+      throw new Error("klaʊdbot could not prepare its private home. The original harness is unchanged; retry setup.");
     } finally { busy = false; }
   };
   return {
     inspect, prepare,
-    home() { const saved = selected(); if (!saved?.prepared) throw new Error("Complete the first setup step before starting Klaudbot."); return target; },
+    home() { const saved = selected(); if (!saved?.prepared) throw new Error("Complete the first setup step before starting klaʊdbot."); return target; },
     complete() {
       if (busy) throw new Error("Setup is still preparing your home.");
       const saved = selected();

@@ -72,7 +72,7 @@ struct OnboardingView: View {
             Button("← Choose another way") { discovery.stop(); showHost = false }.buttonStyle(ReinSecondaryButtonStyle())
             FieldLabel("Find your host", folio: "02 / 03")
             Text("LINK TO REIN").font(.reinDisplay(.title))
-            Text("Open Klaudbot on your computer and start its local gateway, or run rein serve. Use the address and mobile token shown there. Your phone and host must have a reachable LAN, mesh, or HTTPS route.")
+            Text("Open klaʊdbot on your computer and start its local gateway, or run rein serve. Use the address and mobile token shown there. Your phone and host must have a reachable LAN, mesh, or HTTPS route.")
                 .font(.reinBody()).foregroundStyle(theme.muted)
             Button(discovery.isSearching ? "Stop local search" : "Find Rein nearby") { discovery.isSearching ? discovery.stop() : discovery.start() }
                 .buttonStyle(ReinSecondaryButtonStyle())

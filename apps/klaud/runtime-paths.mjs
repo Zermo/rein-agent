@@ -13,7 +13,7 @@ export function prepareLocalRuntime({ packaged, appDirectory, resourcesPath, use
   const root = packaged ? join(resourcesPath, "rein") : resolve(appDirectory, "../..");
   const bundled = join(root, "dist/rein.js");
   const entry = !packaged && !existsSync(bundled) ? join(root, "bin/rein.js") : bundled;
-  if (!existsSync(entry)) throw new Error(packaged ? "The app is missing its Rein runtime. Reinstall Klaudbot." : "I couldn't find Rein. Run this app from the Rein checkout.");
+  if (!existsSync(entry)) throw new Error(packaged ? "The app is missing its Rein runtime. Reinstall klaʊdbot." : "I couldn't find Rein. Run this app from the Rein checkout.");
   const home = resolve(reinHome || join(userHome, ".rein"));
   const cwd = packaged || isolated ? join(home, "workspace") : root;
   if (packaged || isolated) {

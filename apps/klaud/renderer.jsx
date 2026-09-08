@@ -390,7 +390,7 @@ function App() {
   return <div className="app">
     {rainEnabled && <RainFrame paused={!pageVisible}/>}
     <header className="masthead">
-      <div className="brand"><img src="./rein-logo.svg" alt="Rein"/><span className="brand-name">Klaudbot</span><span className="edition">Field console / 01</span></div>
+      <div className="brand"><img src="./rein-logo.svg" alt="Rein"/><span className="brand-name">klaʊdbot</span><span className="edition">Field console / 01</span></div>
       {connection && onboarding?.completed && !setupOpened && <nav aria-label="Main">
         <button aria-current={view === "bots" ? "page" : undefined} onClick={() => setView("bots")}><span>01</span> Bots</button>
         <button aria-current={view === "chat" ? "page" : undefined} onClick={() => setView("chat")}><span>02</span> Chat</button>
@@ -405,21 +405,21 @@ function App() {
     {notice && <div className="notice" role="status"><strong>Field note /</strong> {notice}</div>}
     {onboarding && (!onboarding.completed || setupOpened) ? <SetupWizard api={api} inspection={onboarding} connection={connection} bots={state?.bots || []} selectedBotId={selected} onPrepared={setupPrepared} onFinish={setupFinished} onCancel={onboarding.completed ? () => setSetupOpened(false) : undefined}/> : !connection ? <main className="welcome">
       <section className="welcome-art" aria-labelledby="welcome-title">
-        <div className="plate-label"><span>Rein field systems</span><span>Plate 01 / Klaudbot</span></div>
+        <div className="plate-label"><span>Rein field systems</span><span>Plate 01 / <span className="phonetic-name">klaʊdbot</span></span></div>
         <img src="./rein-field-guide-card.jpg" width="1280" height="640" alt="Rein field guide artwork showing a computer linked to a local server"/>
         <p className="plate-caption">A local-first command surface for durable agents.</p>
       </section>
       <section className="welcome-copy">
         <p className="eyebrow">Boot sequence / connection</p>
         <h1 id="welcome-title">Fresh context.<br/>Same journey.</h1>
-        <p className="lede">Start your Klaudbot space on this machine or attach this console to a Rein server already listening on loopback.</p>
+        <p className="lede">Start your klaʊdbot space on this machine or attach this console to a Rein server already listening on loopback.</p>
         <form className="connect-form" onSubmit={connect}>
           <fieldset><legend>Choose the link</legend>
             <label className="choice" data-sound-control><input type="radio" name="mode" value="local" checked={mode === "local"} onChange={() => setMode("local")}/><span><strong>Start local</strong><small>Launch <code>rein serve</code> here</small></span></label>
             <label className="choice" data-sound-control><input type="radio" name="mode" value="remote" checked={mode === "remote"} onChange={() => setMode("remote")}/><span><strong>Attach</strong><small>Use a loopback URL and token</small></span></label>
           </fieldset>
           {mode === "remote" && <div className="remote-fields"><label htmlFor="server-url">Server URL</label><input id="server-url" type="url" required value={url} onChange={event => setUrl(event.target.value)} spellCheck={false}/><label htmlFor="server-token">Bearer token</label><input id="server-token" type="password" required value={token} onChange={event => setToken(event.target.value)} autoComplete="off" spellCheck={false}/></div>}
-          <button className="primary" aria-busy={connecting} disabled={connecting} type="submit">{connecting ? "Linking…" : mode === "local" ? "Open Klaudbot" : "Attach console"}</button>
+          <button className="primary" aria-busy={connecting} disabled={connecting} type="submit">{connecting ? "Linking…" : mode === "local" ? <>Open <span className="phonetic-name">klaʊdbot</span></> : "Attach console"}</button>
         </form>
       </section>
     </main> : <div className="workspace">
