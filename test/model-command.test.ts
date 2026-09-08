@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { runModelCommand, type ModelCommandDependencies } from "../src/models/command.ts";
 import type { ModelArtifact } from "../src/models/artifacts.ts";
 import type { HardwareProfile } from "../src/hardware/profile.ts";
-import { runOSCommand } from "../src/os/command.ts";
+import { isChromeOSRelease, runOSCommand } from "../src/os/command.ts";
 
 const id = "a".repeat(64), token = "hf_fixture_secret", localKey = "d".repeat(64);
 const artifact: ModelArtifact = { schemaVersion: 1, id, repo: "fixture/Tiny", revision: "b".repeat(40), file: "tiny.gguf", sha256: "c".repeat(64), sizeBytes: 128, url: "https://huggingface.co/fixture/Tiny" };
@@ -71,6 +71,12 @@ test("OS command uses platform evidence and rejects execution-like flags", async
 	await assert.rejects(runOSCommand(["plan"], { apply: true }, { hardware: async () => { probes++; return machine; } }), /Unsupported/);
 	await assert.rejects(runOSCommand(["prepare"], { output: true }), /new directory|directory path/);
 	assert.equal(probes, 1);
+});
+test("ChromeOS evidence requires an exact release key", () => {
+	assert.equal(isChromeOSRelease("NAME=Chrome OS\nID=chromeos\n"), true);
+	assert.equal(isChromeOSRelease("CROS_RELEASE_VERSION=132.0.0.0\n"), true);
+	assert.equal(isChromeOSRelease("NOT_ID=chromeos\n# CROS_RELEASE=132\n"), false);
+	assert.equal(isChromeOSRelease("ID=chromeos-like\n"), false);
 });
 test("real source CLI routes managed-model commands without changing server discovery aliases", { timeout: 10000 }, async () => {
 	const home = await mkdtemp(join(tmpdir(), "rein-model-cli-"));
