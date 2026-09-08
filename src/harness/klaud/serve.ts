@@ -14,12 +14,15 @@ import { createRunner } from "../runner.ts";
 import { applyKlaudPatch, loadKlaudShell, saveKlaudShell } from "./shell.ts";
 import type { JsonPatchOp, KlaudSharedState } from "./shell.ts";
 import { createKlaudTools } from "./tools.ts";
-import { createBot, getBot, listBots } from "./bots.ts";
+import { createBot, getBot, listBots, setBotAvatar, validateBotAvatar } from "./bots.ts";
 import type { KlaudBot } from "./bots.ts";
 import { loadKlaudRunSettings, saveKlaudRunSettings, validateRunSettingsPatch } from "./settings.ts";
 import { reasoningCapabilities, type ReasoningCapabilities } from "../../ai/reasoning.ts";
 import { klaudActivity } from "./activity.ts";
 import { loadConfig, guessProvider, normalizeBaseUrl, PROVIDER_PRESETS } from "../../ai/models.ts";
+
+import { createMobileAccounts, MobileAccountError } from "./mobile-accounts.ts";
+import { readKlaudSetup, saveKlaudSetup, probeKlaudModel, discoverKlaudModels } from "./setup.ts";
 
 export interface ServeOptions {
 	host?: "127.0.0.1";
@@ -213,6 +216,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		const model = process.env.REIN_MODEL?.trim() || (sameEndpoint ? config.model : undefined) || "unknown";
 		return reasoningCapabilities({ id: model, provider, baseUrl });
 	};
+	const accounts = createMobileAccounts({ home });
 	const runSettingsResponse = () => ({ ...loadKlaudRunSettings(home), reasoningControl: reasoningControl() });
 	const token = opts.token ?? randomBytes(24).toString("hex");
 	if (!/^[\x21-\x7e]{1,512}$/.test(token)) throw new Error("The bearer token must be nonempty printable ASCII without spaces.");
@@ -410,12 +414,47 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 				catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(400, error instanceof Error ? error.message : "Invalid run settings."); }
 				return;
 			}
+
+            if (req.method === "GET" && req.url === "/accounts") { json(res, 200, await accounts.list()); return; }
+            if (req.method === "PUT" && req.url === "/accounts/provider") {
+                if (active.size) throw new HttpError(409, "Finish or stop the current run before changing its model connection.");
+                const input = await body(req);
+                // A run can start while the request body is still arriving.
+                if (active.size) throw new HttpError(409, "Finish or stop the current run before changing its model connection.");
+                json(res, 200, accounts.select(input)); return;
+            }
+            if (req.method === "POST" && req.url === "/accounts/logins") { json(res, 202, accounts.start(await body(req))); return; }
+            const loginRoute = /^\/accounts\/logins\/([a-f0-9-]+)$/.exec(req.url ?? "");
+            if (loginRoute && req.method === "GET") { json(res, 200, accounts.get(loginRoute[1])); return; }
+            if (loginRoute && req.method === "DELETE") { json(res, 200, accounts.cancel(loginRoute[1])); return; }
+            if (req.url?.startsWith("/setup")) {
+                if (active.size && req.method !== "GET") throw new HttpError(409, "Finish or stop the current run before changing setup.");
+                try {
+                    if (req.method === "GET" && req.url === "/setup") { json(res, 200, readKlaudSetup(home)); return; }
+                    if (req.method === "POST" && ["/setup", "/setup/probe", "/setup/discover"].includes(req.url ?? "")) {
+                        const input = await body(req);
+                        if (active.size) throw new HttpError(409, "Finish or stop the current run before changing setup.");
+                        if (req.url === "/setup") { json(res, 200, saveKlaudSetup(input, home)); return; }
+                        if (req.url === "/setup/probe") { json(res, 200, await probeKlaudModel(home)); return; }
+                        json(res, 200, await discoverKlaudModels(input)); return;
+                    }
+                } catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(400, error instanceof Error ? error.message : "Setup could not be saved."); }
+            }
 			if (req.method === "GET" && req.url === "/bots") { json(res, 200, listBots(home)); return; }
 			if (req.method === "POST" && req.url === "/bots") {
 				const input = await body(req);
-				if (Object.keys(input).some(key => key !== "name") || typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 64 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) invalid("Use a bot name of 1 to 64 characters without control characters.");
-				const bot = createBot(input.name, home, cwd); publishState(); json(res, 201, bot); return;
+				if (Object.keys(input).some(key => !["name", "avatar"].includes(key)) || typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 64 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) invalid("Use a bot name of 1 to 64 characters without control characters.");
+				if (input.avatar !== undefined) { try { validateBotAvatar(input.avatar); } catch { invalid("Choose a supported bot avatar."); } }
+				const bot = createBot(input.name, home, cwd, input.avatar as KlaudBot["avatar"]); publishState(); json(res, 201, bot); return;
 			}
+            const avatarRoute = /^\/bots\/([^/]+)$/.exec(req.url ?? "");
+            if (req.method === "PATCH" && avatarRoute) {
+                const input = await body(req);
+                if (Object.keys(input).length !== 1 || !("avatar" in input)) invalid("Use {avatar} to change a bot's headwear.");
+                try { validateBotAvatar(input.avatar); } catch { invalid("Choose a supported bot avatar."); }
+                const bot = requestedBot(avatarRoute[1], home);
+                const updated = setBotAvatar(bot.id, input.avatar, home); publishState(); json(res, 200, updated); return;
+            }
 			const messagesRoute = /^\/bots\/([^/]+)\/messages(?:\?before=(\d+))?$/.exec(req.url ?? "");
 			if (req.method === "GET" && messagesRoute) {
 				const before = messagesRoute[2] === undefined ? undefined : Number(messagesRoute[2]);
@@ -465,7 +504,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		})().catch(error => {
 			if (res.headersSent || res.destroyed) { if (!res.destroyed) res.destroy(); return; }
 			res.setHeader("Connection", "close");
-			json(res, error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : "rein-klaʊd request failed." });
+			json(res, error instanceof HttpError || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError || error instanceof MobileAccountError ? error.message : "Klaudbot request failed." });
 		});
 	});
 	server.requestTimeout = 15_000; server.headersTimeout = 5000;
@@ -477,6 +516,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 	return { url, token, close() {
 		if (!closing) closing = (async () => {
 			for (const run of active.values()) run.controller.abort();
+			await accounts.close();
 			await new Promise<void>((resolve, reject) => {
 				server.close(error => error ? reject(error) : resolve());
 				(server as typeof server & { closeAllConnections?: () => void }).closeAllConnections?.();

@@ -3,6 +3,10 @@ import { createRoot } from "react-dom/client";
 import { applyDelta, applyShellPatch, presentTranscript, publicProgress, readTranscriptView, saveTranscriptView, updateTranscript, validateActivity, validateMessages, validateRunSettings, validateState } from "./model.mjs";
 import { createSoundEngine, readSoundEnabled } from "./sounds.mjs";
 
+import { BotAvatar, AvatarPicker } from "./avatars.jsx";
+import { avatarForBot } from "./avatar-catalog.mjs";
+import { SetupWizard } from "./setup-wizard.jsx";
+
 const api = window.klaud;
 const errorText = error => String(error?.message || "Something went wrong.").replace(/^Error invoking remote method '[^']+': Error: /, "");
 const rainPreference = "rein.klaud.rain-enabled";
@@ -26,6 +30,8 @@ function ActivitySignal({ phase = "ready", toolName, className = "" }) {
 }
 
 function App() {
+  const [onboarding, setOnboarding] = useState(null), [setupOpened, setSetupOpened] = useState(false);
+  const [botAvatar, setBotAvatar] = useState("aviator");
   const [connection, setConnection] = useState(null), [state, setState] = useState(null), [error, setError] = useState("");
   const [mode, setMode] = useState("local"), [url, setUrl] = useState("http://127.0.0.1:4317"), [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false), [view, setView] = useState("chat"), [selected, setSelected] = useState("");
@@ -203,6 +209,27 @@ function App() {
     };
   }, []);
   useEffect(() => {
+    void api.onboardingInspect().then(setOnboarding).catch(error => setError(errorText(error)));
+  }, []);
+  async function setupPrepared(status) {
+    setConnection(status.url); adopt(status.state);
+    setOnboarding(await api.onboardingInspect());
+  }
+  async function setupFinished(chosenBot, starter) {
+    await refresh();
+    await chooseBot(chosenBot.id);
+    if (!onboarding?.completed) setOnboarding(await api.onboardingComplete());
+    setSetupOpened(false);
+    if (!onboarding?.completed) setMessage(starter || "");
+    sound.current?.play("ready");
+  }
+  async function changeAvatar(value) {
+    if (!selectedRef.current) return;
+    setSaving(true); setError("");
+    try { await api.request("setBotAvatar", { id: selectedRef.current, avatar: value }); await refresh(); }
+    catch (error) { setError(errorText(error)); } finally { setSaving(false); }
+  }
+  useEffect(() => {
     let initializing = true;
     const queued = [];
     const unsubscribe = api.onEvent(event => { if (initializing) queued.push(event); else void onEvent(event); });
@@ -294,7 +321,7 @@ function App() {
   async function createBot(event) {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      const bot = await api.request("createBot", { name: botName }); setBotName(""); await refresh(); await chooseBot(bot.id);
+      const bot = await api.request("createBot", { name: botName, avatar: botAvatar }); setBotName(""); await refresh(); await chooseBot(bot.id);
     } catch (error) { setError(errorText(error)); } finally { setSaving(false); }
   }
   async function submit(event) {
@@ -336,6 +363,10 @@ function App() {
   const bot = state?.bots.find(item => item.id === selected);
   const visibleMessages = presentTranscript(chats[selected] || [], transcriptView);
   const workingHere = busy && runBot.current === selected;
+  function botPhase(id) {
+    if (busy && runBot.current === id) return state?.approvals.length ? "approval" : progress?.phase || "working";
+    return "ready";
+  }
   const botList = <>
     <div className="section-heading">
       <p className="eyebrow">Agent roster / live</p>
@@ -343,7 +374,7 @@ function App() {
     </div>
     <div className="bot-list">
       {state?.bots.map((item, index) => <button className={selected === item.id ? "bot active" : "bot"} aria-pressed={selected === item.id} key={item.id} onClick={() => { void chooseBot(item.id).catch(error => setError(errorText(error))); }}>
-        <span className="bot-number">{String(index + 1).padStart(2, "0")}</span>
+        <BotAvatar botId={item.id} avatar={item.avatar} state={botPhase(item.id)} size={44} decorative paused={!pageVisible}/><span className="bot-number">{String(index + 1).padStart(2, "0")}</span>
         <span className="bot-name">{item.name}</span>
         {runBot.current === item.id && <span className="running-dot" aria-label="Running"/>}
       </button>)}
@@ -352,13 +383,15 @@ function App() {
     <form className="new-bot" onSubmit={createBot}>
       <label htmlFor={view === "bots" ? "bot-name-page" : "bot-name-sidebar"}>Register new unit</label>
       <div className="input-row"><input id={view === "bots" ? "bot-name-page" : "bot-name-sidebar"} value={botName} onChange={event => setBotName(event.target.value)} placeholder="Agent name" maxLength={64}/><button aria-busy={saving} disabled={saving || !botName.trim()} type="submit">Add</button></div>
+      <details className="bot-dressing"><summary>Choose their headwear</summary><AvatarPicker value={botAvatar} onChange={setBotAvatar} disabled={saving}/></details>
     </form>
+    {bot && <details className="bot-dressing"><summary>Dress {bot.name}</summary><AvatarPicker value={avatarForBot(bot.id, bot.avatar)} onChange={changeAvatar} disabled={saving || busy}/></details>}
   </>;
   return <div className="app">
     {rainEnabled && <RainFrame paused={!pageVisible}/>}
     <header className="masthead">
-      <div className="brand"><img src="./rein-logo.svg" alt="Rein"/><span className="brand-name">rein-klaʊd</span><span className="edition">Field console / 01</span></div>
-      {connection && <nav aria-label="Main">
+      <div className="brand"><img src="./rein-logo.svg" alt="Rein"/><span className="brand-name">Klaudbot</span><span className="edition">Field console / 01</span></div>
+      {connection && onboarding?.completed && !setupOpened && <nav aria-label="Main">
         <button aria-current={view === "bots" ? "page" : undefined} onClick={() => setView("bots")}><span>01</span> Bots</button>
         <button aria-current={view === "chat" ? "page" : undefined} onClick={() => setView("chat")}><span>02</span> Chat</button>
         <button aria-current={view === "settings" ? "page" : undefined} onClick={() => setView("settings")}><span>03</span> Settings</button>
@@ -370,23 +403,23 @@ function App() {
     </header>
     {error && <div className="error" role="alert"><span><strong>Signal fault /</strong> {error}</span><button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
     {notice && <div className="notice" role="status"><strong>Field note /</strong> {notice}</div>}
-    {!connection ? <main className="welcome">
+    {onboarding && (!onboarding.completed || setupOpened) ? <SetupWizard api={api} inspection={onboarding} connection={connection} bots={state?.bots || []} selectedBotId={selected} onPrepared={setupPrepared} onFinish={setupFinished} onCancel={onboarding.completed ? () => setSetupOpened(false) : undefined}/> : !connection ? <main className="welcome">
       <section className="welcome-art" aria-labelledby="welcome-title">
-        <div className="plate-label"><span>Rein field systems</span><span>Plate 01 / Klaʊd</span></div>
+        <div className="plate-label"><span>Rein field systems</span><span>Plate 01 / Klaudbot</span></div>
         <img src="./rein-field-guide-card.jpg" width="1280" height="640" alt="Rein field guide artwork showing a computer linked to a local server"/>
         <p className="plate-caption">A local-first command surface for durable agents.</p>
       </section>
       <section className="welcome-copy">
         <p className="eyebrow">Boot sequence / connection</p>
         <h1 id="welcome-title">Fresh context.<br/>Same journey.</h1>
-        <p className="lede">Start Rein on this machine or attach this console to a Rein server already listening on loopback.</p>
+        <p className="lede">Start your Klaudbot space on this machine or attach this console to a Rein server already listening on loopback.</p>
         <form className="connect-form" onSubmit={connect}>
           <fieldset><legend>Choose the link</legend>
             <label className="choice" data-sound-control><input type="radio" name="mode" value="local" checked={mode === "local"} onChange={() => setMode("local")}/><span><strong>Start local</strong><small>Launch <code>rein serve</code> here</small></span></label>
             <label className="choice" data-sound-control><input type="radio" name="mode" value="remote" checked={mode === "remote"} onChange={() => setMode("remote")}/><span><strong>Attach</strong><small>Use a loopback URL and token</small></span></label>
           </fieldset>
           {mode === "remote" && <div className="remote-fields"><label htmlFor="server-url">Server URL</label><input id="server-url" type="url" required value={url} onChange={event => setUrl(event.target.value)} spellCheck={false}/><label htmlFor="server-token">Bearer token</label><input id="server-token" type="password" required value={token} onChange={event => setToken(event.target.value)} autoComplete="off" spellCheck={false}/></div>}
-          <button className="primary" aria-busy={connecting} disabled={connecting} type="submit">{connecting ? "Linking…" : mode === "local" ? "Start Rein" : "Attach console"}</button>
+          <button className="primary" aria-busy={connecting} disabled={connecting} type="submit">{connecting ? "Linking…" : mode === "local" ? "Open Klaudbot" : "Attach console"}</button>
         </form>
       </section>
     </main> : <div className="workspace">
@@ -395,6 +428,7 @@ function App() {
         {view === "bots" ? <section className="page bots-page">{botList}</section> : view === "settings" ? <section className="page settings">
           <div className="page-heading"><p className="eyebrow">Console controls / device</p><h1>Set the working rhythm.</h1><p className="lede">Run settings are saved by the connected Rein backend. Transcript views, rain and sound effects stay with this device.</p></div>
           {settingsError && <p className="run-settings-error" role="alert">{settingsError}</p>}
+          <button className="setup-reopen" disabled={busy} onClick={() => setSetupOpened(true)}>Assisted setup · model, work style, and task limits</button>
           <div className="setting-list">
             <label data-sound-control><span><strong>Bash approval</strong><small>Auto runs Bash within authorized tasks. Ask restores a review before each Bash call.</small></span><select value={runSettings?.bashApproval ?? ""} disabled={!runSettings || savingRunSettings || busy} onChange={event => saveRunSetting("bashApproval", event.target.value)}><option value="" disabled>{settingsError ? "Unavailable" : "Loading…"}</option><option value="auto">Auto</option><option value="ask">Ask every time</option></select></label>
             <label data-sound-control><span><strong>Reasoning effort</strong><small>{runSettings?.reasoningControl?.description ?? "Requested effort for new runs. Provider support varies; this is not a measured reasoning score."}</small></span><select value={runSettings?.reasoningEffort ?? ""} disabled={!runSettings || savingRunSettings || busy} onChange={event => saveRunSetting("reasoningEffort", event.target.value)}><option value="" disabled>{settingsError ? "Unavailable" : "Loading…"}</option>{[["default", "Provider default"], ["off", "Off, if supported"], ["low", "Low"], ["medium", "Medium"], ["high", "High"]].map(([value, label]) => <option key={value} value={value} disabled={runSettings?.reasoningControl && !runSettings.reasoningControl.supported.includes(value)}>{label}</option>)}</select></label>
@@ -408,7 +442,7 @@ function App() {
           </div>
           <div className="service-note"><p>With the tray hidden, click the Dock icon or launch the app again to reopen this window. Quit from the app menu.</p><p>Connected to <code>{connection}</code></p></div>
         </section> : <>
-          <div className="chat-heading"><div><p className="eyebrow">Conversation ledger / current</p><h1>{bot?.name || "Choose a field unit"}</h1></div><div className="chat-status"><span className="folio">Thread / {bot ? bot.id.slice(-4).toUpperCase() : "----"}</span>{state?.shell.chrome.showActivity && <ActivitySignal phase={workingHere ? progress?.phase ?? "working" : "ready"} toolName={workingHere ? progress?.toolName : undefined}/>}</div></div>
+          <div className="chat-heading"><div className="chat-identity">{bot && <BotAvatar botId={bot.id} avatar={bot.avatar} state={botPhase(bot.id)} size={64} decorative paused={!pageVisible}/>}<div><p className="eyebrow">Conversation ledger / current</p><h1>{bot?.name || "Choose a field unit"}</h1></div></div><div className="chat-status"><span className="folio">Thread / {bot ? bot.id.slice(-4).toUpperCase() : "----"}</span>{state?.shell.chrome.showActivity && <ActivitySignal phase={workingHere ? progress?.phase ?? "working" : "ready"} toolName={workingHere ? progress?.toolName : undefined}/>}</div></div>
           <div className="transcript-controls">
             <div className="view-switch" role="group" aria-label="Transcript view">{[["replies", "Replies"], ["activity", "Activity"], ["full", "Full"]].map(([value, label]) => <button key={value} aria-pressed={transcriptView === value} onClick={() => chooseTranscriptView(value)}>{label}</button>)}</div>
             <span className="transcript-context">{transcriptView === "replies" ? "Conversation + failures" : transcriptView === "full" ? "Full tool details · collapsible" : "Public activity · expand any tool"}</span>
@@ -417,7 +451,7 @@ function App() {
           <div className="transcript" ref={transcript} aria-label="Conversation" aria-live="polite" aria-relevant="additions text">
             {historyBefore[selected] != null && <button className="history-control" disabled={busy || loadingHistory} onClick={earlier}>{loadingHistory ? "Opening archive…" : "Open earlier ledger"}</button>}
             {!bot ? <div className="empty"><p className="eyebrow">No active unit</p><h2>Give your first agent a name.</h2><p className="muted">Rein keeps its conversation between visits.</p><button onClick={() => setView("bots")}>Open field units</button></div> : !(chats[selected]?.length) ? <div className="empty"><p className="eyebrow">Ledger clear</p><h2>What are we working on?</h2><p className="muted">Send an instruction to start this durable conversation.</p></div> : visibleMessages.map((item, index) => <article className={`message ${item.role}${item.isError ? " tool-error" : ""}`} key={item.id}>
-              <div className="role"><span>{item.role === "user" ? "Operator input" : item.role === "tool" ? "Tool / exec" : item.completion?.stopReason === "toolUse" ? "Rein / progress" : "Rein / reply"}</span><span>{String(index + 1).padStart(3, "0")}</span></div>
+              <div className="role"><span>{item.role === "user" ? "Operator input" : item.role === "tool" ? "Tool / exec" : item.completion?.stopReason === "toolUse" ? `${bot?.name || "Bot"} / progress` : `${bot?.name || "Bot"} / reply`}</span><span>{String(index + 1).padStart(3, "0")}</span></div>
               {item.role === "tool" ? <div className="tool-record"><div className="tool-summary"><strong>{item.toolName}</strong><span>{item.isError ? "Failed" : item.status === "running" ? "Running" : item.status === "recorded" ? "Call recorded" : "Complete"}</span></div><details open={transcriptView === "full" || item.isError === true}><summary>Inspect arguments and result</summary>{item.arguments && <><span className="detail-label">Arguments</span><pre>{item.arguments}</pre></>}{item.content ? <><span className="detail-label">{item.isError ? "Error output" : "Result"}</span><pre>{item.content}</pre></> : <p className="muted">{item.status === "running" ? "Waiting for the tool result." : "No text result recorded."}</p>}{item.truncated && <p className="muted">Preview shortened. Full output remains in session history.</p>}</details></div> : <div><div className="message-text">{item.content}</div>{transcriptView !== "replies" && item.completion && <div className="completion-meta">{item.completion.stopReason && <span>Completion / {item.completion.stopReason}</span>}{item.completion.reasoningTokens && <span>Reported reasoning tokens / {item.completion.reasoningTokens.toLocaleString()}</span>}</div>}</div>}
             </article>)}
           </div>

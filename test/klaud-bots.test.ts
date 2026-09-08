@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { createBot, getBot, listBots } from "../src/harness/klaud/bots.ts";
+import { BOT_AVATARS, createBot, getBot, listBots, setBotAvatar } from "../src/harness/klaud/bots.ts";
 import { createSession, sessionPath, sessionsDir } from "../src/agent/session.ts";
 
 function fixture(t: test.TestContext): string {
@@ -21,6 +21,53 @@ function fixture(t: test.TestContext): string {
 }
 
 const registry = (home: string) => join(home, "klaud", "bots.json");
+
+test("legacy bots load without an avatar and changing headwear preserves the entire session", t => {
+	const home = fixture(t), bot = createBot("Existing operator bot", home);
+	assert.equal(Object.hasOwn(bot, "avatar"), false);
+	const file = sessionPath(bot.sessionId, home);
+	fs.appendFileSync(file, JSON.stringify({ type: "message", role: "user", content: "Synthetic preserved transcript" }) + "\n");
+	const transcript = fs.readFileSync(file);
+	for (const avatar of BOT_AVATARS) {
+		const updated = setBotAvatar(bot.id, avatar, home);
+		assert.deepEqual(updated, { ...bot, avatar });
+		assert.deepEqual(getBot(bot.id, home), updated);
+		assert.deepEqual(fs.readFileSync(file), transcript);
+		assert.deepEqual(fs.readdirSync(sessionsDir(home)), [`${bot.sessionId}.jsonl`]);
+	}
+	assert.equal(fs.statSync(registry(home)).mode & 0o777, 0o600);
+	assert.deepEqual(fs.readdirSync(join(home, "klaud")), ["bots.json"]);
+});
+
+test("new bots persist any supported avatar while invalid identities do not write files", t => {
+	const home = fixture(t);
+	for (const avatar of ["blob", "__proto__", "", null, true, 2, {}, []]) assert.throws(() => createBot("Blocked", home, process.cwd(), avatar as any), /avatar/);
+	assert.deepEqual(fs.readdirSync(home), []);
+	for (const avatar of BOT_AVATARS) {
+		const bot = createBot(avatar, home, process.cwd(), avatar);
+		assert.equal(getBot(bot.id, home).avatar, avatar);
+	}
+	assert.equal(listBots(home).length, BOT_AVATARS.length);
+});
+
+test("invalid avatar updates and invalid stored avatars preserve prior registry and history", t => {
+	const home = fixture(t), bot = createBot("Fixture", home, process.cwd(), "aviator");
+	const before = fs.readFileSync(registry(home)), transcript = fs.readFileSync(sessionPath(bot.sessionId, home));
+	for (const avatar of [undefined, null, "blob", "__proto__", [], {}, 1]) {
+		assert.throws(() => setBotAvatar(bot.id, avatar, home), /avatar/);
+		assert.deepEqual(fs.readFileSync(registry(home)), before);
+	}
+	assert.throws(() => setBotAvatar("klaud-bot-00000000", "builder", home), /No such bot/);
+	assert.deepEqual(fs.readFileSync(sessionPath(bot.sessionId, home)), transcript);
+	for (const avatar of [null, "unknown", false, {}]) {
+		const stored = JSON.stringify({ version: 1, bots: [{ ...bot, avatar }] });
+		fs.writeFileSync(registry(home), stored);
+		assert.throws(() => listBots(home), /registry/);
+		assert.throws(() => setBotAvatar(bot.id, "builder", home), /registry/);
+		assert.equal(fs.readFileSync(registry(home), "utf8"), stored);
+		assert.deepEqual(fs.readFileSync(sessionPath(bot.sessionId, home)), transcript);
+	}
+});
 
 test("bots create, list, and reopen the same private JSONL session", (t) => {
 	const home = fixture(t);

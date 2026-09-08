@@ -45,6 +45,9 @@ final class ReinAppStore: ObservableObject {
     @Published var pendingDecision: PendingDecision?
     @Published private(set) var pendingRunRecovery: PendingRunRecovery?
     @Published var showCloudWorkspace = false
+    @Published private(set) var showBotSetup = false
+    @Published private(set) var activityBotID: String?
+    @Published private(set) var activityPhase = BotAvatarPhase.ready
     @Published private(set) var isCheckingRoute = false
     @Published private(set) var gatewayUnavailable = false
     let cloud: CloudWorkspace
@@ -168,7 +171,7 @@ final class ReinAppStore: ObservableObject {
         return false
     }
 
-    func connect(rawURL: String, token: String, isBackup: Bool = false) async {
+    func connect(rawURL: String, token: String, isBackup: Bool = false, assistedSetup: Bool = false) async {
         if !isBackup { routingGeneration &+= 1 }
         let route = routingGeneration
         isConnecting = true; errorMessage = nil
@@ -180,6 +183,7 @@ final class ReinAppStore: ObservableObject {
         let previousRunID = trackedRunID
         runTask?.cancel(); runTask = nil; runTaskGeneration &+= 1
         clearPendingActions(for: previousRunID)
+        activityBotID = nil; activityPhase = .ready
         client = nil; connectedURL = nil; currentRunID = nil; pendingRunRecovery = nil
         isRunning = false; isLoadingHistory = false; notice = nil
         do {
@@ -187,6 +191,7 @@ final class ReinAppStore: ObservableObject {
             let candidate = makeClient(connection)
             let snapshot = try await candidate.state()
             guard connectionGeneration == generation, !Task.isCancelled else { return }
+            showBotSetup = assistedSetup && !defaults.bool(forKey: setupKey(for: connection.baseURL))
             client = candidate; state = snapshot; connectedURL = connection.baseURL; gatewayUnavailable = false
             if !isBackup { defaults.set(connection.baseURL.absoluteString, forKey: Self.URLKey) }
             try secrets.write(connection.token, account: tokenAccount(for: connection.baseURL))
@@ -217,6 +222,8 @@ final class ReinAppStore: ObservableObject {
         connectionGeneration &+= 1
         runTask?.cancel(); runTask = nil; runTaskGeneration &+= 1
         automaticActionTasks.values.forEach { $0.cancel() }; automaticActionTasks.removeAll()
+        showBotSetup = false
+        activityBotID = nil; activityPhase = .ready
         client = nil; connectedURL = nil; isConnecting = false; isRunning = false; isLoadingHistory = false; currentRunID = nil; pendingRunRecovery = nil
         gatewayUnavailable = false
         clearPendingActions(for: activeRunID); notice = nil; errorMessage = nil
@@ -264,16 +271,50 @@ final class ReinAppStore: ObservableObject {
         await reconcile(runID: runID, restartSubscription: true, context: context)
     }
 
-    func createBot(name: String) async -> Bool {
+    func avatarPhase(for bot: ReinBot) -> BotAvatarPhase {
+        guard activityBotID == bot.id else { return .ready }
+        if pendingDecision != nil { return .approval }
+        if activityPhase == .error { return .error }
+        guard isRunning else { return .ready }
+        if gatewayUnavailable || errorMessage != nil { return .error }
+        return activityPhase == .ready ? .working : activityPhase
+    }
+
+    func updateBotAvatar(_ bot: ReinBot, avatar: BotAvatarStyle) async -> Bool {
+        guard let context = currentConnectionContext() else { return false }
+        do {
+            let updated = try await context.client.updateBotAvatar(botID: bot.id, avatar: avatar.rawValue)
+            try requireCurrentConnection(context)
+            guard let index = state.bots.firstIndex(where: { $0.id == bot.id }), updated.id == bot.id else { return false }
+            state.bots[index] = updated
+            return true
+        } catch {
+            guard isCurrentConnection(context) else { return false }
+            fail(error); return false
+        }
+    }
+
+    private func setupKey(for origin: URL) -> String { "klaudbot:assisted-setup:v1:" + origin.absoluteString }
+
+    func completeBotSetup() {
+        guard let origin = connectedURL, selectedBot != nil else { return }
+        defaults.set(true, forKey: setupKey(for: origin))
+        showBotSetup = false
+        section = .chat
+    }
+
+    func createBot(name: String, avatar: String? = nil) async -> Bool {
         guard let context = currentConnectionContext(), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         do {
-            let bot = try await context.client.createBot(name: String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64)))
+            let bot = try await context.client.createBot(name: String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64)), avatar: avatar)
             try requireCurrentConnection(context)
             let snapshot = try await context.client.state()
             try requireCurrentConnection(context)
             state = snapshot
+            guard snapshot.bots.contains(where: { $0.id == bot.id }) else { throw GatewayClientError.invalidResponse }
             await chooseBot(bot.id, context: context)
             try requireCurrentConnection(context)
+            guard errorMessage == nil else { return false }
             sounds.play(.ready)
             return true
         } catch {
@@ -335,6 +376,7 @@ final class ReinAppStore: ObservableObject {
             notice = "The request was not sent because its protected retry copy could not be saved."
             return false
         }
+        activityBotID = bot.id; activityPhase = .working
         errorMessage = nil; notice = "Streaming from \(bot.name)…"; isRunning = true
         let optimistic = ReinMessage(id: "pending-user-\(UUID().uuidString)", role: .user, content: clean)
         messagesByBot[bot.id, default: []].append(optimistic)
@@ -536,6 +578,15 @@ final class ReinAppStore: ObservableObject {
     private func consume(_ event: GatewayEvent, botID: String, context: StoreConnectionContext) async {
         guard isCurrentConnection(context) else { return }
         do {
+            activityBotID = botID
+            switch event.type {
+            case "RUN_STARTED", "TOOL_CALL_END": activityPhase = .working
+            case "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT": activityPhase = .responding
+            case "TOOL_CALL_START": activityPhase = .tool
+            case "RUN_ERROR": activityPhase = .error
+            case "RUN_FINISHED": activityPhase = .ready
+            default: break
+            }
             if event.type == "RUN_STARTED" { currentRunID = event.runId }
             if event.type == "RUN_STARTED", let id = event.runId { persistActiveRun(id, origin: context.origin) }
             if event.type == "TEXT_MESSAGE_START" { sounds.play(.reply) }
@@ -792,6 +843,7 @@ final class ReinAppStore: ObservableObject {
             }
             guard let bot = state.bots.first(where: { $0.sessionId == snapshot.threadId }) else { throw GatewayClientError.invalidResponse }
             selectedBotID = bot.id
+            activityBotID = bot.id; activityPhase = .working
             try await loadMessages(context: context, botID: bot.id, before: nil)
             currentRunID = runID; isRunning = true; adoptPending(from: snapshot, context: context)
             let resumeAfter = min(max(eventCursor.lastHandled(runID: runID), snapshot.oldestSequence - 1), snapshot.lastSequence)

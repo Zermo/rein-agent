@@ -1,3 +1,5 @@
+@import url("./avatars.css");
+@import url("./setup.css");
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 · genre: editorial · macrostructure: Workbench · theme: studied-DNA (source: docs/assets/rein-field-guide-card.png) · design-system: design.md · designed-as-app · tone: industrial field manual · anchor hue: rust · contrast: pass (40–41) · nav: N6 · footer: none · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
 @import "./tokens.css";
 
@@ -454,7 +456,7 @@ aside {
   display: grid;
   width: 100%;
   min-height: calc(44px + var(--klaud-density));
-  grid-template-columns: 30px minmax(0, 1fr) 12px;
+  grid-template-columns: 44px 24px minmax(0, 1fr) 12px;
   align-items: center;
   gap: var(--space-xs);
   padding: var(--klaud-density) var(--space-xs);
@@ -542,6 +544,7 @@ aside {
   border-bottom: var(--rule-strong) solid var(--ink);
 }
 
+.chat-identity { display: flex; align-items: center; gap: var(--space-md); min-width: 0; }
 .chat-heading h1 { margin: 0; font-size: clamp(var(--text-xl), 4vw, var(--text-2xl)); overflow-wrap: anywhere; }
 .chat-status { display: flex; align-items: center; gap: var(--space-sm); }
 .folio { color: var(--ink-muted); }

@@ -5,6 +5,7 @@ struct ChatView: View {
     @Environment(\.reinTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var composerFocused: Bool
+    @State private var editingBot: ReinBot?
 
     var body: some View {
         ScreenScaffold {
@@ -19,6 +20,7 @@ struct ChatView: View {
                 else { transcript }
             }
         }
+        .sheet(item: $editingBot) { bot in BotAvatarEditor(store: store, bot: bot).environment(\.reinTheme, theme) }
         .safeAreaInset(edge: .bottom, spacing: 0) { if store.selectedBot != nil { composer } }
     }
 
@@ -41,18 +43,23 @@ struct ChatView: View {
     }
 
     private var chatHeading: some View {
-        HStack(alignment: .bottom, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
+            if let bot = store.selectedBot {
+                Button { editingBot = bot } label: {
+                    BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), phase: store.avatarPhase(for: bot)).frame(width: 56, height: 64)
+                }.buttonStyle(.plain).accessibilityLabel("Change \(bot.name)’s avatar")
+            }
             VStack(alignment: .leading, spacing: 2) {
-                Text("ACTIVE FIELD UNIT").font(.reinMono(.caption)).foregroundStyle(theme.accent).tracking(1)
-                Text(store.selectedBot?.name.uppercased() ?? "NO UNIT SELECTED").font(.reinDisplay(.title)).lineLimit(2).minimumScaleFactor(0.7)
+                Text("YOUR BOT").font(.reinMono(.caption)).foregroundStyle(theme.accent).tracking(1)
+                Text(store.selectedBot?.name.uppercased() ?? "NO BOT SELECTED").font(.reinDisplay(.title)).lineLimit(2).minimumScaleFactor(0.7)
             }
             Spacer()
             if store.state.shell.chrome.showActivity {
-                Text(store.isRunning ? "WORKING" : "READY")
+                Text(store.selectedBot.map { store.avatarPhase(for: $0).label.uppercased() } ?? "READY")
                     .font(.reinMono(.caption)).tracking(1).padding(.horizontal, 12).frame(minHeight: 36)
                     .foregroundStyle(theme.greenInk).background(store.isRunning ? theme.gold : theme.green)
                     .overlay(Rectangle().stroke(theme.ink, lineWidth: 1))
-                    .accessibilityLabel("Agent status: \(store.isRunning ? "working" : "ready")")
+                    .accessibilityLabel("Agent status: \(store.selectedBot.map { store.avatarPhase(for: $0).label } ?? "Ready")")
             }
         }.padding(16).background(theme.paper).overlay(alignment: .bottom) { Rectangle().fill(theme.ink).frame(height: 2) }
     }
@@ -153,7 +160,7 @@ struct MessageLedgerRow: View {
     private var label: String {
         switch message.role {
         case .user: "OPERATOR INPUT"
-        case .assistant: "REIN \(replyMarker) / AGENT REPLY" + (presented.purpose == .message ? "" : " · \(presented.purpose.rawValue)")
+        case .assistant: "KLAUDBOT \(replyMarker) / AGENT REPLY" + (presented.purpose == .message ? "" : " · \(presented.purpose.rawValue)")
         case .tool: "TOOL CALL / EXEC"
         }
     }
@@ -161,7 +168,7 @@ struct MessageLedgerRow: View {
     private var accessibleLabel: String {
         switch message.role {
         case .user: "Operator input"
-        case .assistant: "Rein agent reply" + (presented.purpose == .message ? "" : ", \(presented.purpose.rawValue.lowercased())")
+        case .assistant: "Klaudbot agent reply" + (presented.purpose == .message ? "" : ", \(presented.purpose.rawValue.lowercased())")
         case .tool: "Tool call or execution"
         }
     }

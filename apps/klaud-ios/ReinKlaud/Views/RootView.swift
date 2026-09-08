@@ -11,6 +11,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if store.connectedURL == nil { OnboardingView(store: store) }
+            else if store.showBotSetup { BotSetupView(store: store) }
             else if horizontalSizeClass == .regular && store.state.shell.chrome.sidebar { TabletShell(store: store) }
             else { PhoneShell(store: store) }
         }
@@ -56,7 +57,7 @@ private struct TabletShell: View {
                     Section("Field units") {
                         ForEach(store.state.bots) { bot in
                             Button { Task { await store.chooseBot(bot.id) } } label: {
-                                HStack { Text(bot.name); Spacer(); if store.selectedBotID == bot.id { Image(systemName: "arrow.right") } }
+                                HStack { BotAvatarView(style: .resolve(bot.avatar, botID: bot.id), phase: store.avatarPhase(for: bot)).frame(width: 36, height: 44).accessibilityHidden(true); Text(bot.name); Spacer(); if store.selectedBotID == bot.id { Image(systemName: "arrow.right") } }
                             }.buttonStyle(.plain).frame(minHeight: 44)
                         }
                     }
@@ -87,7 +88,7 @@ struct BrandMasthead: View {
         HStack(spacing: 10) {
             Image("ReinMark").resizable().scaledToFit().frame(width: compact ? 36 : 44, height: compact ? 36 : 44)
             VStack(alignment: .leading, spacing: 0) {
-                Text("rein-klaʊd").font(.reinDisplay(.title2)).textCase(.uppercase)
+                Text("Klaudbot").font(.reinDisplay(.title2)).textCase(.uppercase)
                 Text("FIELD CONSOLE / iOS").font(.reinMono(.caption2)).tracking(1.1).foregroundStyle(theme.muted)
             }
             Spacer()

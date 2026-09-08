@@ -1,4 +1,4 @@
-# rein-klaʊd for iPhone and iPad
+# Klaudbot for iPhone and iPad
 
 This is the native SwiftUI operator console for Rein. The agent loop, model,
 shell tools, durable sessions, and headless autonomy stay on the operator's Rein
@@ -10,7 +10,7 @@ when a host is unavailable or the operator chooses an API account.
 The interface follows the same Rein field guide as the desktop app: cream paper,
 charcoal rules, rust actions, mustard activity, terminal-green tool records,
 condensed headings, and a numbered transcript ledger. Every exchange identifies
-`OPERATOR INPUT`, `REIN / AGENT REPLY`, or `TOOL CALL / EXEC`. Light and Night
+`OPERATOR INPUT`, `KLAUDBOT / AGENT REPLY`, or `TOOL CALL / EXEC`. Light and Night
 themes, density, signal color, and activity settings follow the shared host
 state. Eight short 48 kHz PCM cues reproduce the desktop cue frequencies and
 timing without a runtime dependency. Sounds are on by default and the switch is
@@ -192,3 +192,12 @@ Text uses Dynamic Type-relative fonts, controls keep a 44-point minimum target,
 role and status labels are available to VoiceOver, and Reduce Motion replaces
 the transcript scroll animation with an immediate update. Color and sound repeat
 information already present in text.
+
+
+## Bot identity and guided setup
+
+Klaudbot is the new visible name. The existing bundle ID, Keychain services, Bonjour service, and preference keys stay unchanged so installed copies retain their settings.
+
+Onboarding offers a Rein host or a direct model account. A saved host stays available for reconnection. After the first successful link to a host, setup lists its existing bots and offers a name and avatar for a new one. Completing this step is remembered separately for each host. The iOS app can discover advertised gateways; it does not inspect another computer’s filesystem or migrate a desktop installation.
+
+Every bot has a vintage headwear avatar: Aviator, Rider, Builder, Slugger, Medic, or Explorer. Existing bots without an avatar get the same stable selection as the desktop app. The picker saves appearance to the gateway, so it follows that bot on other clients. It leaves sessions, model settings, and permissions unchanged. Eyebrows use reported runtime state—ready, working, replying, running a tool, waiting for approval, or needing attention—with no inferred mood or idle animation.

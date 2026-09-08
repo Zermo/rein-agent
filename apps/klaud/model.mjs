@@ -1,4 +1,6 @@
 // This browser-safe cache validator has no filesystem or agent-loop imports.
+import { AVATAR_STYLES } from "./avatar-catalog.mjs";
+const avatarIds = AVATAR_STYLES.map(style => style.id);
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const keys = (value, names) => object(value) && Object.keys(value).length === names.length && names.every(key => Object.hasOwn(value, key));
 const string = (value, max = 4000) => typeof value === "string" && value.length > 0 && value.length <= max;
@@ -22,7 +24,7 @@ export function validateState(state) {
   if (!keys(state, ["shell", "prefs", "bots", "approvals"])) throw new Error("Invalid state snapshot.");
   validateShell(state.shell);
   if (!object(state.prefs) || Object.keys(state.prefs).some(key => key !== "lastBotId") || state.prefs.lastBotId !== undefined && !string(state.prefs.lastBotId, 160)) throw new Error("Invalid preferences.");
-  if (!Array.isArray(state.bots) || state.bots.some(bot => !object(bot) || !string(bot.id, 160) || !string(bot.name) || !string(bot.sessionId, 160)) || new Set(state.bots.map(bot => bot.id)).size !== state.bots.length) throw new Error("Invalid bots.");
+  if (!Array.isArray(state.bots) || state.bots.some(bot => !object(bot) || !string(bot.id, 160) || !string(bot.name) || !string(bot.sessionId, 160) || bot.avatar !== undefined && !avatarIds.includes(bot.avatar)) || new Set(state.bots.map(bot => bot.id)).size !== state.bots.length) throw new Error("Invalid bots.");
   if (!Array.isArray(state.approvals) || state.approvals.some(item => !keys(item, ["id", "tool", "summary"]) || !string(item.id, 160) || !string(item.tool) || typeof item.summary !== "string")) throw new Error("Invalid approvals.");
   return structuredClone(state);
 }
@@ -60,13 +62,26 @@ export function requestRoute(operation, input = {}) {
     case "getRunSettings": return { method: "GET", path: "/settings" };
     case "getActivity": return { method: "GET", path: "/activity" };
     case "saveRunSettings": return { method: "POST", path: "/settings", body: validateRunSettings(input, true) };
+    case "getAccounts": return { method: "GET", path: "/accounts" };
+    case "saveProvider": return { method: "PUT", path: "/accounts/provider", body: input };
+    case "startLogin": return { method: "POST", path: "/accounts/logins", body: input };
+    case "getLogin": return { method: "GET", path: `/accounts/logins/${id(input.id)}` };
+    case "cancelLogin": return { method: "DELETE", path: `/accounts/logins/${id(input.id)}` };
+    case "getSetup": return { method: "GET", path: "/setup" };
+    case "saveSetup": return { method: "POST", path: "/setup", body: input };
+    case "probeModel": return { method: "POST", path: "/setup/probe", body: {} };
+    case "discoverModels": return { method: "POST", path: "/setup/discover", body: input };
+    case "setBotAvatar":
+      if (!avatarIds.includes(input.avatar)) throw new Error("Choose a supported bot avatar.");
+      return { method: "PATCH", path: `/bots/${id(input.id)}`, body: { avatar: input.avatar } };
     case "bots": return { method: "GET", path: "/bots" };
     case "messages":
       if (input.before !== undefined && (!Number.isSafeInteger(input.before) || input.before < 0)) throw new Error("Invalid history cursor.");
       return { method: "GET", path: `/bots/${id(input.id)}/messages${input.before === undefined ? "" : `?before=${input.before}`}` };
     case "createBot":
       if (!string(input.name, 64) || !input.name.trim()) throw new Error("Enter a bot name of at most 64 characters.");
-      return { method: "POST", path: "/bots", body: { name: input.name.trim() } };
+      if (input.avatar !== undefined && !avatarIds.includes(input.avatar)) throw new Error("Choose a supported bot avatar.");
+      return { method: "POST", path: "/bots", body: { name: input.name.trim(), ...(input.avatar === undefined ? {} : { avatar: input.avatar }) } };
     case "patchShell":
       if (!Array.isArray(input.patch)) throw new Error("Invalid shell patch.");
       return { method: "POST", path: "/state", body: { patch: input.patch } };

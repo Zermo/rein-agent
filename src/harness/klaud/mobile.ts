@@ -535,6 +535,9 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			if (req.method === "POST" && [`${API_ROOT}/state`, `${API_ROOT}/bots`, `${API_ROOT}/prefs`].includes(parsed.pathname)) {
 				await proxy(res, "POST", relative, await requestBody(req)); return;
 			}
+			if (req.method === "PATCH" && /^\/v1\/mobile\/bots\/[^/]+$/.test(parsed.pathname)) {
+				await proxy(res, "PATCH", relative, await requestBody(req)); return;
+			}
 			if (req.method === "POST" && parsed.pathname === `${API_ROOT}/runs`) {
 				const input = await requestBody(req); validateRunInput(input);
 				const id = typeof input.runId === "string" ? input.runId : randomUUID();

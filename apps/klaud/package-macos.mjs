@@ -113,10 +113,10 @@ try {
   run("/usr/bin/ditto", [electronApp, app]);
   rmSync(join(resources, "default_app.asar"), { force: true });
   rmSync(join(resources, "electron.icns"), { force: true });
-  for (const file of ["main.mjs", "model.mjs", "lifecycle.mjs", "runtime-paths.mjs", "preload.cjs", "icon.png", "NOTICE"]) copy(join(directory, file), join(appCode, file));
+  for (const file of ["main.mjs", "model.mjs", "lifecycle.mjs", "runtime-paths.mjs", "onboarding.mjs", "avatar-catalog.mjs", "preload.cjs", "icon.png", "NOTICE"]) copy(join(directory, file), join(appCode, file));
   const trayFiles = ["ready", "working"].flatMap(state => ["", "@2x", "Template", "Template@2x"].map(suffix => `tray-${state}${suffix}.png`));
   for (const file of trayFiles) copy(join(directory, file), join(appCode, file));
-  for (const file of ["index.html", "renderer.js", "styles.css", "tokens.css", "icon.svg", "icon.png", "rein-logo.svg", "rein-field-guide-card.jpg", ...trayFiles]) copy(join(directory, "dist", file), join(appCode, "dist", file));
+  for (const file of ["index.html", "renderer.js", "styles.css", "avatars.css", "setup.css", "tokens.css", "icon.svg", "icon.png", "rein-logo.svg", "rein-field-guide-card.jpg", ...trayFiles]) copy(join(directory, "dist", file), join(appCode, "dist", file));
   writeFileSync(join(appCode, "package.json"), JSON.stringify({ name: "rein-klaud", productName: metadata.productName, version: metadata.version, type: "module", main: "main.mjs", license: metadata.license }, null, 2) + "\n");
   for (const file of ["package.json", "LICENSE", "dist/rein.js", "dist/meat-worker.js"]) copy(join(root, file), join(runtime, file));
 
@@ -147,8 +147,8 @@ try {
   renameSync(join(app, "Contents/MacOS/Electron"), join(app, "Contents/MacOS/rein-klaud"));
   // Electron's native helper lookup reads CFBundleName before JavaScript runs.
   // Keep it aligned with the ASCII executable/helper names; the display name
-  // and the app's own menu retain the rein-klaʊd branding.
-  for (const [key, value] of Object.entries({ CFBundleIdentifier: "org.zermo.rein-klaud", CFBundleName: "rein-klaud", CFBundleDisplayName: "rein-klaʊd", CFBundleExecutable: "rein-klaud", CFBundleIconFile: "rein.icns", CFBundleVersion: metadata.version, CFBundleShortVersionString: metadata.version, NSHumanReadableCopyright: "Copyright Zermo. MIT License." })) plistSet(info, key, value);
+  // and the app's own menu use Klaudbot branding.
+  for (const [key, value] of Object.entries({ CFBundleIdentifier: "org.zermo.rein-klaud", CFBundleName: "rein-klaud", CFBundleDisplayName: "Klaudbot", CFBundleExecutable: "rein-klaud", CFBundleIconFile: "rein.icns", CFBundleVersion: metadata.version, CFBundleShortVersionString: metadata.version, NSHumanReadableCopyright: "Copyright Zermo. MIT License." })) plistSet(info, key, value);
   plistDelete(info, "ElectronAsarIntegrity");
   for (const suffix of ["", " (GPU)", " (Plugin)", " (Renderer)"]) {
     const oldName = `Electron Helper${suffix}`, newName = `rein-klaud Helper${suffix}`;

@@ -96,23 +96,23 @@ function sshArguments(host, baseUrl, localPort) {
 }
 async function unusedPort() {
   const server = createServer();
-  await new Promise((resolve34, reject) => {
+  await new Promise((resolve35, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve34);
+    server.listen(0, "127.0.0.1", resolve35);
   });
   const port = server.address().port;
-  await new Promise((resolve34, reject) => server.close((error) => error ? reject(error) : resolve34()));
+  await new Promise((resolve35, reject) => server.close((error) => error ? reject(error) : resolve35()));
   return port;
 }
 function portReady(port) {
-  return new Promise((resolve34) => {
+  return new Promise((resolve35) => {
     const socket = createConnection({ host: "127.0.0.1", port });
     let done = false;
     const finish = (ready) => {
       if (done) return;
       done = true;
       socket.destroy();
-      resolve34(ready);
+      resolve35(ready);
     };
     socket.once("connect", () => finish(true));
     socket.once("error", () => finish(false));
@@ -129,16 +129,16 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
   let failure;
   let closed = false;
   let stderr = "";
-  const exited = new Promise((resolve34) => {
+  const exited = new Promise((resolve35) => {
     child.once("error", (error) => {
       failure = error;
       closed = true;
-      resolve34();
+      resolve35();
     });
     child.once("close", (code) => {
       closed = true;
       failure ??= new Error(`SSH exited (${code ?? "signal"}). ${stderr.trim()}`);
-      resolve34();
+      resolve35();
     });
   });
   child.stderr?.on("data", (chunk) => {
@@ -156,7 +156,7 @@ async function withSshTunnel(baseUrl, sshHost, use, options = {}) {
       if (failure) throw new Error(`Cannot open SSH tunnel through ${sshHost}: ${failure.message}. Check that ssh ${sshHost} works with key authentication.`);
       if (Date.now() >= deadline) throw new Error(`SSH tunnel through ${sshHost} timed out. Check the VPN and SSH connection.`);
       if (await portReady(port)) break;
-      await new Promise((resolve34) => setTimeout(resolve34, 40));
+      await new Promise((resolve35) => setTimeout(resolve35, 40));
     }
     const forwarded = new URL(baseUrl);
     forwarded.hostname = "127.0.0.1";
@@ -652,7 +652,7 @@ function parseLinuxNeighbors(output) {
   }))];
 }
 function commandOutput(command, args) {
-  return new Promise((resolve34, reject) => execFile(command, args, { encoding: "utf8", timeout: 1200, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve34(stdout)));
+  return new Promise((resolve35, reject) => execFile(command, args, { encoding: "utf8", timeout: 1200, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve35(stdout)));
 }
 async function knownPeers(dependencies) {
   const platform2 = dependencies.platform ?? process.platform;
@@ -2453,7 +2453,7 @@ import { tmpdir } from "node:os";
 import { join as join6 } from "node:path";
 function runProgram(command, args, signal, timeoutMs) {
   signal.throwIfAborted();
-  return new Promise((resolve34, reject) => {
+  return new Promise((resolve35, reject) => {
     const child = spawn3(command, args, { shell: false, detached: true, stdio: "inherit" });
     let closed = false, settled = false, code = null, error;
     let escalation;
@@ -2470,7 +2470,7 @@ function runProgram(command, args, signal, timeoutMs) {
       signal.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (code !== 0) reject(new Error(`${command} exited ${code ?? "after a signal"}.`));
-      else resolve34();
+      else resolve35();
     };
     const stop = (reason2) => {
       if (error) return;
@@ -3361,8 +3361,8 @@ var init_event_stream = __esm({
       constructor(isComplete, extractResult) {
         this.isComplete = isComplete ?? (() => false);
         this.extractResult = extractResult ?? ((event) => event);
-        this.finalResultPromise = new Promise((resolve34) => {
-          this.resolveFinalResult = resolve34;
+        this.finalResultPromise = new Promise((resolve35) => {
+          this.resolveFinalResult = resolve35;
         });
       }
       push(event) {
@@ -3391,7 +3391,7 @@ var init_event_stream = __esm({
           if (this.queue.length > 0) yield this.queue.shift();
           else if (this.done) return;
           else {
-            const result2 = await new Promise((resolve34) => this.waiting.push(resolve34));
+            const result2 = await new Promise((resolve35) => this.waiting.push(resolve35));
             if (result2.done) return;
             yield result2.value;
           }
@@ -4193,7 +4193,7 @@ function streamCli(model, context, options = {}) {
   return out;
 }
 function runCliProcess(provider, args, input, cwd, env, options) {
-  return new Promise((resolve34, reject) => {
+  return new Promise((resolve35, reject) => {
     const child = spawn5(options.executable ?? CLI_PROVIDERS[provider].command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32" });
     let stdout = "", stderr = "", pendingLine = "", bytes = 0, error, forceKill;
     let closed = false, settled = false, exitCode = null, exitSignal = null;
@@ -4226,7 +4226,7 @@ function runCliProcess(provider, args, input, cwd, env, options) {
       options.signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (exitCode !== 0) reject(new Error(`${provider} CLI exited ${exitCode ?? exitSignal}. ${stderr.trim().slice(-2e3)} Run 'rein login ${provider}' if authentication is required.`));
-      else resolve34(stdout);
+      else resolve35(stdout);
     };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -5139,7 +5139,7 @@ var init_tmux = __esm({
 import { spawn as spawn7 } from "node:child_process";
 async function runShell(command, cwd, timeout, signal) {
   if (signal?.aborted) return { stdout: "", stderr: "", code: 1, reason: "Operation aborted" };
-  return new Promise((resolve34) => {
+  return new Promise((resolve35) => {
     const child = spawn7("bash", ["-c", command], { cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, code = 1, reason2;
     let closed = false, settled = false, killTimer;
@@ -5155,7 +5155,7 @@ async function runShell(command, cwd, timeout, signal) {
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
-      resolve34({ stdout, stderr, code, reason: reason2 });
+      resolve35({ stdout, stderr, code, reason: reason2 });
     };
     const stop = (detail) => {
       if (reason2) return;
@@ -5740,7 +5740,7 @@ function browserEnvironment() {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => names.has(name))), RUST_LOG: "error", NO_COLOR: "1" };
 }
 function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
-  return new Promise((resolve34, reject) => {
+  return new Promise((resolve35, reject) => {
     const child = spawn8(executable2, args, { cwd, env: browserEnvironment(), detached: process.platform !== "win32", shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", bytes = 0, closed = false, settled = false, exitCode = null, error;
     let escalation;
@@ -5758,7 +5758,7 @@ function runObscura(executable2, args, cwd, timeoutSeconds, signal) {
       signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (exitCode !== 0) reject(new Error(`Obscura exited ${exitCode ?? "with a signal"}: ${cleanWebText(stderr).trim().slice(-1500) || "page navigation failed"}`));
-      else resolve34(stdout);
+      else resolve35(stdout);
     };
     const stop = (message) => {
       if (error) return;
@@ -6196,7 +6196,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
   }
   postEvent(request3, { nodeterm_pending_id: pendingId });
   const deadline = Date.now() + wait * 1e3;
-  return new Promise((resolve34) => {
+  return new Promise((resolve35) => {
     let timer, settled = false;
     const finish = (answer, answered = false) => {
       if (settled) return;
@@ -6213,7 +6213,7 @@ function requestApproval(toolName, toolInput, timeoutSec, signal) {
         { hook_event_name: "PostToolUse", tool_name: toolName, hookSpecificOutput: { hookEventName: "PostToolUse" } },
         { nodeterm_answered: answer }
       );
-      resolve34(answer);
+      resolve35(answer);
     };
     const abort = () => finish("deny");
     const tick = () => {
@@ -7005,7 +7005,7 @@ async function updateState(change) {
   let unlock;
   for (let attempt = 0; attempt < 50 && !unlock; attempt++) {
     unlock = acquireLock("state");
-    if (!unlock) await new Promise((resolve34) => setTimeout(resolve34, 100));
+    if (!unlock) await new Promise((resolve35) => setTimeout(resolve35, 100));
   }
   if (!unlock) throw new Error("Autonomy state is busy. Try again shortly.");
   const temp = join20(autonomyDirectory(), `state-${randomUUID10()}.tmp`);
@@ -7553,7 +7553,7 @@ async function runDashboard(controller) {
   }
   const wasRaw = Boolean(input.isRaw);
   const wasPaused = input.isPaused();
-  await new Promise((resolve34, reject) => {
+  await new Promise((resolve35, reject) => {
     let state = { selected: 0, button: 0, details: false };
     let done = false;
     let busy = false;
@@ -7579,7 +7579,7 @@ async function runDashboard(controller) {
       } catch {
       }
       if (error) reject(error);
-      else resolve34();
+      else resolve35();
     };
     const draw = () => {
       if (done) return;
@@ -8177,6 +8177,9 @@ import { randomUUID as randomUUID12 } from "node:crypto";
 import { closeSync as closeSync6, constants as constants10, fstatSync as fstatSync4, fsyncSync, lstatSync as lstatSync9, mkdirSync as mkdirSync13, openSync as openSync6, readFileSync as readFileSync17, renameSync as renameSync7, unlinkSync as unlinkSync8, writeFileSync as writeFileSync14 } from "node:fs";
 import { homedir as homedir14 } from "node:os";
 import { join as join23, resolve as resolve16 } from "node:path";
+function validateBotAvatar(value) {
+  if (!BOT_AVATARS.includes(value)) throw new Error("Choose a supported bot avatar.");
+}
 function botName(value) {
   if (typeof value !== "string" || /[\u0000-\u001f\u007f-\u009f]/u.test(value)) throw new Error("Invalid bot name: use 1 to 64 characters without control characters.");
   const name = value.trim();
@@ -8213,7 +8216,7 @@ function validateRegistry(value) {
   const ids = /* @__PURE__ */ new Set();
   const sessions = /* @__PURE__ */ new Set();
   for (const bot of value.bots) {
-    if (!hasKeys2(bot, ["id", "name", "sessionId", "created"]) || typeof bot.id !== "string" || !BOT_ID.test(bot.id) || typeof bot.sessionId !== "string" || !SESSION_ID.test(bot.sessionId) || typeof bot.created !== "string" || !Number.isFinite(Date.parse(bot.created)) || new Date(bot.created).toISOString() !== bot.created || botName(bot.name) !== bot.name || ids.has(bot.id) || sessions.has(bot.sessionId)) {
+    if (!(hasKeys2(bot, ["id", "name", "sessionId", "created"]) || hasKeys2(bot, ["id", "name", "sessionId", "created", "avatar"]) && BOT_AVATARS.includes(bot.avatar)) || typeof bot.id !== "string" || !BOT_ID.test(bot.id) || typeof bot.sessionId !== "string" || !SESSION_ID.test(bot.sessionId) || typeof bot.created !== "string" || !Number.isFinite(Date.parse(bot.created)) || new Date(bot.created).toISOString() !== bot.created || botName(bot.name) !== bot.name || ids.has(bot.id) || sessions.has(bot.sessionId)) {
       throw new Error("Invalid rein-kla\u028Ad bot registry entry.");
     }
     ids.add(bot.id);
@@ -8288,7 +8291,8 @@ function saveRegistry(home, bots) {
     if (staged) removeOwned(home, temp, owned2);
   }
 }
-function createBot(name, home, cwd = process.cwd()) {
+function createBot(name, home, cwd = process.cwd(), avatar) {
+  if (avatar !== void 0) validateBotAvatar(avatar);
   const normalizedName = botName(name);
   const root2 = botHome(home);
   checkStorage2(root2);
@@ -8313,7 +8317,7 @@ function createBot(name, home, cwd = process.cwd()) {
     const owned2 = checkPath2(file2, false);
     try {
       if (bots.some((bot2) => bot2.sessionId === sessionId)) throw new Error("Bot session id collision.");
-      const bot = { id, name: normalizedName, sessionId, created: (/* @__PURE__ */ new Date()).toISOString() };
+      const bot = { id, name: normalizedName, sessionId, created: (/* @__PURE__ */ new Date()).toISOString(), ...avatar === void 0 ? {} : { avatar } };
       saveRegistry(root2, [...bots, bot]);
       return bot;
     } catch (error) {
@@ -8330,10 +8334,27 @@ function getBot(id, home) {
   if (!bot) throw new Error(`No such bot: ${id}`);
   return bot;
 }
-var BOT_ID, SESSION_ID;
+function setBotAvatar(id, avatar, home) {
+  validateBotAvatar(avatar);
+  const root2 = botHome(home);
+  getBot(id, root2);
+  const unlock = lockRegistry(root2);
+  try {
+    const bots = listBots(root2), index = bots.findIndex((bot2) => bot2.id === id);
+    if (index < 0) throw new Error("No such bot.");
+    const bot = { ...bots[index], avatar };
+    bots[index] = bot;
+    saveRegistry(root2, bots);
+    return bot;
+  } finally {
+    unlock();
+  }
+}
+var BOT_AVATARS, BOT_ID, SESSION_ID;
 var init_bots = __esm({
   "src/harness/klaud/bots.ts"() {
     init_session();
+    BOT_AVATARS = ["aviator", "motorcycle", "builder", "baseball", "medic", "explorer"];
     BOT_ID = /^klaud-bot-[0-9a-f]{8}$/;
     SESSION_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/;
   }
@@ -8487,651 +8508,11 @@ var init_activity = __esm({
   }
 });
 
-// src/harness/klaud/serve.ts
-var serve_exports = {};
-__export(serve_exports, {
-  startKlaudServe: () => startKlaudServe
-});
-import { createServer as createServer2 } from "node:http";
-import { createHash as createHash8, randomBytes, randomUUID as randomUUID14, timingSafeEqual } from "node:crypto";
-import { closeSync as closeSync9, constants as constants13, existsSync as existsSync13, fstatSync as fstatSync7, lstatSync as lstatSync12, mkdirSync as mkdirSync15, openSync as openSync9, readFileSync as readFileSync19, renameSync as renameSync9, unlinkSync as unlinkSync10, writeFileSync as writeFileSync16 } from "node:fs";
-import { homedir as homedir15 } from "node:os";
-import { dirname as dirname11, join as join26, resolve as resolve19 } from "node:path";
-function json(res, status2, value) {
-  res.writeHead(status2, { "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify(value));
-}
-function checkStorage3(file2) {
-  for (const [path2, directory2] of [[dirname11(dirname11(file2)), true], [dirname11(file2), true], [file2, false]]) {
-    try {
-      const stat3 = lstatSync12(path2);
-      if (stat3.isSymbolicLink() || (directory2 ? !stat3.isDirectory() : !stat3.isFile())) throw new Error("rein-kla\u028Ad storage must use ordinary files and directories, never symlinks.");
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-  }
-}
-function privateRead(file2) {
-  checkStorage3(file2);
-  let fd;
-  try {
-    fd = openSync9(file2, constants13.O_RDONLY | constants13.O_NOFOLLOW);
-  } catch (error) {
-    if (error.code === "ENOENT") return;
-    throw error;
-  }
-  try {
-    if (fstatSync7(fd).size > MAX_BODY) throw new Error("rein-kla\u028Ad state file is too large.");
-    return readFileSync19(fd, "utf8");
-  } finally {
-    closeSync9(fd);
-  }
-}
-function privateWrite(file2, content) {
-  checkStorage3(file2);
-  mkdirSync15(dirname11(file2), { recursive: true, mode: 448 });
-  checkStorage3(file2);
-  const temp = `${file2}.${randomUUID14()}.tmp`;
-  try {
-    writeFileSync16(temp, content, { flag: "wx", mode: 384 });
-    checkStorage3(file2);
-    renameSync9(temp, file2);
-  } finally {
-    if (existsSync13(temp)) unlinkSync10(temp);
-  }
-}
-function readPrefs(file2) {
-  const raw = privateRead(file2), prefs = raw === void 0 ? {} : JSON.parse(raw);
-  if (!object(prefs) || Object.keys(prefs).some((key) => key !== "lastBotId") || prefs.lastBotId !== void 0 && (typeof prefs.lastBotId !== "string" || !prefs.lastBotId || prefs.lastBotId.length > 160)) throw new Error("Invalid rein-kla\u028Ad preferences.");
-  return prefs;
-}
-function requestedBot(id, home) {
-  if (typeof id !== "string") invalid("A bot id is required.");
-  try {
-    return getBot(id, home);
-  } catch (error) {
-    if (error instanceof Error && error.message === "Invalid bot id.") invalid(error.message);
-    if (error instanceof Error && error.message.startsWith("No such bot:")) throw new HttpError(404, "No such bot.");
-    throw error;
-  }
-}
-function publicCompletion(message) {
-  const stopReason = typeof message.stopReason === "string" && PUBLIC_STOP_REASONS.has(message.stopReason) ? message.stopReason : void 0;
-  const reasoning = object(message.usage) ? message.usage.reasoning : void 0;
-  const reasoningTokens = typeof reasoning === "number" && Number.isSafeInteger(reasoning) && reasoning > 0 ? reasoning : void 0;
-  return stopReason === void 0 && reasoningTokens === void 0 ? void 0 : {
-    ...stopReason ? { stopReason } : {},
-    ...reasoningTokens ? { reasoningTokens } : {}
-  };
-}
-function displayToolId(scope, providerId) {
-  return `tool-${createHash8("sha256").update(`${scope}\0${providerId}`).digest("hex")}`;
-}
-function botMessages(bot, home, before) {
-  const file2 = sessionPath(bot.sessionId, home);
-  checkStorage3(file2);
-  if (!existsSync13(file2)) throw new HttpError(404, "Bot session is missing.");
-  const toolIds = /* @__PURE__ */ new Map();
-  const messages = loadSession(bot.sessionId, home).messages.flatMap((message) => {
-    if (message.role === "user") return [{ id: message.id, role: "user", content: message.content }];
-    const content = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-    if (message.role === "toolResult") return [{ id: message.id, role: "tool", content, toolCallId: toolIds.get(message.toolCallId) ?? displayToolId(message.id, message.toolCallId), providerToolCallId: message.toolCallId, toolName: message.toolName, isError: message.isError === true }];
-    const toolCalls = message.content.filter((part) => part.type === "toolCall").map((part) => {
-      const id = displayToolId(message.id, part.id);
-      toolIds.set(part.id, id);
-      return { id, type: "function", function: { name: part.name, arguments: JSON.stringify(part.arguments) } };
-    });
-    const completion = publicCompletion(message);
-    return content || toolCalls.length ? [{ id: message.id, role: "assistant", content, ...toolCalls.length ? { toolCalls } : {}, ...completion ? { completion } : {} }] : [];
-  });
-  const end = Math.min(before ?? messages.length, messages.length);
-  const page2 = [];
-  let start = end, bytes = 0;
-  while (start > 0 && page2.length < 100) {
-    const message = structuredClone(messages[start - 1]);
-    const preview = (value, limit2) => {
-      if (value.length <= limit2) return value;
-      message.truncated = true;
-      return value.slice(0, limit2) + "\n[Preview shortened; full text remains in session history.]";
-    };
-    message.content = preview(message.content, 32768);
-    if (message.toolCalls) {
-      if (message.toolCalls.length > 16) message.truncated = true;
-      message.toolCalls = message.toolCalls.slice(0, 16).map((call) => ({ ...call, function: { ...call.function, arguments: preview(call.function.arguments, 4096) } }));
-    }
-    const size = Buffer.byteLength(JSON.stringify(message));
-    if (page2.length && bytes + size > 2 * 1024 * 1024) break;
-    bytes += size;
-    page2.unshift(message);
-    start--;
-  }
-  return { messages: page2, before: start || null };
-}
-function body(req) {
-  if (req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") return Promise.reject(new HttpError(415, "Use application/json."));
-  return new Promise((resolve34, reject) => {
-    let size = 0;
-    const chunks = [];
-    const cleanup = () => {
-      clearTimeout(timer);
-      req.removeListener("data", data);
-      req.removeListener("end", end);
-      req.removeListener("aborted", aborted2);
-      req.removeListener("error", fail);
-    };
-    const fail = (error) => {
-      cleanup();
-      chunks.length = 0;
-      req.resume();
-      reject(error);
-    };
-    const aborted2 = () => fail(new HttpError(400, "Request aborted."));
-    const data = (chunk) => {
-      size += chunk.length;
-      if (size > MAX_BODY) fail(new HttpError(413, "Request body is too large."));
-      else chunks.push(chunk);
-    };
-    const end = () => {
-      cleanup();
-      try {
-        const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        if (!object(value)) invalid("Expected a JSON object.");
-        resolve34(value);
-      } catch (error) {
-        reject(error instanceof HttpError ? error : new HttpError(400, "Invalid JSON."));
-      }
-    };
-    const timer = setTimeout(() => fail(new HttpError(408, "Request body timed out.")), 1e4);
-    timer.unref();
-    req.on("data", data);
-    req.once("end", end);
-    req.once("aborted", aborted2);
-    req.once("error", fail);
-  });
-}
-function frontendDeclarations(value) {
-  if (value === void 0) return [];
-  if (!Array.isArray(value) || value.length > FRONTEND_NAMES.size) invalid("Invalid frontend tools.");
-  const names = /* @__PURE__ */ new Set();
-  return value.map((raw) => {
-    if (!object(raw) || typeof raw.name !== "string" || !FRONTEND_NAMES.has(raw.name) || names.has(raw.name) || typeof raw.description !== "string" || raw.description.length > 4e3 || !object(raw.parameters) || raw.parameters.type !== "object") invalid("Only distinct declared rein-kla\u028Ad frontend tools are supported.");
-    names.add(raw.name);
-    return { name: raw.name, description: raw.description, parameters: raw.parameters };
-  });
-}
-function validateFrontend(name, args) {
-  if (name === "patchShell") {
-    if (Object.keys(args).some((key) => key !== "patch") || !Array.isArray(args.patch)) invalid("patchShell requires {patch}.");
-  } else if (name === "setPref") {
-    if (Object.keys(args).some((key) => !["key", "value"].includes(key)) || args.key !== "lastBotId" || typeof args.value !== "string" || !args.value || args.value.length > 160) invalid("setPref supports only lastBotId.");
-  } else if (name === "navigateTo") {
-    if (Object.keys(args).some((key) => key !== "dest") || !["bots", "chat", "settings"].includes(String(args.dest))) invalid("Invalid navigation destination.");
-  } else if (Object.keys(args).some((key) => !["action", "importance"].includes(key)) || typeof args.action !== "string" || !args.action.trim() || args.action.length > 4e3 || args.importance !== void 0 && !["low", "medium", "high", "critical"].includes(String(args.importance))) invalid("Invalid confirmAction arguments.");
-}
-function abortable2(promise, signal) {
-  if (signal.aborted) return Promise.reject(new Error("Run cancelled."));
-  return new Promise((resolve34, reject) => {
-    const abort = () => reject(new Error("Run cancelled."));
-    signal.addEventListener("abort", abort, { once: true });
-    promise.then(resolve34, reject).finally(() => signal.removeEventListener("abort", abort));
-  });
-}
-async function startKlaudServe(opts = {}) {
-  if (opts.host !== void 0 && opts.host !== "127.0.0.1") throw new Error("rein serve binds only to 127.0.0.1.");
-  if (opts.port !== void 0 && (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535)) throw new Error("Invalid port, expected 0 through 65535.");
-  const home = resolve19(opts.home ?? processHome()), cwd = resolve19(opts.cwd ?? process.cwd());
-  const checkHome = () => {
-    if (!opts.run && home !== processHome()) throw new Error("Set REIN_HOME to the requested home before starting rein serve; the runner uses process-wide configuration and sessions.");
-  };
-  checkHome();
-  loadKlaudShell(home);
-  loadKlaudRunSettings(home);
-  const prefsFile = join26(home, "klaud", "prefs.json");
-  readPrefs(prefsFile);
-  const reasoningControl = () => {
-    const config = loadConfig(), envBase = process.env.REIN_BASE_URL?.trim();
-    const provider = envBase ? guessProvider(envBase, "custom") : config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0) ?? (config.baseUrl ? guessProvider(config.baseUrl, "custom") : "unconfigured");
-    if (provider === "unconfigured") return { supported: ["default"], mode: "unsupported", description: "Connect a model to configure its reasoning effort. Provider default keeps the serving model's own settings." };
-    const baseUrl = envBase || (["codex", "copilot", "grok"].includes(provider) ? `cli://${provider}` : config.baseUrl ?? PROVIDER_PRESETS[provider]?.baseUrl ?? "");
-    let sameEndpoint = !envBase;
-    try {
-      if (envBase) sameEndpoint = normalizeBaseUrl(envBase) === normalizeBaseUrl(config.baseUrl ?? PROVIDER_PRESETS[provider]?.baseUrl ?? "");
-    } catch {
-    }
-    const model = process.env.REIN_MODEL?.trim() || (sameEndpoint ? config.model : void 0) || "unknown";
-    return reasoningCapabilities({ id: model, provider, baseUrl });
-  };
-  const runSettingsResponse = () => ({ ...loadKlaudRunSettings(home), reasoningControl: reasoningControl() });
-  const token2 = opts.token ?? randomBytes(24).toString("hex");
-  if (!/^[\x21-\x7e]{1,512}$/.test(token2)) throw new Error("The bearer token must be nonempty printable ASCII without spaces.");
-  const authorization = Buffer.from(`Bearer ${token2}`);
-  const active3 = /* @__PURE__ */ new Map(), threads = /* @__PURE__ */ new Set();
-  const executions = /* @__PURE__ */ new Set();
-  let url = "", tokenFile, closing;
-  const snapshot = () => {
-    const bots = listBots(home), prefs = readPrefs(prefsFile);
-    return {
-      shell: loadKlaudShell(home),
-      prefs: bots.some((bot) => bot.id === prefs.lastBotId) ? prefs : {},
-      bots,
-      approvals: [...active3.values()].flatMap((run3) => [...run3.pending.entries()].filter(([, pending]) => pending.kind === "approval" || pending.tool === "confirmAction").map(([id, pending]) => ({ id, tool: pending.tool, summary: pending.summary })))
-    };
-  };
-  const savePref = (value) => {
-    const bot = requestedBot(value, home);
-    privateWrite(prefsFile, JSON.stringify({ lastBotId: bot.id }) + "\n");
-  };
-  const broadcast = (event) => {
-    for (const run3 of active3.values()) run3.emit(event);
-  };
-  const publishState = () => broadcast(stateSnapshot(snapshot()));
-  function waitFor(run3, id, kind, tool, args) {
-    if (run3.controller.signal.aborted) return Promise.reject(new Error("Run cancelled."));
-    if (run3.pending.has(id)) return Promise.reject(new Error("Duplicate pending tool call id."));
-    return new Promise((resolve34, reject) => {
-      const signal = run3.controller.signal;
-      const cleanup = () => {
-        clearTimeout(timer);
-        signal.removeEventListener("abort", abort);
-        run3.pending.delete(id);
-      };
-      const abort = () => {
-        cleanup();
-        reject(new Error("Run cancelled."));
-      };
-      const settle = (value) => {
-        cleanup();
-        resolve34(value);
-      };
-      const timer = setTimeout(() => {
-        settle(kind === "approval" ? false : { content: "The renderer did not answer before the timeout.", isError: true });
-        publishState();
-      }, PENDING_TIMEOUT);
-      timer.unref();
-      const summary = JSON.stringify(args).slice(0, 1e3);
-      run3.pending.set(id, { kind, tool, args: structuredClone(args), summary, settle });
-      signal.addEventListener("abort", abort, { once: true });
-      publishState();
-      run3.emit({ type: "CUSTOM", name: kind === "approval" ? "klaud.approval" : "klaud.frontend_tool", value: kind === "approval" ? { runId: run3.id, id, tool, summary } : { runId: run3.id, toolCallId: id, toolName: tool, args } });
-    });
-  }
-  function runTools(run3, declarations) {
-    const backend = createKlaudTools(home).map((tool) => ({ ...tool, async execute(id, args, signal) {
-      if (run3.controller.signal.aborted || signal?.aborted) throw new Error("Run cancelled.");
-      const result2 = await tool.execute(id, args, signal);
-      if (tool.name === "klaud_patch_shell" && !result2.isError) {
-        broadcast(stateDelta(args.patch));
-        publishState();
-      }
-      return result2;
-    } }));
-    const frontend = declarations.map((tool) => ({ ...tool, executionMode: "sequential", async execute(id, args) {
-      validateFrontend(tool.name, args);
-      if (tool.name === "patchShell") applyKlaudPatch(loadKlaudShell(home), args.patch);
-      if (tool.name === "setPref") requestedBot(args.value, home);
-      return await waitFor(run3, id, "tool", tool.name, args);
-    } }));
-    return [...backend, ...frontend];
-  }
-  async function streamRun(res, input, declarations, sessionId, bot) {
-    const threadId = input.threadId, id = randomUUID14(), controller = new AbortController();
-    const run3 = { id, threadId, controller, pending: /* @__PURE__ */ new Map(), emit(event) {
-      if (res.destroyed || res.writableEnded) return;
-      res.write(`data: ${JSON.stringify(event)}
-
-`);
-      if (res.writableLength > MAX_BODY * 4) {
-        controller.abort();
-        res.destroy();
-      }
-    } };
-    active3.set(id, run3);
-    threads.add(sessionId);
-    const disconnected = () => controller.abort();
-    res.once("close", disconnected);
-    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", Connection: "keep-alive", "X-Accel-Buffering": "no" });
-    res.flushHeaders();
-    let turn = 0, failure;
-    const toolIds = /* @__PURE__ */ new Map(), startedTools = /* @__PURE__ */ new Set();
-    const startTool = (providerId, name) => {
-      const scopedId = toolIds.get(providerId) ?? displayToolId(`${id}:${Math.max(0, turn - 1)}`, providerId);
-      toolIds.set(providerId, scopedId);
-      if (!startedTools.has(scopedId)) {
-        startedTools.add(scopedId);
-        run3.emit({ type: "TOOL_CALL_START", toolCallId: scopedId, providerToolCallId: providerId, toolCallName: name });
-      }
-      return scopedId;
-    };
-    const endAssistant = (message) => {
-      for (const [contentIndex, part] of message.content.entries()) {
-        if (part.type === "text") run3.emit({ type: "TEXT_MESSAGE_END", messageId: `${id}:${turn}:${contentIndex}`, content: part.text, completion: publicCompletion(message) });
-      }
-      turn++;
-    };
-    let completion;
-    const onAssistant = (event) => {
-      if (controller.signal.aborted) return;
-      if (event.type === "done") {
-        failure = void 0;
-        endAssistant(event.message);
-        return;
-      }
-      if (event.type === "error") {
-        failure = event.error.errorMessage || event.reason;
-        endAssistant(event.error);
-        return;
-      }
-      if (event.type === "thinking_start" || event.type === "text_start") run3.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: event.type === "thinking_start" ? "thinking" : "responding", turn: turn + 1 } });
-      if (event.type === "toolcall_start" || event.type === "toolcall_end") {
-        const call = event.type === "toolcall_end" ? event.toolCall : event.partial.content[event.contentIndex];
-        if (call?.type === "toolCall") {
-          toolIds.set(call.id, displayToolId(`${id}:${turn}`, call.id));
-          startTool(call.id, call.name);
-        }
-      }
-      for (const encoded of toAgUiEvents(event, { threadId, runId: `${id}:${turn}` })) {
-        if (encoded.type === "TOOL_CALL_START") continue;
-        if (typeof encoded.toolCallId === "string") run3.emit({ ...encoded, providerToolCallId: encoded.toolCallId, toolCallId: toolIds.get(encoded.toolCallId) ?? displayToolId(`${id}:${turn}`, encoded.toolCallId) });
-        else run3.emit(encoded);
-      }
-    };
-    const finalStatus = (message) => {
-      completion = {
-        stopReason: message.stopReason,
-        ...Number.isSafeInteger(message.usage.reasoning) && (message.usage.reasoning ?? 0) > 0 ? { reasoningTokens: message.usage.reasoning } : {}
-      };
-      if (["error", "aborted", "budget", "length", "pending"].includes(message.stopReason)) failure = message.errorMessage || (message.stopReason === "budget" ? "Turn budget reached. Continue the run to resume." : `Run stopped: ${message.stopReason}.`);
-      else failure = void 0;
-    };
-    try {
-      run3.emit({ type: "RUN_STARTED", threadId, runId: id });
-      run3.emit(stateSnapshot(snapshot()));
-      const additions = runTools(run3, declarations);
-      if (opts.run) {
-        const iterator = opts.run(input.message, additions)[Symbol.asyncIterator]();
-        try {
-          while (!controller.signal.aborted) {
-            const next = await abortable2(iterator.next(), controller.signal);
-            if (next.done) break;
-            onAssistant(next.value);
-            if (next.value.type === "done") finalStatus(next.value.message);
-          }
-        } finally {
-          if (controller.signal.aborted) void iterator.return?.().catch(() => {
-          });
-        }
-      } else {
-        checkHome();
-        const file2 = sessionPath(sessionId, home);
-        checkStorage3(file2);
-        if (!existsSync13(file2)) {
-          if (bot) throw new Error("Bot session is missing.");
-          mkdirSync15(dirname11(file2), { recursive: true, mode: 448 });
-          checkStorage3(file2);
-          createSession({ id: sessionId, cwd }, home);
-        }
-        const settings = loadKlaudRunSettings(home);
-        const runner = await createRunner({ cwd, sessionId, surface: "klaud", reasoningEffort: settings.reasoningEffort, toolGuard: async (name, args) => {
-          if (controller.signal.aborted) return "Run cancelled.";
-          if (name === "bash" && loadKlaudRunSettings(home).bashApproval === "auto") return;
-          const mutates = ["bash", "write", "edit", "gates"].includes(name) || name === "tmux" && !["list", "capture"].includes(String(args.op));
-          if (!mutates) return;
-          const allow = await waitFor(run3, randomUUID14(), "approval", name, args);
-          return allow === true && !controller.signal.aborted ? void 0 : "The user denied this action.";
-        } });
-        if (controller.signal.aborted) throw new Error("Run cancelled.");
-        for (const addition of additions) {
-          const index = runner.tools.findIndex((tool) => tool.name === addition.name);
-          if (index !== -1) {
-            if (FRONTEND_NAMES.has(addition.name)) throw new Error("A frontend tool cannot replace a native tool.");
-            runner.tools[index] = addition;
-          } else runner.tools.push(addition);
-        }
-        if (bot) runner.systemPrompt += `
-
-Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, name: bot.name })}. This conversation is stored in its own session.`;
-        const messages = await runner.run({ role: "user", content: input.message, timestamp: Date.now() }, { signal: controller.signal, onEvent(event) {
-          if (event.type === "turn_start") run3.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: "working", turn: turn + 1 } });
-          if (event.type === "message_update") onAssistant(event.event);
-          if (event.type === "message_end" && event.message.role === "assistant") endAssistant(event.message);
-          if (event.type === "tool_execution_start") {
-            startTool(event.toolCallId, event.toolName);
-            const journaling = event.toolName === "notes" && object(event.args) && ["write", "append"].includes(String(event.args.op));
-            run3.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: journaling ? "journaling" : "tool", toolName: event.toolName, turn: Math.max(1, turn) } });
-          }
-          if (event.type === "tool_execution_end") {
-            const toolCallId = startTool(event.toolCallId, event.toolName);
-            run3.emit({ type: "TOOL_CALL_RESULT", messageId: `${toolCallId}:result`, toolCallId, providerToolCallId: event.toolCallId, toolName: event.toolName, content: event.result.content, isError: event.isError === true || event.result.isError === true, role: "tool" });
-            run3.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: "working", turn: Math.max(1, turn) } });
-          }
-          if (event.type === "agent_pause") failure = "Turn budget reached. Continue the run to resume.";
-        } });
-        const last = messages.filter((message) => message.role === "assistant").at(-1);
-        if (last) finalStatus(last);
-      }
-      if (controller.signal.aborted) failure = "Run cancelled.";
-    } catch (error) {
-      failure = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Run failed.";
-    } finally {
-      controller.abort();
-      active3.delete(id);
-      threads.delete(sessionId);
-      res.removeListener("close", disconnected);
-      run3.emit(failure ? { type: "RUN_ERROR", threadId, runId: id, message: failure } : {
-        type: "RUN_FINISHED",
-        threadId,
-        runId: id,
-        outcome: { type: "success", ...completion ?? { stopReason: "stop" } }
-      });
-      if (!res.destroyed && !res.writableEnded) res.end("data: [DONE]\n\n");
-      publishState();
-    }
-  }
-  const server = createServer2((req, res) => {
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("X-Frame-Options", "DENY");
-    void (async () => {
-      if (closing) throw new HttpError(503, "Server is closing.");
-      if (req.headers.host !== url.slice(7) || req.headers.origin && req.headers.origin !== url) throw new HttpError(403, "Invalid Host or Origin.");
-      if (req.method === "GET" && req.url === "/health") {
-        json(res, 200, { ok: true, name: "rein-klaud" });
-        return;
-      }
-      const provided = Buffer.from(req.headers.authorization ?? "");
-      if (provided.length !== authorization.length || !timingSafeEqual(provided, authorization)) throw new HttpError(401, "Bearer token required.");
-      if (req.method === "GET" && req.url === "/state") {
-        json(res, 200, snapshot());
-        return;
-      }
-      if (req.method === "GET" && req.url === "/settings") {
-        json(res, 200, runSettingsResponse());
-        return;
-      }
-      if (req.method === "GET" && req.url === "/activity") {
-        json(res, 200, klaudActivity(home));
-        return;
-      }
-      if (req.method === "POST" && req.url === "/settings") {
-        try {
-          const input = await body(req);
-          validateRunSettingsPatch(input);
-          const control = reasoningControl();
-          if (input.reasoningEffort && !control.supported.includes(input.reasoningEffort)) invalid(control.description);
-          saveKlaudRunSettings(input, home);
-          json(res, 200, runSettingsResponse());
-        } catch (error) {
-          if (error instanceof HttpError) throw error;
-          throw new HttpError(400, error instanceof Error ? error.message : "Invalid run settings.");
-        }
-        return;
-      }
-      if (req.method === "GET" && req.url === "/bots") {
-        json(res, 200, listBots(home));
-        return;
-      }
-      if (req.method === "POST" && req.url === "/bots") {
-        const input = await body(req);
-        if (Object.keys(input).some((key) => key !== "name") || typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 64 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) invalid("Use a bot name of 1 to 64 characters without control characters.");
-        const bot = createBot(input.name, home, cwd);
-        publishState();
-        json(res, 201, bot);
-        return;
-      }
-      const messagesRoute = /^\/bots\/([^/]+)\/messages(?:\?before=(\d+))?$/.exec(req.url ?? "");
-      if (req.method === "GET" && messagesRoute) {
-        const before = messagesRoute[2] === void 0 ? void 0 : Number(messagesRoute[2]);
-        if (before !== void 0 && !Number.isSafeInteger(before)) invalid("Invalid history cursor.");
-        json(res, 200, botMessages(requestedBot(messagesRoute[1], home), home, before));
-        return;
-      }
-      if (req.method === "POST" && req.url === "/prefs") {
-        const input = await body(req);
-        validateFrontend("setPref", input);
-        savePref(input.value);
-        publishState();
-        json(res, 200, snapshot());
-        return;
-      }
-      if (req.method === "POST" && req.url === "/state") {
-        const input = await body(req);
-        try {
-          const next = applyKlaudPatch(loadKlaudShell(home), input.patch);
-          saveKlaudShell(next, home);
-        } catch (error) {
-          throw new HttpError(400, error instanceof Error ? error.message : "Invalid shell patch.");
-        }
-        broadcast(stateDelta(input.patch));
-        publishState();
-        json(res, 200, snapshot());
-        return;
-      }
-      if (req.method === "POST" && req.url === "/run") {
-        const input = await body(req);
-        if (typeof input.threadId !== "string" || !input.threadId.trim() || input.threadId.length > 160 || typeof input.message !== "string" || !input.message.trim() || input.message.length > 128 * 1024) invalid("A run requires a threadId and nonempty message.");
-        const bot = input.botId === void 0 ? void 0 : requestedBot(input.botId, home);
-        if (bot && input.threadId !== bot.sessionId) invalid("threadId must match the selected bot's sessionId.");
-        const sessionId = bot?.sessionId ?? `klaud-thread-${createHash8("sha256").update(input.threadId).digest("hex").slice(0, 32)}`;
-        const declarations = frontendDeclarations(input.tools);
-        if (closing) throw new HttpError(503, "Server is closing.");
-        if (threads.has(sessionId)) throw new HttpError(409, "This thread already has an active run.");
-        if (active3.size >= 8) throw new HttpError(429, "Too many active runs.");
-        const execution = streamRun(res, input, declarations, sessionId, bot);
-        executions.add(execution);
-        try {
-          await execution;
-        } finally {
-          executions.delete(execution);
-        }
-        return;
-      }
-      const route = /^\/runs\/([a-f0-9-]+)\/(cancel|tools\/([^/]+)|approvals\/([^/]+))$/.exec(req.url ?? "");
-      if (req.method === "POST" && route) {
-        const input = await body(req), run3 = active3.get(route[1]);
-        if (!run3 || run3.controller.signal.aborted) throw new HttpError(404, "No active run.");
-        if (route[2] === "cancel") {
-          run3.controller.abort();
-          json(res, 200, { ok: true });
-          return;
-        }
-        const id = decodeURIComponent(route[3] ?? route[4]), pending = run3.pending.get(id);
-        if (!pending || pending.kind !== (route[3] ? "tool" : "approval")) throw new HttpError(404, "No pending action.");
-        if (pending.kind === "approval") {
-          if (typeof input.allow !== "boolean") invalid("Approval requires {allow: boolean}.");
-          pending.settle(input.allow);
-        } else {
-          if (typeof input.result !== "string" || input.isError !== void 0 && typeof input.isError !== "boolean") invalid("A tool result requires {result: string, isError?: boolean}.");
-          if (!input.isError && pending.tool === "setPref") savePref(pending.args.value);
-          pending.settle({ content: input.result, isError: input.isError === true });
-        }
-        publishState();
-        json(res, 200, { ok: true });
-        return;
-      }
-      throw new HttpError(404, "Not found.");
-    })().catch((error) => {
-      if (res.headersSent || res.destroyed) {
-        if (!res.destroyed) res.destroy();
-        return;
-      }
-      res.setHeader("Connection", "close");
-      json(res, error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : "rein-kla\u028Ad request failed." });
-    });
-  });
-  server.requestTimeout = 15e3;
-  server.headersTimeout = 5e3;
-  await new Promise((resolve34, reject) => {
-    server.once("error", reject);
-    server.listen(opts.port ?? 0, "127.0.0.1", () => {
-      server.removeListener("error", reject);
-      resolve34();
-    });
-  });
-  url = `http://127.0.0.1:${server.address().port}`;
-  try {
-    if (opts.token === void 0) {
-      tokenFile = join26(home, "klaud", `serve-${new URL(url).port}.token`);
-      privateWrite(tokenFile, token2 + "\n");
-    }
-  } catch (error) {
-    await new Promise((resolve34) => server.close(() => resolve34()));
-    throw error;
-  }
-  return { url, token: token2, close() {
-    if (!closing) closing = (async () => {
-      for (const run3 of active3.values()) run3.controller.abort();
-      await new Promise((resolve34, reject) => {
-        server.close((error) => error ? reject(error) : resolve34());
-        server.closeAllConnections?.();
-      });
-      await Promise.allSettled([...executions]);
-      if (tokenFile) {
-        try {
-          if (privateRead(tokenFile) === token2 + "\n") unlinkSync10(tokenFile);
-        } catch {
-        }
-      }
-    })();
-    return closing;
-  } };
-}
-var MAX_BODY, PENDING_TIMEOUT, FRONTEND_NAMES, PUBLIC_STOP_REASONS, processHome, object, HttpError, invalid;
-var init_serve = __esm({
-  "src/harness/klaud/serve.ts"() {
-    init_session();
-    init_ag_ui();
-    init_runner();
-    init_shell();
-    init_tools2();
-    init_bots();
-    init_settings();
-    init_reasoning();
-    init_activity();
-    init_models();
-    MAX_BODY = 256 * 1024;
-    PENDING_TIMEOUT = 30 * 6e4;
-    FRONTEND_NAMES = /* @__PURE__ */ new Set(["patchShell", "setPref", "navigateTo", "confirmAction"]);
-    PUBLIC_STOP_REASONS = /* @__PURE__ */ new Set(["stop", "length", "toolUse", "error", "aborted", "budget"]);
-    processHome = () => resolve19(process.env.REIN_HOME || join26(homedir15(), ".rein"));
-    object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-    HttpError = class extends Error {
-      status;
-      constructor(status2, message) {
-        super(message);
-        this.status = status2;
-      }
-    };
-    invalid = (message) => {
-      throw new HttpError(400, message);
-    };
-  }
-});
-
 // src/harness/klaud/mobile-accounts.ts
 import { spawn as spawn9 } from "node:child_process";
-import { randomUUID as randomUUID15 } from "node:crypto";
-import { homedir as homedir16 } from "node:os";
-import { join as join27, resolve as resolve20 } from "node:path";
+import { randomUUID as randomUUID14 } from "node:crypto";
+import { homedir as homedir15 } from "node:os";
+import { join as join26, resolve as resolve19 } from "node:path";
 function mobileDeviceChallenge(provider, output) {
   const text = output.replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "").replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
   let verificationURL, userCode;
@@ -9253,12 +8634,12 @@ async function subscriptionStatus(provider, options, signal) {
 function createMobileAccounts(options) {
   const records = /* @__PURE__ */ new Map(), controller = new AbortController();
   let closed = false, statusPromise, statusAt = 0;
-  const checkHome = () => {
+  const checkHome2 = () => {
     if (closed) throw new MobileAccountError(503, "Mobile account setup is closed.");
-    if (resolve20(options.home) !== resolve20(process.env.REIN_HOME || join27(homedir16(), ".rein"))) throw new MobileAccountError(409, "Start the gateway with REIN_HOME set to its configuration directory before managing accounts.");
+    if (resolve19(options.home) !== resolve19(process.env.REIN_HOME || join26(homedir15(), ".rein"))) throw new MobileAccountError(409, "Start the gateway with REIN_HOME set to its configuration directory before managing accounts.");
   };
   const configuration2 = () => {
-    checkHome();
+    checkHome2();
     const config = readConfig(), auth = config.auth;
     const candidate = config.provider ?? (auth?.type === "cli" ? auth.provider : void 0);
     const provider = typeof candidate === "string" && (isCli(candidate) || Object.hasOwn(PROVIDER_PRESETS, candidate) || ["custom", "openai-compatible"].includes(candidate)) ? candidate : void 0;
@@ -9290,7 +8671,7 @@ function createMobileAccounts(options) {
       return { ...config, subscriptions: await statusPromise };
     },
     select(input) {
-      checkHome();
+      checkHome2();
       if (Object.keys(input).some((key) => !["provider", "model", "baseUrl", "apiKey"].includes(key))) throw new MobileAccountError(400, "Unknown provider setup field.");
       const provider = input.provider;
       if (typeof provider !== "string" || !(isCli(provider) || Object.hasOwn(PROVIDER_PRESETS, provider) || ["custom", "openai-compatible"].includes(provider))) throw new MobileAccountError(400, "Choose a supported API or CLI provider.");
@@ -9333,7 +8714,7 @@ function createMobileAccounts(options) {
       return { ...configuration2(), message: "Saved for new runs on this gateway. Existing runs keep their current provider." };
     },
     start(input) {
-      checkHome();
+      checkHome2();
       if (Object.keys(input).some((key) => key !== "provider") || !isCli(input.provider)) throw new MobileAccountError(400, "Choose codex, copilot, or grok for official CLI device sign-in.");
       const provider = input.provider;
       for (const record4 of records.values()) if (record4.value.provider === provider) {
@@ -9351,7 +8732,7 @@ function createMobileAccounts(options) {
       } catch {
         throw new MobileAccountError(409, `The isolated ${provider} CLI profile needs attention. Run 'rein login ${provider}' on the gateway host to resolve it.`);
       }
-      const value = { id: randomUUID15(), provider, status: "starting", message: "Starting official CLI device sign-in on this gateway." };
+      const value = { id: randomUUID14(), provider, status: "starting", message: "Starting official CLI device sign-in on this gateway." };
       let finishDone;
       const record3 = { value, done: new Promise((resolveDone) => {
         finishDone = resolveDone;
@@ -9471,13 +8852,13 @@ function createMobileAccounts(options) {
       return { ...value };
     },
     get(id) {
-      checkHome();
+      checkHome2();
       const record3 = records.get(id);
       if (!record3) throw new MobileAccountError(404, "Sign-in record has expired or was not found.");
       return { ...record3.value };
     },
     cancel(id) {
-      checkHome();
+      checkHome2();
       const record3 = records.get(id);
       if (!record3) throw new MobileAccountError(404, "Sign-in record has expired or was not found.");
       record3.stop?.("cancelled", "Device sign-in cancelled.");
@@ -9515,6 +8896,797 @@ var init_mobile_accounts = __esm({
   }
 });
 
+// src/harness/klaud/setup.ts
+import { resolve as resolve20 } from "node:path";
+import { homedir as homedir16 } from "node:os";
+import { join as join27 } from "node:path";
+function checkHome(home) {
+  if (resolve20(home) !== resolve20(process.env.REIN_HOME || join27(homedir16(), ".rein"))) throw new Error("Setup must use the connected gateway's configuration directory.");
+}
+function readKlaudSetup(home) {
+  checkHome(home);
+  const config = readConfig(), saved = readOperatorProfile(home);
+  let budgets, budgetsNeedReview = false;
+  try {
+    budgets = resolveRunBudgets(config);
+  } catch {
+    budgets = resolveRunBudgets();
+    budgetsNeedReview = true;
+  }
+  return {
+    budgets,
+    budgetsNeedReview,
+    items: ITEMS,
+    packs: PACKS,
+    profile: saved.profile ?? null,
+    profileNeedsReview: !!saved.diagnostic,
+    fingerprint: operatorFilesFingerprint(home),
+    providers: Object.entries(PROVIDER_PRESETS).map(([id, preset]) => ({ id, baseUrl: preset.baseUrl }))
+  };
+}
+function saveKlaudSetup(input, home) {
+  checkHome(home);
+  if (Object.keys(input).some((key) => !["budgets", "answers", "enabledPack", "fingerprint"].includes(key))) throw new Error("Unknown setup field.");
+  const config = readConfig();
+  const budgets = input.budgets;
+  if (budgets !== void 0 && (!budgets || typeof budgets !== "object" || Array.isArray(budgets) || Object.keys(budgets).some((key) => !["maxTurns", "maxIterations"].includes(key)))) throw new Error("Use maxTurns and maxIterations for task limits.");
+  const nextBudgets = resolveRunBudgets(config, budgets);
+  if (input.answers !== void 0) {
+    if (!input.answers || typeof input.answers !== "object" || Array.isArray(input.answers) || typeof input.fingerprint !== "string") throw new Error("Review the work-style choices before saving.");
+    const profile = createOperatorProfile(input.answers, input.enabledPack ?? null);
+    saveOperatorProfile(profile, { home, expectedFingerprint: input.fingerprint });
+  }
+  if (budgets !== void 0) saveConfig({ ...config, ...nextBudgets });
+  return readKlaudSetup(home);
+}
+async function probeKlaudModel(home) {
+  checkHome(home);
+  const config = readConfig(), auth = config.auth;
+  if (auth?.type === "cli") return { status: "cli", models: [], message: "Subscription access is managed by the official CLI. Check its sign-in status below." };
+  const provider = typeof config.provider === "string" ? config.provider : "custom";
+  const baseUrl = typeof config.baseUrl === "string" ? config.baseUrl : PROVIDER_PRESETS[provider]?.baseUrl;
+  if (!baseUrl) throw new Error("Save a model connection before checking it.");
+  const result2 = await detectEndpoint(baseUrl, { provider, apiKey: apiKeyFor(provider, baseUrl, config.sshHost), sshHost: config.sshHost, timeoutMs: 5e3 });
+  return {
+    status: result2.status,
+    models: result2.models,
+    baseUrl: result2.baseUrl,
+    selectedModelAvailable: typeof config.model === "string" && result2.models.includes(config.model),
+    message: result2.status === "ready" ? "The server returned a model list. Your first message will check generation." : result2.error ?? "The server did not return a usable model list."
+  };
+}
+async function discoverKlaudModels(input) {
+  if (Object.keys(input).some((key) => key !== "network") || input.network !== void 0 && typeof input.network !== "boolean") throw new Error("Choose whether to include known network peers.");
+  const report = await discoverServers({ network: input.network === true, budgetMs: 8e3, timeoutMs: 1500, maxCandidates: 40 });
+  return { servers: report.servers, scanned: report.scanned, timedOut: report.timedOut };
+}
+var init_setup = __esm({
+  "src/harness/klaud/setup.ts"() {
+    init_config();
+    init_models();
+    init_endpoints();
+    init_discovery();
+    init_operator_profile();
+    init_run_budgets();
+  }
+});
+
+// src/harness/klaud/serve.ts
+var serve_exports = {};
+__export(serve_exports, {
+  startKlaudServe: () => startKlaudServe
+});
+import { createServer as createServer2 } from "node:http";
+import { createHash as createHash8, randomBytes, randomUUID as randomUUID15, timingSafeEqual } from "node:crypto";
+import { closeSync as closeSync9, constants as constants13, existsSync as existsSync13, fstatSync as fstatSync7, lstatSync as lstatSync12, mkdirSync as mkdirSync15, openSync as openSync9, readFileSync as readFileSync19, renameSync as renameSync9, unlinkSync as unlinkSync10, writeFileSync as writeFileSync16 } from "node:fs";
+import { homedir as homedir17 } from "node:os";
+import { dirname as dirname11, join as join28, resolve as resolve21 } from "node:path";
+function json(res, status2, value) {
+  res.writeHead(status2, { "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify(value));
+}
+function checkStorage3(file2) {
+  for (const [path2, directory2] of [[dirname11(dirname11(file2)), true], [dirname11(file2), true], [file2, false]]) {
+    try {
+      const stat3 = lstatSync12(path2);
+      if (stat3.isSymbolicLink() || (directory2 ? !stat3.isDirectory() : !stat3.isFile())) throw new Error("rein-kla\u028Ad storage must use ordinary files and directories, never symlinks.");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+}
+function privateRead(file2) {
+  checkStorage3(file2);
+  let fd;
+  try {
+    fd = openSync9(file2, constants13.O_RDONLY | constants13.O_NOFOLLOW);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  try {
+    if (fstatSync7(fd).size > MAX_BODY) throw new Error("rein-kla\u028Ad state file is too large.");
+    return readFileSync19(fd, "utf8");
+  } finally {
+    closeSync9(fd);
+  }
+}
+function privateWrite(file2, content) {
+  checkStorage3(file2);
+  mkdirSync15(dirname11(file2), { recursive: true, mode: 448 });
+  checkStorage3(file2);
+  const temp = `${file2}.${randomUUID15()}.tmp`;
+  try {
+    writeFileSync16(temp, content, { flag: "wx", mode: 384 });
+    checkStorage3(file2);
+    renameSync9(temp, file2);
+  } finally {
+    if (existsSync13(temp)) unlinkSync10(temp);
+  }
+}
+function readPrefs(file2) {
+  const raw = privateRead(file2), prefs = raw === void 0 ? {} : JSON.parse(raw);
+  if (!object(prefs) || Object.keys(prefs).some((key) => key !== "lastBotId") || prefs.lastBotId !== void 0 && (typeof prefs.lastBotId !== "string" || !prefs.lastBotId || prefs.lastBotId.length > 160)) throw new Error("Invalid rein-kla\u028Ad preferences.");
+  return prefs;
+}
+function requestedBot(id, home) {
+  if (typeof id !== "string") invalid("A bot id is required.");
+  try {
+    return getBot(id, home);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Invalid bot id.") invalid(error.message);
+    if (error instanceof Error && error.message.startsWith("No such bot:")) throw new HttpError(404, "No such bot.");
+    throw error;
+  }
+}
+function publicCompletion(message) {
+  const stopReason = typeof message.stopReason === "string" && PUBLIC_STOP_REASONS.has(message.stopReason) ? message.stopReason : void 0;
+  const reasoning = object(message.usage) ? message.usage.reasoning : void 0;
+  const reasoningTokens = typeof reasoning === "number" && Number.isSafeInteger(reasoning) && reasoning > 0 ? reasoning : void 0;
+  return stopReason === void 0 && reasoningTokens === void 0 ? void 0 : {
+    ...stopReason ? { stopReason } : {},
+    ...reasoningTokens ? { reasoningTokens } : {}
+  };
+}
+function displayToolId(scope, providerId) {
+  return `tool-${createHash8("sha256").update(`${scope}\0${providerId}`).digest("hex")}`;
+}
+function botMessages(bot, home, before) {
+  const file2 = sessionPath(bot.sessionId, home);
+  checkStorage3(file2);
+  if (!existsSync13(file2)) throw new HttpError(404, "Bot session is missing.");
+  const toolIds = /* @__PURE__ */ new Map();
+  const messages = loadSession(bot.sessionId, home).messages.flatMap((message) => {
+    if (message.role === "user") return [{ id: message.id, role: "user", content: message.content }];
+    const content = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+    if (message.role === "toolResult") return [{ id: message.id, role: "tool", content, toolCallId: toolIds.get(message.toolCallId) ?? displayToolId(message.id, message.toolCallId), providerToolCallId: message.toolCallId, toolName: message.toolName, isError: message.isError === true }];
+    const toolCalls = message.content.filter((part) => part.type === "toolCall").map((part) => {
+      const id = displayToolId(message.id, part.id);
+      toolIds.set(part.id, id);
+      return { id, type: "function", function: { name: part.name, arguments: JSON.stringify(part.arguments) } };
+    });
+    const completion = publicCompletion(message);
+    return content || toolCalls.length ? [{ id: message.id, role: "assistant", content, ...toolCalls.length ? { toolCalls } : {}, ...completion ? { completion } : {} }] : [];
+  });
+  const end = Math.min(before ?? messages.length, messages.length);
+  const page2 = [];
+  let start = end, bytes = 0;
+  while (start > 0 && page2.length < 100) {
+    const message = structuredClone(messages[start - 1]);
+    const preview = (value, limit2) => {
+      if (value.length <= limit2) return value;
+      message.truncated = true;
+      return value.slice(0, limit2) + "\n[Preview shortened; full text remains in session history.]";
+    };
+    message.content = preview(message.content, 32768);
+    if (message.toolCalls) {
+      if (message.toolCalls.length > 16) message.truncated = true;
+      message.toolCalls = message.toolCalls.slice(0, 16).map((call) => ({ ...call, function: { ...call.function, arguments: preview(call.function.arguments, 4096) } }));
+    }
+    const size = Buffer.byteLength(JSON.stringify(message));
+    if (page2.length && bytes + size > 2 * 1024 * 1024) break;
+    bytes += size;
+    page2.unshift(message);
+    start--;
+  }
+  return { messages: page2, before: start || null };
+}
+function body(req) {
+  if (req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") return Promise.reject(new HttpError(415, "Use application/json."));
+  return new Promise((resolve35, reject) => {
+    let size = 0;
+    const chunks = [];
+    const cleanup = () => {
+      clearTimeout(timer);
+      req.removeListener("data", data);
+      req.removeListener("end", end);
+      req.removeListener("aborted", aborted2);
+      req.removeListener("error", fail);
+    };
+    const fail = (error) => {
+      cleanup();
+      chunks.length = 0;
+      req.resume();
+      reject(error);
+    };
+    const aborted2 = () => fail(new HttpError(400, "Request aborted."));
+    const data = (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY) fail(new HttpError(413, "Request body is too large."));
+      else chunks.push(chunk);
+    };
+    const end = () => {
+      cleanup();
+      try {
+        const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        if (!object(value)) invalid("Expected a JSON object.");
+        resolve35(value);
+      } catch (error) {
+        reject(error instanceof HttpError ? error : new HttpError(400, "Invalid JSON."));
+      }
+    };
+    const timer = setTimeout(() => fail(new HttpError(408, "Request body timed out.")), 1e4);
+    timer.unref();
+    req.on("data", data);
+    req.once("end", end);
+    req.once("aborted", aborted2);
+    req.once("error", fail);
+  });
+}
+function frontendDeclarations(value) {
+  if (value === void 0) return [];
+  if (!Array.isArray(value) || value.length > FRONTEND_NAMES.size) invalid("Invalid frontend tools.");
+  const names = /* @__PURE__ */ new Set();
+  return value.map((raw) => {
+    if (!object(raw) || typeof raw.name !== "string" || !FRONTEND_NAMES.has(raw.name) || names.has(raw.name) || typeof raw.description !== "string" || raw.description.length > 4e3 || !object(raw.parameters) || raw.parameters.type !== "object") invalid("Only distinct declared rein-kla\u028Ad frontend tools are supported.");
+    names.add(raw.name);
+    return { name: raw.name, description: raw.description, parameters: raw.parameters };
+  });
+}
+function validateFrontend(name, args) {
+  if (name === "patchShell") {
+    if (Object.keys(args).some((key) => key !== "patch") || !Array.isArray(args.patch)) invalid("patchShell requires {patch}.");
+  } else if (name === "setPref") {
+    if (Object.keys(args).some((key) => !["key", "value"].includes(key)) || args.key !== "lastBotId" || typeof args.value !== "string" || !args.value || args.value.length > 160) invalid("setPref supports only lastBotId.");
+  } else if (name === "navigateTo") {
+    if (Object.keys(args).some((key) => key !== "dest") || !["bots", "chat", "settings"].includes(String(args.dest))) invalid("Invalid navigation destination.");
+  } else if (Object.keys(args).some((key) => !["action", "importance"].includes(key)) || typeof args.action !== "string" || !args.action.trim() || args.action.length > 4e3 || args.importance !== void 0 && !["low", "medium", "high", "critical"].includes(String(args.importance))) invalid("Invalid confirmAction arguments.");
+}
+function abortable2(promise, signal) {
+  if (signal.aborted) return Promise.reject(new Error("Run cancelled."));
+  return new Promise((resolve35, reject) => {
+    const abort = () => reject(new Error("Run cancelled."));
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve35, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+async function startKlaudServe(opts = {}) {
+  if (opts.host !== void 0 && opts.host !== "127.0.0.1") throw new Error("rein serve binds only to 127.0.0.1.");
+  if (opts.port !== void 0 && (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535)) throw new Error("Invalid port, expected 0 through 65535.");
+  const home = resolve21(opts.home ?? processHome()), cwd = resolve21(opts.cwd ?? process.cwd());
+  const checkHome2 = () => {
+    if (!opts.run && home !== processHome()) throw new Error("Set REIN_HOME to the requested home before starting rein serve; the runner uses process-wide configuration and sessions.");
+  };
+  checkHome2();
+  loadKlaudShell(home);
+  loadKlaudRunSettings(home);
+  const prefsFile = join28(home, "klaud", "prefs.json");
+  readPrefs(prefsFile);
+  const reasoningControl = () => {
+    const config = loadConfig(), envBase = process.env.REIN_BASE_URL?.trim();
+    const provider = envBase ? guessProvider(envBase, "custom") : config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0) ?? (config.baseUrl ? guessProvider(config.baseUrl, "custom") : "unconfigured");
+    if (provider === "unconfigured") return { supported: ["default"], mode: "unsupported", description: "Connect a model to configure its reasoning effort. Provider default keeps the serving model's own settings." };
+    const baseUrl = envBase || (["codex", "copilot", "grok"].includes(provider) ? `cli://${provider}` : config.baseUrl ?? PROVIDER_PRESETS[provider]?.baseUrl ?? "");
+    let sameEndpoint = !envBase;
+    try {
+      if (envBase) sameEndpoint = normalizeBaseUrl(envBase) === normalizeBaseUrl(config.baseUrl ?? PROVIDER_PRESETS[provider]?.baseUrl ?? "");
+    } catch {
+    }
+    const model = process.env.REIN_MODEL?.trim() || (sameEndpoint ? config.model : void 0) || "unknown";
+    return reasoningCapabilities({ id: model, provider, baseUrl });
+  };
+  const accounts = createMobileAccounts({ home });
+  const runSettingsResponse = () => ({ ...loadKlaudRunSettings(home), reasoningControl: reasoningControl() });
+  const token2 = opts.token ?? randomBytes(24).toString("hex");
+  if (!/^[\x21-\x7e]{1,512}$/.test(token2)) throw new Error("The bearer token must be nonempty printable ASCII without spaces.");
+  const authorization = Buffer.from(`Bearer ${token2}`);
+  const active3 = /* @__PURE__ */ new Map(), threads = /* @__PURE__ */ new Set();
+  const executions = /* @__PURE__ */ new Set();
+  let url = "", tokenFile, closing;
+  const snapshot = () => {
+    const bots = listBots(home), prefs = readPrefs(prefsFile);
+    return {
+      shell: loadKlaudShell(home),
+      prefs: bots.some((bot) => bot.id === prefs.lastBotId) ? prefs : {},
+      bots,
+      approvals: [...active3.values()].flatMap((run3) => [...run3.pending.entries()].filter(([, pending]) => pending.kind === "approval" || pending.tool === "confirmAction").map(([id, pending]) => ({ id, tool: pending.tool, summary: pending.summary })))
+    };
+  };
+  const savePref = (value) => {
+    const bot = requestedBot(value, home);
+    privateWrite(prefsFile, JSON.stringify({ lastBotId: bot.id }) + "\n");
+  };
+  const broadcast = (event) => {
+    for (const run3 of active3.values()) run3.emit(event);
+  };
+  const publishState = () => broadcast(stateSnapshot(snapshot()));
+  function waitFor(run3, id, kind, tool, args) {
+    if (run3.controller.signal.aborted) return Promise.reject(new Error("Run cancelled."));
+    if (run3.pending.has(id)) return Promise.reject(new Error("Duplicate pending tool call id."));
+    return new Promise((resolve35, reject) => {
+      const signal = run3.controller.signal;
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", abort);
+        run3.pending.delete(id);
+      };
+      const abort = () => {
+        cleanup();
+        reject(new Error("Run cancelled."));
+      };
+      const settle = (value) => {
+        cleanup();
+        resolve35(value);
+      };
+      const timer = setTimeout(() => {
+        settle(kind === "approval" ? false : { content: "The renderer did not answer before the timeout.", isError: true });
+        publishState();
+      }, PENDING_TIMEOUT);
+      timer.unref();
+      const summary = JSON.stringify(args).slice(0, 1e3);
+      run3.pending.set(id, { kind, tool, args: structuredClone(args), summary, settle });
+      signal.addEventListener("abort", abort, { once: true });
+      publishState();
+      run3.emit({ type: "CUSTOM", name: kind === "approval" ? "klaud.approval" : "klaud.frontend_tool", value: kind === "approval" ? { runId: run3.id, id, tool, summary } : { runId: run3.id, toolCallId: id, toolName: tool, args } });
+    });
+  }
+  function runTools(run3, declarations) {
+    const backend = createKlaudTools(home).map((tool) => ({ ...tool, async execute(id, args, signal) {
+      if (run3.controller.signal.aborted || signal?.aborted) throw new Error("Run cancelled.");
+      const result2 = await tool.execute(id, args, signal);
+      if (tool.name === "klaud_patch_shell" && !result2.isError) {
+        broadcast(stateDelta(args.patch));
+        publishState();
+      }
+      return result2;
+    } }));
+    const frontend = declarations.map((tool) => ({ ...tool, executionMode: "sequential", async execute(id, args) {
+      validateFrontend(tool.name, args);
+      if (tool.name === "patchShell") applyKlaudPatch(loadKlaudShell(home), args.patch);
+      if (tool.name === "setPref") requestedBot(args.value, home);
+      return await waitFor(run3, id, "tool", tool.name, args);
+    } }));
+    return [...backend, ...frontend];
+  }
+  async function streamRun(res, input, declarations, sessionId, bot) {
+    const threadId = input.threadId, id = randomUUID15(), controller = new AbortController();
+    const run3 = { id, threadId, controller, pending: /* @__PURE__ */ new Map(), emit(event) {
+      if (res.destroyed || res.writableEnded) return;
+      res.write(`data: ${JSON.stringify(event)}
+
+`);
+      if (res.writableLength > MAX_BODY * 4) {
+        controller.abort();
+        res.destroy();
+      }
+    } };
+    active3.set(id, run3);
+    threads.add(sessionId);
+    const disconnected = () => controller.abort();
+    res.once("close", disconnected);
+    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+    res.flushHeaders();
+    let turn = 0, failure;
+    const toolIds = /* @__PURE__ */ new Map(), startedTools = /* @__PURE__ */ new Set();
+    const startTool = (providerId, name) => {
+      const scopedId = toolIds.get(providerId) ?? displayToolId(`${id}:${Math.max(0, turn - 1)}`, providerId);
+      toolIds.set(providerId, scopedId);
+      if (!startedTools.has(scopedId)) {
+        startedTools.add(scopedId);
+        run3.emit({ type: "TOOL_CALL_START", toolCallId: scopedId, providerToolCallId: providerId, toolCallName: name });
+      }
+      return scopedId;
+    };
+    const endAssistant = (message) => {
+      for (const [contentIndex, part] of message.content.entries()) {
+        if (part.type === "text") run3.emit({ type: "TEXT_MESSAGE_END", messageId: `${id}:${turn}:${contentIndex}`, content: part.text, completion: publicCompletion(message) });
+      }
+      turn++;
+    };
+    let completion;
+    const onAssistant = (event) => {
+      if (controller.signal.aborted) return;
+      if (event.type === "done") {
+        failure = void 0;
+        endAssistant(event.message);
+        return;
+      }
+      if (event.type === "error") {
+        failure = event.error.errorMessage || event.reason;
+        endAssistant(event.error);
+        return;
+      }
+      if (event.type === "thinking_start" || event.type === "text_start") run3.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: event.type === "thinking_start" ? "thinking" : "responding", turn: turn + 1 } });
+      if (event.type === "toolcall_start" || event.type === "toolcall_end") {
+        const call = event.type === "toolcall_end" ? event.toolCall : event.partial.content[event.contentIndex];
+        if (call?.type === "toolCall") {
+          toolIds.set(call.id, displayToolId(`${id}:${turn}`, call.id));
+          startTool(call.id, call.name);
+        }
+      }
+      for (const encoded of toAgUiEvents(event, { threadId, runId: `${id}:${turn}` })) {
+        if (encoded.type === "TOOL_CALL_START") continue;
+        if (typeof encoded.toolCallId === "string") run3.emit({ ...encoded, providerToolCallId: encoded.toolCallId, toolCallId: toolIds.get(encoded.toolCallId) ?? displayToolId(`${id}:${turn}`, encoded.toolCallId) });
+        else run3.emit(encoded);
+      }
+    };
+    const finalStatus = (message) => {
+      completion = {
+        stopReason: message.stopReason,
+        ...Number.isSafeInteger(message.usage.reasoning) && (message.usage.reasoning ?? 0) > 0 ? { reasoningTokens: message.usage.reasoning } : {}
+      };
+      if (["error", "aborted", "budget", "length", "pending"].includes(message.stopReason)) failure = message.errorMessage || (message.stopReason === "budget" ? "Turn budget reached. Continue the run to resume." : `Run stopped: ${message.stopReason}.`);
+      else failure = void 0;
+    };
+    try {
+      run3.emit({ type: "RUN_STARTED", threadId, runId: id });
+      run3.emit(stateSnapshot(snapshot()));
+      const additions = runTools(run3, declarations);
+      if (opts.run) {
+        const iterator = opts.run(input.message, additions)[Symbol.asyncIterator]();
+        try {
+          while (!controller.signal.aborted) {
+            const next = await abortable2(iterator.next(), controller.signal);
+            if (next.done) break;
+            onAssistant(next.value);
+            if (next.value.type === "done") finalStatus(next.value.message);
+          }
+        } finally {
+          if (controller.signal.aborted) void iterator.return?.().catch(() => {
+          });
+        }
+      } else {
+        checkHome2();
+        const file2 = sessionPath(sessionId, home);
+        checkStorage3(file2);
+        if (!existsSync13(file2)) {
+          if (bot) throw new Error("Bot session is missing.");
+          mkdirSync15(dirname11(file2), { recursive: true, mode: 448 });
+          checkStorage3(file2);
+          createSession({ id: sessionId, cwd }, home);
+        }
+        const settings = loadKlaudRunSettings(home);
+        const runner = await createRunner({ cwd, sessionId, surface: "klaud", reasoningEffort: settings.reasoningEffort, toolGuard: async (name, args) => {
+          if (controller.signal.aborted) return "Run cancelled.";
+          if (name === "bash" && loadKlaudRunSettings(home).bashApproval === "auto") return;
+          const mutates = ["bash", "write", "edit", "gates"].includes(name) || name === "tmux" && !["list", "capture"].includes(String(args.op));
+          if (!mutates) return;
+          const allow = await waitFor(run3, randomUUID15(), "approval", name, args);
+          return allow === true && !controller.signal.aborted ? void 0 : "The user denied this action.";
+        } });
+        if (controller.signal.aborted) throw new Error("Run cancelled.");
+        for (const addition of additions) {
+          const index = runner.tools.findIndex((tool) => tool.name === addition.name);
+          if (index !== -1) {
+            if (FRONTEND_NAMES.has(addition.name)) throw new Error("A frontend tool cannot replace a native tool.");
+            runner.tools[index] = addition;
+          } else runner.tools.push(addition);
+        }
+        if (bot) runner.systemPrompt += `
+
+Bot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, name: bot.name })}. This conversation is stored in its own session.`;
+        const messages = await runner.run({ role: "user", content: input.message, timestamp: Date.now() }, { signal: controller.signal, onEvent(event) {
+          if (event.type === "turn_start") run3.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: "working", turn: turn + 1 } });
+          if (event.type === "message_update") onAssistant(event.event);
+          if (event.type === "message_end" && event.message.role === "assistant") endAssistant(event.message);
+          if (event.type === "tool_execution_start") {
+            startTool(event.toolCallId, event.toolName);
+            const journaling = event.toolName === "notes" && object(event.args) && ["write", "append"].includes(String(event.args.op));
+            run3.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: journaling ? "journaling" : "tool", toolName: event.toolName, turn: Math.max(1, turn) } });
+          }
+          if (event.type === "tool_execution_end") {
+            const toolCallId = startTool(event.toolCallId, event.toolName);
+            run3.emit({ type: "TOOL_CALL_RESULT", messageId: `${toolCallId}:result`, toolCallId, providerToolCallId: event.toolCallId, toolName: event.toolName, content: event.result.content, isError: event.isError === true || event.result.isError === true, role: "tool" });
+            run3.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: "working", turn: Math.max(1, turn) } });
+          }
+          if (event.type === "agent_pause") failure = "Turn budget reached. Continue the run to resume.";
+        } });
+        const last = messages.filter((message) => message.role === "assistant").at(-1);
+        if (last) finalStatus(last);
+      }
+      if (controller.signal.aborted) failure = "Run cancelled.";
+    } catch (error) {
+      failure = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Run failed.";
+    } finally {
+      controller.abort();
+      active3.delete(id);
+      threads.delete(sessionId);
+      res.removeListener("close", disconnected);
+      run3.emit(failure ? { type: "RUN_ERROR", threadId, runId: id, message: failure } : {
+        type: "RUN_FINISHED",
+        threadId,
+        runId: id,
+        outcome: { type: "success", ...completion ?? { stopReason: "stop" } }
+      });
+      if (!res.destroyed && !res.writableEnded) res.end("data: [DONE]\n\n");
+      publishState();
+    }
+  }
+  const server = createServer2((req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Frame-Options", "DENY");
+    void (async () => {
+      if (closing) throw new HttpError(503, "Server is closing.");
+      if (req.headers.host !== url.slice(7) || req.headers.origin && req.headers.origin !== url) throw new HttpError(403, "Invalid Host or Origin.");
+      if (req.method === "GET" && req.url === "/health") {
+        json(res, 200, { ok: true, name: "rein-klaud" });
+        return;
+      }
+      const provided = Buffer.from(req.headers.authorization ?? "");
+      if (provided.length !== authorization.length || !timingSafeEqual(provided, authorization)) throw new HttpError(401, "Bearer token required.");
+      if (req.method === "GET" && req.url === "/state") {
+        json(res, 200, snapshot());
+        return;
+      }
+      if (req.method === "GET" && req.url === "/settings") {
+        json(res, 200, runSettingsResponse());
+        return;
+      }
+      if (req.method === "GET" && req.url === "/activity") {
+        json(res, 200, klaudActivity(home));
+        return;
+      }
+      if (req.method === "POST" && req.url === "/settings") {
+        try {
+          const input = await body(req);
+          validateRunSettingsPatch(input);
+          const control = reasoningControl();
+          if (input.reasoningEffort && !control.supported.includes(input.reasoningEffort)) invalid(control.description);
+          saveKlaudRunSettings(input, home);
+          json(res, 200, runSettingsResponse());
+        } catch (error) {
+          if (error instanceof HttpError) throw error;
+          throw new HttpError(400, error instanceof Error ? error.message : "Invalid run settings.");
+        }
+        return;
+      }
+      if (req.method === "GET" && req.url === "/accounts") {
+        json(res, 200, await accounts.list());
+        return;
+      }
+      if (req.method === "PUT" && req.url === "/accounts/provider") {
+        if (active3.size) throw new HttpError(409, "Finish or stop the current run before changing its model connection.");
+        const input = await body(req);
+        if (active3.size) throw new HttpError(409, "Finish or stop the current run before changing its model connection.");
+        json(res, 200, accounts.select(input));
+        return;
+      }
+      if (req.method === "POST" && req.url === "/accounts/logins") {
+        json(res, 202, accounts.start(await body(req)));
+        return;
+      }
+      const loginRoute = /^\/accounts\/logins\/([a-f0-9-]+)$/.exec(req.url ?? "");
+      if (loginRoute && req.method === "GET") {
+        json(res, 200, accounts.get(loginRoute[1]));
+        return;
+      }
+      if (loginRoute && req.method === "DELETE") {
+        json(res, 200, accounts.cancel(loginRoute[1]));
+        return;
+      }
+      if (req.url?.startsWith("/setup")) {
+        if (active3.size && req.method !== "GET") throw new HttpError(409, "Finish or stop the current run before changing setup.");
+        try {
+          if (req.method === "GET" && req.url === "/setup") {
+            json(res, 200, readKlaudSetup(home));
+            return;
+          }
+          if (req.method === "POST" && ["/setup", "/setup/probe", "/setup/discover"].includes(req.url ?? "")) {
+            const input = await body(req);
+            if (active3.size) throw new HttpError(409, "Finish or stop the current run before changing setup.");
+            if (req.url === "/setup") {
+              json(res, 200, saveKlaudSetup(input, home));
+              return;
+            }
+            if (req.url === "/setup/probe") {
+              json(res, 200, await probeKlaudModel(home));
+              return;
+            }
+            json(res, 200, await discoverKlaudModels(input));
+            return;
+          }
+        } catch (error) {
+          if (error instanceof HttpError) throw error;
+          throw new HttpError(400, error instanceof Error ? error.message : "Setup could not be saved.");
+        }
+      }
+      if (req.method === "GET" && req.url === "/bots") {
+        json(res, 200, listBots(home));
+        return;
+      }
+      if (req.method === "POST" && req.url === "/bots") {
+        const input = await body(req);
+        if (Object.keys(input).some((key) => !["name", "avatar"].includes(key)) || typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 64 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) invalid("Use a bot name of 1 to 64 characters without control characters.");
+        if (input.avatar !== void 0) {
+          try {
+            validateBotAvatar(input.avatar);
+          } catch {
+            invalid("Choose a supported bot avatar.");
+          }
+        }
+        const bot = createBot(input.name, home, cwd, input.avatar);
+        publishState();
+        json(res, 201, bot);
+        return;
+      }
+      const avatarRoute = /^\/bots\/([^/]+)$/.exec(req.url ?? "");
+      if (req.method === "PATCH" && avatarRoute) {
+        const input = await body(req);
+        if (Object.keys(input).length !== 1 || !("avatar" in input)) invalid("Use {avatar} to change a bot's headwear.");
+        try {
+          validateBotAvatar(input.avatar);
+        } catch {
+          invalid("Choose a supported bot avatar.");
+        }
+        const bot = requestedBot(avatarRoute[1], home);
+        const updated = setBotAvatar(bot.id, input.avatar, home);
+        publishState();
+        json(res, 200, updated);
+        return;
+      }
+      const messagesRoute = /^\/bots\/([^/]+)\/messages(?:\?before=(\d+))?$/.exec(req.url ?? "");
+      if (req.method === "GET" && messagesRoute) {
+        const before = messagesRoute[2] === void 0 ? void 0 : Number(messagesRoute[2]);
+        if (before !== void 0 && !Number.isSafeInteger(before)) invalid("Invalid history cursor.");
+        json(res, 200, botMessages(requestedBot(messagesRoute[1], home), home, before));
+        return;
+      }
+      if (req.method === "POST" && req.url === "/prefs") {
+        const input = await body(req);
+        validateFrontend("setPref", input);
+        savePref(input.value);
+        publishState();
+        json(res, 200, snapshot());
+        return;
+      }
+      if (req.method === "POST" && req.url === "/state") {
+        const input = await body(req);
+        try {
+          const next = applyKlaudPatch(loadKlaudShell(home), input.patch);
+          saveKlaudShell(next, home);
+        } catch (error) {
+          throw new HttpError(400, error instanceof Error ? error.message : "Invalid shell patch.");
+        }
+        broadcast(stateDelta(input.patch));
+        publishState();
+        json(res, 200, snapshot());
+        return;
+      }
+      if (req.method === "POST" && req.url === "/run") {
+        const input = await body(req);
+        if (typeof input.threadId !== "string" || !input.threadId.trim() || input.threadId.length > 160 || typeof input.message !== "string" || !input.message.trim() || input.message.length > 128 * 1024) invalid("A run requires a threadId and nonempty message.");
+        const bot = input.botId === void 0 ? void 0 : requestedBot(input.botId, home);
+        if (bot && input.threadId !== bot.sessionId) invalid("threadId must match the selected bot's sessionId.");
+        const sessionId = bot?.sessionId ?? `klaud-thread-${createHash8("sha256").update(input.threadId).digest("hex").slice(0, 32)}`;
+        const declarations = frontendDeclarations(input.tools);
+        if (closing) throw new HttpError(503, "Server is closing.");
+        if (threads.has(sessionId)) throw new HttpError(409, "This thread already has an active run.");
+        if (active3.size >= 8) throw new HttpError(429, "Too many active runs.");
+        const execution = streamRun(res, input, declarations, sessionId, bot);
+        executions.add(execution);
+        try {
+          await execution;
+        } finally {
+          executions.delete(execution);
+        }
+        return;
+      }
+      const route = /^\/runs\/([a-f0-9-]+)\/(cancel|tools\/([^/]+)|approvals\/([^/]+))$/.exec(req.url ?? "");
+      if (req.method === "POST" && route) {
+        const input = await body(req), run3 = active3.get(route[1]);
+        if (!run3 || run3.controller.signal.aborted) throw new HttpError(404, "No active run.");
+        if (route[2] === "cancel") {
+          run3.controller.abort();
+          json(res, 200, { ok: true });
+          return;
+        }
+        const id = decodeURIComponent(route[3] ?? route[4]), pending = run3.pending.get(id);
+        if (!pending || pending.kind !== (route[3] ? "tool" : "approval")) throw new HttpError(404, "No pending action.");
+        if (pending.kind === "approval") {
+          if (typeof input.allow !== "boolean") invalid("Approval requires {allow: boolean}.");
+          pending.settle(input.allow);
+        } else {
+          if (typeof input.result !== "string" || input.isError !== void 0 && typeof input.isError !== "boolean") invalid("A tool result requires {result: string, isError?: boolean}.");
+          if (!input.isError && pending.tool === "setPref") savePref(pending.args.value);
+          pending.settle({ content: input.result, isError: input.isError === true });
+        }
+        publishState();
+        json(res, 200, { ok: true });
+        return;
+      }
+      throw new HttpError(404, "Not found.");
+    })().catch((error) => {
+      if (res.headersSent || res.destroyed) {
+        if (!res.destroyed) res.destroy();
+        return;
+      }
+      res.setHeader("Connection", "close");
+      json(res, error instanceof HttpError || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError || error instanceof MobileAccountError ? error.message : "Klaudbot request failed." });
+    });
+  });
+  server.requestTimeout = 15e3;
+  server.headersTimeout = 5e3;
+  await new Promise((resolve35, reject) => {
+    server.once("error", reject);
+    server.listen(opts.port ?? 0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve35();
+    });
+  });
+  url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    if (opts.token === void 0) {
+      tokenFile = join28(home, "klaud", `serve-${new URL(url).port}.token`);
+      privateWrite(tokenFile, token2 + "\n");
+    }
+  } catch (error) {
+    await new Promise((resolve35) => server.close(() => resolve35()));
+    throw error;
+  }
+  return { url, token: token2, close() {
+    if (!closing) closing = (async () => {
+      for (const run3 of active3.values()) run3.controller.abort();
+      await accounts.close();
+      await new Promise((resolve35, reject) => {
+        server.close((error) => error ? reject(error) : resolve35());
+        server.closeAllConnections?.();
+      });
+      await Promise.allSettled([...executions]);
+      if (tokenFile) {
+        try {
+          if (privateRead(tokenFile) === token2 + "\n") unlinkSync10(tokenFile);
+        } catch {
+        }
+      }
+    })();
+    return closing;
+  } };
+}
+var MAX_BODY, PENDING_TIMEOUT, FRONTEND_NAMES, PUBLIC_STOP_REASONS, processHome, object, HttpError, invalid;
+var init_serve = __esm({
+  "src/harness/klaud/serve.ts"() {
+    init_session();
+    init_ag_ui();
+    init_runner();
+    init_shell();
+    init_tools2();
+    init_bots();
+    init_settings();
+    init_reasoning();
+    init_activity();
+    init_models();
+    init_mobile_accounts();
+    init_setup();
+    MAX_BODY = 256 * 1024;
+    PENDING_TIMEOUT = 30 * 6e4;
+    FRONTEND_NAMES = /* @__PURE__ */ new Set(["patchShell", "setPref", "navigateTo", "confirmAction"]);
+    PUBLIC_STOP_REASONS = /* @__PURE__ */ new Set(["stop", "length", "toolUse", "error", "aborted", "budget"]);
+    processHome = () => resolve21(process.env.REIN_HOME || join28(homedir17(), ".rein"));
+    object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+    HttpError = class extends Error {
+      status;
+      constructor(status2, message) {
+        super(message);
+        this.status = status2;
+      }
+    };
+    invalid = (message) => {
+      throw new HttpError(400, message);
+    };
+  }
+});
+
 // src/harness/klaud/mobile.ts
 var mobile_exports = {};
 __export(mobile_exports, {
@@ -9526,8 +9698,8 @@ import { createHash as createHash9, randomBytes as randomBytes2, randomUUID as r
 import { closeSync as closeSync10, constants as constants14, existsSync as existsSync14, fstatSync as fstatSync8, lstatSync as lstatSync13, mkdirSync as mkdirSync16, openSync as openSync10, readFileSync as readFileSync20, renameSync as renameSync10, unlinkSync as unlinkSync11, writeFileSync as writeFileSync17 } from "node:fs";
 import { createServer as createServer3 } from "node:http";
 import { BlockList, isIP as isIP2 } from "node:net";
-import { homedir as homedir17 } from "node:os";
-import { dirname as dirname12, join as join28, resolve as resolve21 } from "node:path";
+import { homedir as homedir18 } from "node:os";
+import { dirname as dirname12, join as join29, resolve as resolve22 } from "node:path";
 function json2(res, status2, value) {
   res.writeHead(status2, { "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify(value));
 }
@@ -9614,7 +9786,7 @@ function writeCredential(file2, token2) {
 }
 function credentialPath(home, host, port) {
   const id = createHash9("sha256").update(`${host}:${port}`).digest("hex").slice(0, 16);
-  return join28(home, "klaud", `mobile-${id}.token`);
+  return join29(home, "klaud", `mobile-${id}.token`);
 }
 function requestBody(req) {
   if (req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") return Promise.reject(new HttpError2(415, "Use application/json."));
@@ -9750,7 +9922,7 @@ async function desktopEvents(body2, receive) {
 async function startKlaudMobileGateway(opts) {
   const host = validateMobileBindHost(opts?.host), requestedPort = validatePort(opts.port);
   const trustedOrigin = opts.trustedOrigin === void 0 ? void 0 : validateMobileTrustedOrigin(opts.trustedOrigin);
-  const home = resolve21(opts.home ?? processHome2()), cwd = resolve21(opts.cwd ?? process.cwd());
+  const home = resolve22(opts.home ?? processHome2()), cwd = resolve22(opts.cwd ?? process.cwd());
   let tokenFile = opts.token === void 0 && requestedPort !== 0 ? credentialPath(home, host, requestedPort) : void 0;
   const storedToken = tokenFile ? readCredential(tokenFile) : void 0;
   const token2 = validateToken(opts.token ?? storedToken ?? randomBytes2(32).toString("hex"));
@@ -9979,6 +10151,10 @@ data: ${JSON.stringify({ sequence: stored.sequence, event: stored.event })}
         await proxy(res, "POST", relative5, await requestBody(req));
         return;
       }
+      if (req.method === "PATCH" && /^\/v1\/mobile\/bots\/[^/]+$/.test(parsed.pathname)) {
+        await proxy(res, "PATCH", relative5, await requestBody(req));
+        return;
+      }
       if (req.method === "POST" && parsed.pathname === `${API_ROOT}/runs`) {
         const input = await requestBody(req);
         validateRunInput(input);
@@ -10201,7 +10377,7 @@ var init_mobile = __esm({
     privateHosts.addSubnet("::1", 128, "ipv6");
     privateHosts.addSubnet("fc00::", 7, "ipv6");
     privateHosts.addSubnet("fe80::", 10, "ipv6");
-    processHome2 = () => resolve21(process.env.REIN_HOME || join28(homedir17(), ".rein"));
+    processHome2 = () => resolve22(process.env.REIN_HOME || join29(homedir18(), ".rein"));
     object2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
     HttpError2 = class extends Error {
       status;
@@ -10218,8 +10394,8 @@ var init_mobile = __esm({
 
 // src/harness/desktop/surface.ts
 import { existsSync as existsSync15, lstatSync as lstatSync14, mkdirSync as mkdirSync17, readFileSync as readFileSync21, renameSync as renameSync11, writeFileSync as writeFileSync18, unlinkSync as unlinkSync12 } from "node:fs";
-import { homedir as homedir18 } from "node:os";
-import { dirname as dirname13, join as join29, resolve as resolve22 } from "node:path";
+import { homedir as homedir19 } from "node:os";
+import { dirname as dirname13, join as join30, resolve as resolve23 } from "node:path";
 import { execFile as execFile8 } from "node:child_process";
 import { promisify as promisify7 } from "node:util";
 import { randomUUID as randomUUID17 } from "node:crypto";
@@ -10229,11 +10405,11 @@ function remoteDesktopSession(env = process.env) {
 function desktopAvailable(env = process.env, platform2 = process.platform) {
   return platform2 === "darwin" && !env.CI && !remoteDesktopSession(env);
 }
-function nativeApp(home = homedir18()) {
-  return [join29(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find((path2) => existsSync15(join29(path2, "Contents/MacOS/nodeterm")));
+function nativeApp(home = homedir19()) {
+  return [join30(home, "Applications/nodeterm.app"), "/Applications/nodeterm.app"].find((path2) => existsSync15(join30(path2, "Contents/MacOS/nodeterm")));
 }
 function preferencesFile(home) {
-  const file2 = join29(home, "desktop.json");
+  const file2 = join30(home, "desktop.json");
   if (lstatSync14(file2, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error("Desktop preferences must not be a symlink.");
   return file2;
 }
@@ -10282,10 +10458,10 @@ function registeredSettings(current, launchCmd) {
 async function registerRein(options = {}) {
   const running = options.running ?? nodeTermRunning;
   if (await running()) return "NodeTerm is running, so its settings were preserved. Close it when convenient and run rein desktop install --no-launch to register Rein as the default agent. For now, run rein --terminal in a NodeTerm terminal node.";
-  const file2 = options.settingsFile ?? join29(homedir18(), "Library/Application Support/node-terminal/settings.json");
+  const file2 = options.settingsFile ?? join30(homedir19(), "Library/Application Support/node-terminal/settings.json");
   if (existsSync15(file2) && (!lstatSync14(file2).isFile() || lstatSync14(file2).isSymbolicLink())) throw new Error("NodeTerm settings must be an ordinary file.");
   const before = existsSync15(file2) ? readFileSync21(file2, "utf8") : void 0;
-  const command = [options.node ?? "node", options.cli ?? resolve22(process.argv[1]), "--terminal"].map(shellQuote).join(" ");
+  const command = [options.node ?? "node", options.cli ?? resolve23(process.argv[1]), "--terminal"].map(shellQuote).join(" ");
   const next = registeredSettings(before === void 0 ? {} : JSON.parse(before), command);
   mkdirSync17(dirname13(file2), { recursive: true, mode: 448 });
   const temp = `${file2}.${randomUUID17()}.tmp`;
@@ -10308,7 +10484,7 @@ var init_surface = __esm({
     init_tmux();
     exec3 = promisify7(execFile8);
     REIN_AGENT_ID = "custom:749611bd-a3c7-4b35-b0e1-70cf837648b2";
-    desktopHome = () => resolve22(process.env.REIN_HOME || join29(homedir18(), ".rein"));
+    desktopHome = () => resolve23(process.env.REIN_HOME || join30(homedir19(), ".rein"));
   }
 });
 
@@ -10325,8 +10501,8 @@ import { execFile as execFile9 } from "node:child_process";
 import { createHash as createHash10 } from "node:crypto";
 import { constants as constants15, createReadStream as createReadStream2 } from "node:fs";
 import { access as access2, lstat as lstat2, mkdir as mkdir2, mkdtemp as mkdtemp4, rename as rename2, rm as rm4, stat as stat2 } from "node:fs/promises";
-import { homedir as homedir19, tmpdir as tmpdir4 } from "node:os";
-import { join as join30 } from "node:path";
+import { homedir as homedir20, tmpdir as tmpdir4 } from "node:os";
+import { join as join31 } from "node:path";
 import { promisify as promisify8 } from "node:util";
 function nodeTermArtifact(platform2, arch2) {
   if (platform2 !== "darwin") return void 0;
@@ -10353,8 +10529,8 @@ async function exists(path2) {
 }
 async function usableApp(path2) {
   try {
-    const executable2 = join30(path2, "Contents", "MacOS", "nodeterm");
-    if (!(await stat2(path2)).isDirectory() || !(await stat2(executable2)).isFile() || !(await stat2(join30(path2, "Contents", "Info.plist"))).isFile()) return false;
+    const executable2 = join31(path2, "Contents", "MacOS", "nodeterm");
+    if (!(await stat2(path2)).isDirectory() || !(await stat2(executable2)).isFile() || !(await stat2(join31(path2, "Contents", "Info.plist"))).isFile()) return false;
     await access2(executable2, constants15.X_OK);
     return true;
   } catch {
@@ -10371,9 +10547,9 @@ function createNodeTermInstaller(deps) {
     let mount, mounted = false, appPath;
     let detail = "";
     try {
-      const applications = join30(deps.home, "Applications");
-      const destination = join30(applications, "nodeterm.app");
-      for (const candidate of [join30(deps.systemApplications, "nodeterm.app"), destination]) {
+      const applications = join31(deps.home, "Applications");
+      const destination = join31(applications, "nodeterm.app");
+      for (const candidate of [join31(deps.systemApplications, "nodeterm.app"), destination]) {
         if (!await exists(candidate)) continue;
         if (!await usableApp(candidate)) throw new Error(`An incomplete or unusable NodeTerm app exists at ${candidate}. It was preserved. Move it aside before retrying installation.`);
         appPath = candidate;
@@ -10384,7 +10560,7 @@ function createNodeTermInstaller(deps) {
         const artifact = deps.artifact(deps.platform, deps.arch);
         if (!artifact) return { installed: false, detail: `No supported NodeTerm download for macOS ${deps.arch}. See https://nodeterm.dev/releases.` };
         await mkdir2(applications, { recursive: true });
-        const lockPath = join30(applications, ".rein-nodeterm-install.lock");
+        const lockPath = join31(applications, ".rein-nodeterm-install.lock");
         try {
           await mkdir2(lockPath, { mode: 448 });
           lock = lockPath;
@@ -10392,8 +10568,8 @@ function createNodeTermInstaller(deps) {
           if (error.code === "EEXIST") throw new Error("Another NodeTerm installation may be running. Retry when it finishes.");
           throw error;
         }
-        temporary = await mkdtemp4(join30(deps.temporaryRoot, "rein-nodeterm-"));
-        const download2 = join30(temporary, "nodeterm.dmg");
+        temporary = await mkdtemp4(join31(deps.temporaryRoot, "rein-nodeterm-"));
+        const download2 = join31(temporary, "nodeterm.dmg");
         await deps.run("curl", [
           "--fail",
           "--silent",
@@ -10416,16 +10592,16 @@ function createNodeTermInstaller(deps) {
         const downloaded = await stat2(download2);
         if (!downloaded.isFile() || downloaded.size === 0 || downloaded.size > 536870912) throw new Error("The NodeTerm download is empty or exceeds the expected size limit.");
         await verifyNodeTermDownload(download2, artifact.sha256);
-        mount = join30(temporary, "mount");
+        mount = join31(temporary, "mount");
         await mkdir2(mount);
         mounted = true;
         await deps.run("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, download2], 6e4);
-        const source = join30(mount, "nodeterm.app");
+        const source = join31(mount, "nodeterm.app");
         if (!(await lstat2(source)).isDirectory()) throw new Error("The release disk image does not contain nodeterm.app.");
         await deps.run("codesign", ["--verify", "--deep", "--strict", source], 6e4);
         await deps.run("spctl", ["--assess", "--type", "execute", source], 6e4);
-        staging = await mkdtemp4(join30(applications, ".rein-nodeterm-stage-"));
-        const stagedApp = join30(staging, "nodeterm.app");
+        staging = await mkdtemp4(join31(applications, ".rein-nodeterm-stage-"));
+        const stagedApp = join31(staging, "nodeterm.app");
         await deps.run("ditto", [source, stagedApp], 12e4);
         await deps.run("codesign", ["--verify", "--deep", "--strict", stagedApp], 6e4);
         if (await exists(destination)) throw new Error("A NodeTerm installation appeared while downloading. It was preserved; retry to use it.");
@@ -10477,7 +10653,7 @@ var init_install2 = __esm({
     installNodeTerm = createNodeTermInstaller({
       platform: process.platform,
       arch: process.arch,
-      home: homedir19(),
+      home: homedir20(),
       temporaryRoot: tmpdir4(),
       systemApplications: "/Applications",
       run,
@@ -10494,7 +10670,7 @@ __export(cli_exports, {
 });
 import { accessSync as accessSync4, constants as constants16, existsSync as existsSync16 } from "node:fs";
 import { spawn as spawn10 } from "node:child_process";
-import { dirname as dirname14, join as join31, resolve as resolve23 } from "node:path";
+import { dirname as dirname14, join as join32, resolve as resolve24 } from "node:path";
 import { fileURLToPath as fileURLToPath6 } from "node:url";
 async function desktopCommand(args, flags) {
   const action = args[0] ?? (preferredSurface() === "klaud" ? "open" : "status");
@@ -10545,13 +10721,13 @@ NodeTerm: ${nativeApp() ? "installed" : "not found"}`);
 }
 function klaudAppDirectory() {
   const here5 = dirname14(fileURLToPath6(import.meta.url));
-  const candidates = [resolve23(here5, "../../../apps/klaud"), resolve23(here5, "../apps/klaud")];
-  return candidates.find((path2) => existsSync16(join31(path2, "main.mjs"))) ?? candidates[0];
+  const candidates = [resolve24(here5, "../../../apps/klaud"), resolve24(here5, "../apps/klaud")];
+  return candidates.find((path2) => existsSync16(join32(path2, "main.mjs"))) ?? candidates[0];
 }
 function klaudElectron(appDir) {
-  const path2 = join31(appDir, "node_modules", ".bin", process.platform === "win32" ? "electron.cmd" : "electron");
+  const path2 = join32(appDir, "node_modules", ".bin", process.platform === "win32" ? "electron.cmd" : "electron");
   try {
-    if (!existsSync16(join31(appDir, "main.mjs"))) return;
+    if (!existsSync16(join32(appDir, "main.mjs"))) return;
     accessSync4(path2, process.platform === "win32" ? constants16.F_OK : constants16.X_OK);
     return path2;
   } catch {
@@ -10672,7 +10848,7 @@ async function loginCli(provider, options = {}) {
   }
   const device = options.deviceAuth !== false || provider === "grok" && options.openBrowser === false;
   const args = ["login", ...device ? [provider !== "copilot" ? "--device-auth" : "--device-code"] : provider === "copilot" ? ["--web-flow"] : []];
-  return new Promise((resolve34) => {
+  return new Promise((resolve35) => {
     const captureDeviceLink = provider === "grok" && device;
     const child = spawn11(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, cwd: directory2, stdio: captureDeviceLink ? ["inherit", "pipe", "pipe"] : "inherit", shell: false });
     let loginOutput = "", openedDevicePage = false;
@@ -10716,20 +10892,20 @@ async function loginCli(provider, options = {}) {
     };
     child.on("error", (error) => {
       cleanup();
-      resolve34({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
+      resolve35({ ok: false, detail: error.code === "ENOENT" ? missingCli(provider) : error.message });
     });
     child.on("close", (code) => {
       cleanup();
-      if (options.signal?.aborted || timedOut) resolve34({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
-      else resolve34(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
+      if (options.signal?.aborted || timedOut) resolve35({ ok: false, detail: timedOut ? "CLI login timed out" : "Login canceled" });
+      else resolve35(code === 0 ? { ok: true, detail: `${CLI_PROVIDERS[provider].label} login completed using Rein's CLI configuration. Credentials remain managed by the official CLI and its keychain.` } : { ok: false, detail: `${provider} login exited ${code}. Update the official CLI and retry 'rein login ${provider}'.` });
     });
   });
 }
 async function checkCliAuth(provider, options = {}) {
   if (!(provider in CLI_PROVIDERS)) return { available: false, authenticated: false, detail: `Unknown CLI provider: ${provider}` };
   const env = cliEnvironment(provider, options.env);
-  const run3 = (args) => new Promise((resolve34) => {
-    execFile10(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve34({ ok: !error, missing: error?.code === "ENOENT" }));
+  const run3 = (args) => new Promise((resolve35) => {
+    execFile10(options.executable ?? CLI_PROVIDERS[provider].command, args, { env, timeout: options.timeoutMs ?? 1e4, maxBuffer: 64e3, signal: options.signal, encoding: "utf8" }, (error) => resolve35({ ok: !error, missing: error?.code === "ENOENT" }));
   });
   const version = await run3(["--version"]);
   if (!version.ok) return { available: false, authenticated: false, detail: version.missing ? missingCli(provider) : `${provider} CLI could not be checked. Update it and try again.` };
@@ -10785,8 +10961,8 @@ function createSetupPrompt(input = process.stdin, output = process.stdout) {
     output.write(text);
     if (queue.length) return queue.shift().trim() || fallback;
     if (closed) throw eof();
-    const answer = await new Promise((resolve34, reject) => {
-      pending = { resolve: resolve34, reject };
+    const answer = await new Promise((resolve35, reject) => {
+      pending = { resolve: resolve35, reject };
     });
     return answer.trim() || fallback;
   };
@@ -11094,7 +11270,7 @@ Saved ${provider}/${model} at ${baseUrl} to ${configPath()}.`);
   }
 }
 var LOCAL, API_KEY_PAGES;
-var init_setup = __esm({
+var init_setup2 = __esm({
   "src/harness/setup.ts"() {
     init_config();
     init_run_budgets();
@@ -11211,7 +11387,7 @@ Task duration \xB7 Config: ${path2}`);
 var init_budget_setup = __esm({
   "src/harness/budget-setup.ts"() {
     init_config();
-    init_setup();
+    init_setup2();
     init_run_budgets();
   }
 });
@@ -11220,7 +11396,7 @@ var init_budget_setup = __esm({
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { createHash as createHash11 } from "node:crypto";
 import { closeSync as closeSync11, constants as constants17, fstatSync as fstatSync9, lstatSync as lstatSync15, openSync as openSync11, readSync as readSync4, readdirSync as readdirSync5, realpathSync as realpathSync6 } from "node:fs";
-import { join as join32 } from "node:path";
+import { join as join33 } from "node:path";
 function redact(value) {
   return value.replace(/-----BEGIN [^-]*(?:PRIVATE KEY|OPENSSH)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/g, "[credential omitted]").split("\n").map((line) => {
     if (/(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|passwd|authorization|token|secret)["']?(?:\s*[=:]\s*|\s+is\s+)\S/i.test(line) || /\bBearer\s+[\w./+~-]{8,}/i.test(line) || /\b(?:sk-[\w-]{12,}|gh[pousr]_[\w]{12,}|github_pat_[\w]{12,}|AKIA[A-Z0-9]{16})\b/.test(line) || /https?:\/\/[^\s/@]+:[^\s/@]+@/i.test(line) || /[?&](?:key|token|api_key|secret|password)=[^\s&#]+/i.test(line)) return "[credential omitted]";
@@ -11309,7 +11485,7 @@ function collectAutonomyEvidence(workspaces, options = {}) {
   }
   const candidates = [];
   for (const file2 of files) {
-    const session = readBoundedSession(join32(sessionsDir(), file2), allowed);
+    const session = readBoundedSession(join33(sessionsDir(), file2), allowed);
     if (!session) continue;
     const workspace = session.workspace;
     const sessionId = file2.slice(0, -6);
@@ -11450,15 +11626,15 @@ var init_rules = __esm({
 import { spawnSync } from "node:child_process";
 import { createHash as createHash12, randomUUID as randomUUID18 } from "node:crypto";
 import { closeSync as closeSync12, constants as constants18, fstatSync as fstatSync10, lstatSync as lstatSync16, mkdirSync as mkdirSync19, openSync as openSync12, readFileSync as readFileSync22, renameSync as renameSync12, unlinkSync as unlinkSync13, writeFileSync as writeFileSync19 } from "node:fs";
-import { homedir as homedir20 } from "node:os";
-import { basename, dirname as dirname15, isAbsolute as isAbsolute5, join as join33, relative as relative3, resolve as resolve24 } from "node:path";
+import { homedir as homedir21 } from "node:os";
+import { basename, dirname as dirname15, isAbsolute as isAbsolute5, join as join34, relative as relative3, resolve as resolve25 } from "node:path";
 function absolute(value, name) {
   if (!isAbsolute5(value) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${name} must be an absolute path without control characters.`);
-  return resolve24(value);
+  return resolve25(value);
 }
 function configuration(options) {
   const home = absolute(options.home, "REIN_HOME");
-  const userHome = absolute(options.userHome ?? homedir20(), "User home");
+  const userHome = absolute(options.userHome ?? homedir21(), "User home");
   const nodePath = absolute(options.nodePath ?? process.execPath, "Node executable");
   const cliPath = absolute(options.cliPath, "Rein bundle");
   const uid = options.uid ?? process.getuid?.();
@@ -11466,10 +11642,10 @@ function configuration(options) {
   if (platform2 === "darwin" && (!Number.isSafeInteger(uid) || uid < 0)) throw new Error("A user ID is required for a launchd user agent.");
   const scope = createHash12("sha256").update(home).digest("hex").slice(0, 24);
   const label = `dev.rein.${options.kind === "guardian" ? "guardian" : "autonomy"}.${scope}`;
-  const paths2 = [dirname15(nodePath), join33(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  const paths2 = [dirname15(nodePath), join34(userHome, ".local", "bin"), ...(process.env.PATH ?? "").split(":"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
   const path2 = [...new Set(paths2.filter((p) => isAbsolute5(p) && !/[\x00-\x1f\x7f:]/.test(p)))].join(":");
   const arguments_ = options.kind === "guardian" ? ["autonomy", "guardian", "serve"] : ["autonomy", "daemon"];
-  const electronNode = Boolean(process.versions.electron) && nodePath === resolve24(process.execPath);
+  const electronNode = Boolean(process.versions.electron) && nodePath === resolve25(process.execPath);
   return { home, userHome, nodePath, cliPath, uid, platform: platform2, scope, label, path: path2, arguments_, electronNode };
 }
 function xml(value) {
@@ -11486,7 +11662,7 @@ ${body2}`;
 function servicePlan(options) {
   const cfg = configuration(options);
   if (cfg.platform === "darwin") {
-    const path2 = join33(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
+    const path2 = join34(cfg.userHome, "Library", "LaunchAgents", `${cfg.label}.plist`);
     const target = `gui/${cfg.uid}/${cfg.label}`;
     const body2 = `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -11506,7 +11682,7 @@ function servicePlan(options) {
   }
   if (cfg.platform === "linux") {
     const name = `${cfg.label}.service`;
-    const path2 = join33(cfg.userHome, ".config", "systemd", "user", name);
+    const path2 = join34(cfg.userHome, ".config", "systemd", "user", name);
     const body2 = `[Unit]
 Description=Rein autonomy supervisor
 StartLimitIntervalSec=300
@@ -11576,7 +11752,7 @@ function prepareDirectory(path2, userHome) {
   const components = relative3(userHome, path2).split("/");
   let current = userHome;
   for (const component of components) {
-    current = join33(current, component);
+    current = join34(current, component);
     try {
       mkdirSync19(current, { mode: 448 });
     } catch (error) {
@@ -11616,7 +11792,7 @@ async function waitForService(options, initial, polling = {}) {
   const deadline = Date.now() + timeout;
   let result2 = initial;
   while (result2.installed && result2.active !== true && Date.now() < deadline) {
-    await new Promise((resolve34) => setTimeout(resolve34, Math.min(interval, Math.max(0, deadline - Date.now()))));
+    await new Promise((resolve35) => setTimeout(resolve35, Math.min(interval, Math.max(0, deadline - Date.now()))));
     result2 = serviceStatus(options);
   }
   return result2;
@@ -11673,7 +11849,7 @@ import { createReadStream as createReadStream3, createWriteStream, statfsSync } 
 import { chmod as chmod3, lstat as lstat3, mkdir as mkdir3, mkdtemp as mkdtemp5, readFile as readFile3, readdir as readdir2, readlink, realpath, rename as rename3, rm as rm5, writeFile as writeFile2 } from "node:fs/promises";
 import { get } from "node:https";
 import { release as release2 } from "node:os";
-import { isAbsolute as isAbsolute6, join as join34, relative as relative4, resolve as resolve25, sep as sep5 } from "node:path";
+import { isAbsolute as isAbsolute6, join as join35, relative as relative4, resolve as resolve26, sep as sep5 } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 function headlessRuntimePlan(profile) {
@@ -11743,7 +11919,7 @@ async function inspectTree(root2, signal, normalize = false) {
   async function visit(directory2) {
     for (const name of (await readdir2(directory2)).sort()) {
       signal?.throwIfAborted();
-      const full = join34(directory2, name), path2 = relative4(root2, full).split(sep5).join("/");
+      const full = join35(directory2, name), path2 = relative4(root2, full).split(sep5).join("/");
       if (path2 === MANIFEST) continue;
       safeName(path2);
       if (entries.length >= MAX_ENTRIES) throw new Error("Too many guardian runtime files.");
@@ -11751,7 +11927,7 @@ async function inspectTree(root2, signal, normalize = false) {
       if (!normalize && !stat3.isSymbolicLink() && (stat3.mode & 4095) !== (stat3.isDirectory() || stat3.mode & 73 ? 448 : 384)) throw new Error("Guardian runtime file permissions changed.");
       if (stat3.isSymbolicLink()) {
         const target = await readlink(full);
-        if (!target || target.startsWith("/") || /[\\\x00-\x1f\x7f]/.test(target) || !inside(root2, resolve25(directory2, target)) || !inside(canonicalRoot, await realpath(full))) throw new Error("Guardian runtime link escapes its private directory.");
+        if (!target || target.startsWith("/") || /[\\\x00-\x1f\x7f]/.test(target) || !inside(root2, resolve26(directory2, target)) || !inside(canonicalRoot, await realpath(full))) throw new Error("Guardian runtime link escapes its private directory.");
         entries.push({ path: path2, kind: "link", target });
       } else if (stat3.isDirectory()) {
         entries.push({ path: path2, kind: "directory" });
@@ -11770,7 +11946,7 @@ async function inspectTree(root2, signal, normalize = false) {
   if ([...inodes.values()].some((inode) => inode.count !== inode.links)) throw new Error("Guardian runtime has hard links outside its private directory.");
   for (const entry of entries) {
     signal?.throwIfAborted();
-    const full = join34(root2, entry.path);
+    const full = join35(root2, entry.path);
     if (entry.kind === "file") entry.sha256 = await hashFile(full, signal);
     if (normalize && entry.kind !== "link") await chmod3(full, entry.kind === "directory" || entry.executable ? 448 : 384);
   }
@@ -11787,15 +11963,15 @@ async function verify(root2, plan, signal) {
   try {
     const rootStat = await lstat3(root2);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("Runtime root must be an ordinary directory.");
-    const stat3 = await lstat3(join34(root2, MANIFEST));
+    const stat3 = await lstat3(join35(root2, MANIFEST));
     if (!stat3.isFile() || stat3.nlink !== 1 || stat3.size > 8 * 1024 ** 2 || (stat3.mode & 4095) !== 384) throw new Error("Invalid manifest file.");
-    const manifest2 = JSON.parse(await readFile3(join34(root2, MANIFEST), "utf8"));
+    const manifest2 = JSON.parse(await readFile3(join35(root2, MANIFEST), "utf8"));
     if (manifest2.version !== 1 || manifest2.asset !== plan.asset || manifest2.archiveSha256 !== plan.sha256 || manifest2.runtimeVersion !== plan.version) throw new Error("Unrecognized archive manifest.");
     const entries = await inspectTree(root2, signal);
     if (JSON.stringify(entries) !== JSON.stringify(manifest2.entries)) throw new Error("Runtime file integrity mismatch.");
     const binary = entries.find((entry) => entry.path === plan.executableRelative);
     if (binary?.kind !== "file" || !binary.executable) throw new Error("Missing executable.");
-    return join34(root2, plan.executableRelative);
+    return join35(root2, plan.executableRelative);
   } catch (error) {
     signal?.throwIfAborted();
     throw new Error(`Existing guardian runtime was preserved because verification failed: ${error.message} Move the guardian-runtime directory aside after stopping its service, then retry installation.`);
@@ -11822,7 +11998,7 @@ async function installHeadlessRuntime(profile, options = {}, dependencies = {}) 
   }
   const parent = privateDirectory(), filesystem = statfsSync(parent);
   if (Number(filesystem.bavail) * Number(filesystem.bsize) < plan.downloadBytes * 4 + 1024 ** 3) throw new Error("Insufficient free disk space for the headless runtime archive and private extraction staging.");
-  const stage = await mkdtemp5(join34(parent, ".guardian-runtime-")), archive = join34(stage, plan.asset), extracted = join34(stage, "runtime");
+  const stage = await mkdtemp5(join35(parent, ".guardian-runtime-")), archive = join35(stage, plan.asset), extracted = join35(stage, "runtime");
   const controller = new AbortController(), abort = () => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", abort, { once: true });
   if (options.signal?.aborted) abort();
@@ -11858,7 +12034,7 @@ async function installHeadlessRuntime(profile, options = {}, dependencies = {}) 
     const entries = await inspectTree(extracted, controller.signal, true);
     const binary = entries.find((entry) => entry.path === plan.executableRelative);
     if (binary?.kind !== "file" || !binary.executable) throw new Error("Verified runtime archive did not contain its expected executable.");
-    await writeFile2(join34(extracted, MANIFEST), JSON.stringify({ version: 1, runtimeVersion: plan.version, asset: plan.asset, archiveSha256: plan.sha256, entries }), { flag: "wx", mode: 384 });
+    await writeFile2(join35(extracted, MANIFEST), JSON.stringify({ version: 1, runtimeVersion: plan.version, asset: plan.asset, archiveSha256: plan.sha256, entries }), { flag: "wx", mode: 384 });
     controller.signal.throwIfAborted();
     try {
       await lstat3(root2);
@@ -11867,7 +12043,7 @@ async function installHeadlessRuntime(profile, options = {}, dependencies = {}) 
       if (!absent(error)) throw error;
     }
     await rename3(extracted, root2);
-    return join34(root2, plan.executableRelative);
+    return join35(root2, plan.executableRelative);
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", abort);
@@ -11882,7 +12058,7 @@ var init_guardian_runtime = __esm({
     MANIFEST = ".rein-runtime.json";
     MAX_ENTRIES = 2e4;
     MAX_EXPANDED = 16 * 1024 ** 3;
-    runtimeDirectory = () => join34(privateDirectory(), "guardian-runtime");
+    runtimeDirectory = () => join35(privateDirectory(), "guardian-runtime");
     absent = (error) => error.code === "ENOENT";
     runRuntimeArchiveCommand = (command, args, options) => {
       options.signal?.throwIfAborted();
@@ -11950,7 +12126,7 @@ import { spawn as spawn13 } from "node:child_process";
 import { request as request2 } from "node:http";
 import { createServer as createServer4 } from "node:net";
 import { accessSync as accessSync5, constants as constants19, existsSync as existsSync17, lstatSync as lstatSync17, mkdirSync as mkdirSync20, readFileSync as readFileSync23, realpathSync as realpathSync7, renameSync as renameSync13, statfsSync as statfsSync2, statSync as statSync7, unlinkSync as unlinkSync14, writeFileSync as writeFileSync20 } from "node:fs";
-import { delimiter as delimiter5, isAbsolute as isAbsolute7, join as join35, resolve as resolve26 } from "node:path";
+import { delimiter as delimiter5, isAbsolute as isAbsolute7, join as join36, resolve as resolve27 } from "node:path";
 function guardianBaseUrl(value) {
   let url;
   try {
@@ -12051,10 +12227,10 @@ function stopOwnedRuntimeAt(baseUrl) {
 }
 async function guardianPortAvailable(baseUrl) {
   const url = new URL(guardianBaseUrl(baseUrl));
-  return new Promise((resolve34) => {
+  return new Promise((resolve35) => {
     const server = createServer4();
-    server.once("error", () => resolve34(false));
-    server.listen({ host: url.hostname.replace(/^\[|\]$/g, ""), port: Number(url.port || 80), exclusive: true }, () => server.close(() => resolve34(true)));
+    server.once("error", () => resolve35(false));
+    server.listen({ host: url.hostname.replace(/^\[|\]$/g, ""), port: Number(url.port || 80), exclusive: true }, () => server.close(() => resolve35(true)));
   });
 }
 async function guardianStatus(options = {}, deps = {}) {
@@ -12130,7 +12306,7 @@ async function findRuntime(profile) {
   const cached = await verifyHeadlessRuntime(profile);
   if (cached) return cached;
   const candidates = [
-    ...(process.env.PATH ?? "").split(delimiter5).filter(Boolean).map((dir) => resolve26(dir, process.platform === "win32" ? "ollama.exe" : "ollama")),
+    ...(process.env.PATH ?? "").split(delimiter5).filter(Boolean).map((dir) => resolve27(dir, process.platform === "win32" ? "ollama.exe" : "ollama")),
     "/Applications/Ollama.app/Contents/Resources/ollama",
     "/usr/local/bin/ollama",
     "/usr/bin/ollama"
@@ -12147,7 +12323,7 @@ async function findRuntime(profile) {
 }
 async function runGuardianInstallCommand(command, args, opts) {
   opts.signal?.throwIfAborted();
-  return new Promise((resolve34, reject) => {
+  return new Promise((resolve35, reject) => {
     const child = spawn13(command, args, { shell: false, detached: process.platform !== "win32", stdio: "inherit", env: opts.env });
     let settled = false, closed = false, code = null, error, escalation;
     const kill = (signal) => {
@@ -12164,7 +12340,7 @@ async function runGuardianInstallCommand(command, args, opts) {
       opts.signal?.removeEventListener("abort", abort);
       if (error) reject(error);
       else if (code !== 0) reject(new Error(`Guardian installation command exited ${code}; rules-only mode remains available.`));
-      else resolve34();
+      else resolve35();
     };
     const stop = (reason2) => {
       if (error) return;
@@ -12193,7 +12369,7 @@ async function runGuardianInstallCommand(command, args, opts) {
   });
 }
 function guardianRuntimeOptions() {
-  return { home: autonomyHome(), cliPath: realpathSync7(resolve26(process.argv[1])), nodePath: process.execPath, kind: "guardian" };
+  return { home: autonomyHome(), cliPath: realpathSync7(resolve27(process.argv[1])), nodePath: process.execPath, kind: "guardian" };
 }
 function guardianRuntimeStatus() {
   return serviceStatus(guardianRuntimeOptions());
@@ -12202,7 +12378,7 @@ function stopGuardianRuntime() {
   return uninstallService(guardianRuntimeOptions());
 }
 function runtimeRecord() {
-  const path2 = join35(autonomyDirectory(), "guardian-runtime.json");
+  const path2 = join36(autonomyDirectory(), "guardian-runtime.json");
   if (lstatSync17(autonomyDirectory()).isSymbolicLink()) throw new Error("Invalid guardian runtime directory.");
   const stat3 = lstatSync17(path2);
   if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink !== 1 || stat3.size > 4096) throw new Error("Invalid guardian runtime record.");
@@ -12217,7 +12393,7 @@ async function startOwnedRuntime(executable2, signal, baseUrl = readGuardianConf
   if (running && running !== baseUrl) throw new Error("A guardian worker is already active at another endpoint. Run rein autonomy guardian disable before changing its port.");
   if (running === baseUrl) return true;
   if (!isAbsolute7(executable2) || /[\x00-\x1f\x7f]/.test(executable2)) throw new Error("Ollama executable must be an absolute local path.");
-  const path2 = join35(privateDirectory(), "guardian-runtime.json");
+  const path2 = join36(privateDirectory(), "guardian-runtime.json");
   if (existsSync17(path2)) {
     const stat3 = lstatSync17(path2);
     if (!stat3.isFile() || stat3.isSymbolicLink() || stat3.nlink !== 1 || stat3.size > 4096) throw new Error("Guardian runtime record must be a small private file.");
@@ -12244,7 +12420,7 @@ async function startOwnedRuntime(executable2, signal, baseUrl = readGuardianConf
 function guardianRuntimeEnvironment(baseUrl, inherited = process.env) {
   const env = {};
   for (const name of ["PATH", "LANG", "LC_ALL", "TMPDIR", "CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES", "NVIDIA_DRIVER_CAPABILITIES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"]) if (inherited[name]) env[name] = inherited[name];
-  const models = join35(privateDirectory(), "guardian-models"), home = join35(privateDirectory(), "guardian-home");
+  const models = join36(privateDirectory(), "guardian-models"), home = join36(privateDirectory(), "guardian-home");
   for (const directory2 of [models, home]) {
     mkdirSync20(directory2, { recursive: true, mode: 448 });
     if (!lstatSync17(directory2).isDirectory() || lstatSync17(directory2).isSymbolicLink()) throw new Error("Guardian storage must be an ordinary private directory.");
@@ -12312,7 +12488,7 @@ async function installGuardianModel(options = {}, deps = {}) {
         status2 = await guardianStatus({ probe: true, signal: options.signal, baseUrl: config.baseUrl }, deps);
         if (status2.runtimeAvailable) break;
         optsCheck(options);
-        if (attempt < 7) await new Promise((resolve34) => setTimeout(resolve34, 250));
+        if (attempt < 7) await new Promise((resolve35) => setTimeout(resolve35, 250));
       }
       if (!status2.runtimeAvailable) return { installed: false, detail: "The dedicated guardian service started but its runtime API is not ready. Rules-only coordination remains ready; no other server was used.", plan };
     }
@@ -12361,8 +12537,8 @@ var init_guardian = __esm({
     };
     GUARDIAN_LIMITS = { contextTokens: 2048, outputTokens: 192, timeoutMs: 2e4, keepAliveSeconds: 30, maxCandidates: 3, maxInputChars: 4200 };
     defaultGuardianConfig = () => ({ version: 1, mode: "rules", baseUrl: "http://127.0.0.1:11435", model: GUARDIAN_MODEL.tag });
-    configPath2 = () => join35(autonomyDirectory(), "guardian.json");
-    localGuardianRequest = (baseUrl, path2, opts = {}) => new Promise((resolve34, reject) => {
+    configPath2 = () => join36(autonomyDirectory(), "guardian.json");
+    localGuardianRequest = (baseUrl, path2, opts = {}) => new Promise((resolve35, reject) => {
       const origin = guardianBaseUrl(baseUrl);
       if (!["/api/tags", "/api/show", "/api/chat", "/api/pull", "/api/version"].includes(path2)) return reject(new Error("Unsupported guardian API operation."));
       if (opts.signal?.aborted) return reject(new Error("Guardian request cancelled."));
@@ -12373,7 +12549,7 @@ var init_guardian = __esm({
         settled = true;
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abort);
-        error ? reject(error) : resolve34(value);
+        error ? reject(error) : resolve35(value);
       };
       const req = request2(new URL(path2, origin), {
         method: opts.method ?? "GET",
@@ -12671,11 +12847,11 @@ async function runDaemon(signal) {
         const due = state.proposals.find((p) => p.status === "enabled" && p.nextRun !== void 0 && p.nextRun <= Date.now());
         await runCycle(due ? "routine" : "scan", due?.id, { signal: controller.signal });
       }
-      if (!controller.signal.aborted) await new Promise((resolve34) => {
+      if (!controller.signal.aborted) await new Promise((resolve35) => {
         const done = () => {
           clearTimeout(timer);
           controller.signal.removeEventListener("abort", done);
-          resolve34();
+          resolve35();
         };
         const timer = setTimeout(done, 15e3);
         controller.signal.addEventListener("abort", done, { once: true });
@@ -12713,7 +12889,7 @@ __export(command_exports, {
   serviceConfigurationIssue: () => serviceConfigurationIssue
 });
 import { realpathSync as realpathSync8 } from "node:fs";
-import { resolve as resolve27 } from "node:path";
+import { resolve as resolve28 } from "node:path";
 function serviceConfigurationIssue(config, env = process.env) {
   const provider = config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : void 0);
   const cli = provider === "codex" || provider === "copilot" || provider === "grok";
@@ -12754,7 +12930,7 @@ function numberOption(flags, name, min, max) {
   return n;
 }
 function autonomyServiceOptions() {
-  return { home: autonomyHome(), cliPath: realpathSync8(resolve27(process.argv[1])), nodePath: process.execPath };
+  return { home: autonomyHome(), cliPath: realpathSync8(resolve28(process.argv[1])), nodePath: process.execPath };
 }
 function requireServiceModelCompatibility(dependencies) {
   const status2 = (dependencies.status ?? serviceStatus)((dependencies.serviceOptions ?? autonomyServiceOptions)());
@@ -12882,7 +13058,7 @@ async function runAutonomyCommand(args, flags = {}, dependencies = {}) {
     return;
   }
   if (command === "unenroll") {
-    let workspace = resolve27(typeof flags.workspace === "string" ? flags.workspace : process.cwd());
+    let workspace = resolve28(typeof flags.workspace === "string" ? flags.workspace : process.cwd());
     try {
       workspace = canonicalWorkspace(workspace);
     } catch {
@@ -13042,8 +13218,8 @@ __export(onboarding_exports, {
   runOnboarding: () => runOnboarding,
   runProfileWizard: () => runProfileWizard
 });
-import { homedir as homedir21 } from "node:os";
-import { join as join36, resolve as resolve28 } from "node:path";
+import { homedir as homedir22 } from "node:os";
+import { join as join37, resolve as resolve29 } from "node:path";
 async function menu(prompt, log, question, choices, fallback = 1) {
   log(`
 ${question}`);
@@ -13220,15 +13396,15 @@ async function setupProactivity(getPrompt, releasePrompt, log, connected, depend
     return true;
   }
   log("Choose a folder for your notes, everyday tasks, or project whose Rein conversations may be used for suggestions. Git is not required. Avoid your entire home folder.");
-  const candidate = resolve28(process.cwd());
-  const defaultFolder = [resolve28(homedir21()), privateHome()].includes(candidate) ? void 0 : candidate;
+  const candidate = resolve29(process.cwd());
+  const defaultFolder = [resolve29(homedir22()), privateHome()].includes(candidate) ? void 0 : candidate;
   if (!defaultFolder) log("You are in a settings or home folder. Enter an existing working folder, or skip and run rein autonomy init from that folder later.");
   for (; ; ) {
     const answer = await prompt.ask(`Folder [${defaultFolder ?? "skip"}] (or skip): `, defaultFolder ?? "skip");
     if (answer.toLowerCase() === "skip") return true;
     let workspace;
     try {
-      workspace = canonicalWorkspace(answer.startsWith("~/") ? join36(homedir21(), answer.slice(2)) : resolve28(answer));
+      workspace = canonicalWorkspace(answer.startsWith("~/") ? join37(homedir22(), answer.slice(2)) : resolve29(answer));
     } catch (error) {
       log(error.message);
       continue;
@@ -13360,14 +13536,14 @@ var init_onboarding = __esm({
   "src/harness/onboarding.ts"() {
     init_budget_setup();
     init_models();
-    init_setup();
+    init_setup2();
     init_operator_profile();
     init_state();
     init_command();
     init_guardian();
     init_profile();
     init_tui();
-    privateHome = () => resolve28(process.env.REIN_HOME || join36(homedir21(), ".rein"));
+    privateHome = () => resolve29(process.env.REIN_HOME || join37(homedir22(), ".rein"));
     packIds = Object.keys(PACKS);
     firstTasks = {
       everyday: "Help me make one small part of today easier. Ask what feels hard to start, then help me choose one manageable next step.",
@@ -13387,7 +13563,7 @@ __export(terminal_exports, {
   watchActivity: () => watchActivity
 });
 import { emitKeypressEvents } from "node:readline";
-import { resolve as resolve29 } from "node:path";
+import { resolve as resolve30 } from "node:path";
 function renderActivity(snapshot, selected, width = 65, height = 36, controls = "\u2191\u2193 select \xB7 f follow \xB7 q quit") {
   const columns = Math.max(16, width), rows = Math.max(8, height);
   const lines = ["REIN / ACTIVITY", snapshot ? `${snapshot.state} \xB7 ${snapshot.model ?? ""}` : "Waiting for the session\u2026", controls, ""];
@@ -13482,7 +13658,7 @@ async function launchVisual(argv, cwd) {
   const id = newActivityId(), shells = new TmuxShells(cwd, "visual");
   const boundary = argv.indexOf("--");
   const args = argv.filter((arg, index) => boundary >= 0 && index > boundary || !/^--visual(?:=true|=false)?$/.test(arg));
-  const cli = [process.execPath, resolve29(process.argv[1])].map(shellQuote).join(" ");
+  const cli = [process.execPath, resolve30(process.argv[1])].map(shellQuote).join(" ");
   const prefix = `cd ${shellQuote(cwd)} && `;
   const session = await shells.start();
   try {
@@ -13600,13 +13776,13 @@ async function startCanvas(id) {
   });
   server.requestTimeout = 5e3;
   server.headersTimeout = 5e3;
-  await new Promise((resolve34, reject) => {
+  await new Promise((resolve35, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve34);
+    server.listen(0, "127.0.0.1", resolve35);
   });
   origin = `http://127.0.0.1:${server.address().port}`;
-  return { url: `${origin}/#${token2}`, close: () => new Promise((resolve34, reject) => {
-    server.close((error) => error ? reject(error) : resolve34());
+  return { url: `${origin}/#${token2}`, close: () => new Promise((resolve35, reject) => {
+    server.close((error) => error ? reject(error) : resolve35());
     server.closeAllConnections();
   }) };
 }
@@ -13682,7 +13858,7 @@ __export(debug_exports, {
   formatDebugReport: () => formatDebugReport
 });
 import { lstat as lstat4, readdir as readdir3, realpath as realpath2, open as open3 } from "node:fs/promises";
-import { resolve as resolve30 } from "node:path";
+import { resolve as resolve31 } from "node:path";
 function emptyCounts() {
   return {
     users: 0,
@@ -13721,10 +13897,10 @@ async function analyzeDebugFolder(folder) {
   }
 }
 async function readExport(folder) {
-  const root2 = await realpath2(resolve30(folder));
+  const root2 = await realpath2(resolve31(folder));
   let directory2;
   let files = [];
-  for (const path2 of [resolve30(root2, "sessions/raw"), resolve30(root2, "raw"), root2]) {
+  for (const path2 of [resolve31(root2, "sessions/raw"), resolve31(root2, "raw"), root2]) {
     try {
       if (await realpath2(path2) !== path2 || !(await lstat4(path2)).isDirectory()) continue;
       const entries = await readdir3(path2, { withFileTypes: true });
@@ -13742,7 +13918,7 @@ async function readExport(folder) {
   const perSession = [];
   let totalBytes = 0;
   for (const name of files) {
-    const path2 = resolve30(directory2, name);
+    const path2 = resolve31(directory2, name);
     if (await realpath2(path2) !== path2) throw new DebugInputError("Symlinked session files are not supported.");
     const handle = await open3(path2, "r");
     const counts = emptyCounts();
@@ -13884,8 +14060,8 @@ __export(doctor_exports, {
 });
 import { execFileSync as execFileSync4 } from "node:child_process";
 import { existsSync as existsSync18, lstatSync as lstatSync18, readFileSync as readFileSync24, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
-import { homedir as homedir22 } from "node:os";
-import { dirname as dirname16, join as join37 } from "node:path";
+import { homedir as homedir23 } from "node:os";
+import { dirname as dirname16, join as join38 } from "node:path";
 function checkNodeRuntime(version = process.versions.node) {
   const major = Number(version.split(".")[0]);
   const supported = Number.isSafeInteger(major) && major >= 18;
@@ -13936,7 +14112,7 @@ function sh2(cmd, opts = {}) {
 function gitRootOf(file2, maxDepth = 4) {
   let dir = existsSync18(file2) && statSync8(file2).isFile() ? dirname16(file2) : file2;
   for (let i = 0; i < maxDepth; i++) {
-    if (existsSync18(join37(dir, ".git"))) return dir;
+    if (existsSync18(join38(dir, ".git"))) return dir;
     const up = dirname16(dir);
     if (up === dir) return void 0;
     dir = up;
@@ -13948,7 +14124,7 @@ function newestMtime(dir) {
   const walk = (d) => {
     for (const entry of readdirSync6(d, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name === ".git") continue;
-      const p = join37(d, entry.name);
+      const p = join38(d, entry.name);
       if (entry.isDirectory()) walk(p);
       else newest = Math.max(newest, statSync8(p).mtimeMs);
     }
@@ -14029,10 +14205,10 @@ async function runDoctor(opts = {}) {
       let installedPackage = false;
       try {
         const packageRoot = dirname16(dirname16(real));
-        installedPackage = JSON.parse(readFileSync24(join37(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join37(packageRoot, "dist", "rein.js");
+        installedPackage = JSON.parse(readFileSync24(join38(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join38(packageRoot, "dist", "rein.js");
       } catch {
       }
-      const distOk = installedPackage || repo && existsSync18(join37(repo, "dist", "rein.js"));
+      const distOk = installedPackage || repo && existsSync18(join38(repo, "dist", "rein.js"));
       checks.push({
         name: "bin",
         status: distOk ? "ok" : "fail",
@@ -14062,7 +14238,7 @@ async function runDoctor(opts = {}) {
     }
   }
   if (repo) {
-    const bundle = join37(repo, "dist", "rein.js");
+    const bundle = join38(repo, "dist", "rein.js");
     if (!existsSync18(bundle)) {
       checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => {
         const r = sh2("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 6e4 });
@@ -14071,7 +14247,7 @@ async function runDoctor(opts = {}) {
       } });
     } else {
       const bundleMtime = statSync8(bundle).mtimeMs;
-      const srcMtime = newestMtime(join37(repo, "src"));
+      const srcMtime = newestMtime(join38(repo, "src"));
       const fresh = bundleMtime >= srcMtime;
       checks.push({
         name: "bundle",
@@ -14143,7 +14319,7 @@ async function runDoctor(opts = {}) {
   }
   try {
     const { statfsSync: statfsSync3 } = await import("node:fs");
-    const free = statfsSync3(homedir22()).bavail * statfsSync3(homedir22()).bsize;
+    const free = statfsSync3(homedir23()).bavail * statfsSync3(homedir23()).bsize;
     const GiB3 = free / 2 ** 30;
     checks.push({ name: "disk", status: GiB3 >= 1 ? "ok" : "warn", detail: `${GiB3.toFixed(1)} GiB free in $HOME` });
   } catch {
@@ -14211,7 +14387,7 @@ __export(loop_exports, {
 });
 import { execFileSync as execFileSync5 } from "node:child_process";
 import { existsSync as existsSync19, readFileSync as readFileSync25, appendFileSync as appendFileSync2, realpathSync as realpathSync10 } from "node:fs";
-import { join as join38, resolve as resolve31 } from "node:path";
+import { join as join39, resolve as resolve32 } from "node:path";
 import { randomUUID as randomUUID21 } from "node:crypto";
 function incompleteRunReason(messages) {
   const last = messages.filter((message) => message.role === "assistant").at(-1);
@@ -14259,7 +14435,7 @@ function requireCleanGit(cwd) {
   } catch {
     throw new Error("Autonomous keep/discard requires a Git repository with an initial commit");
   }
-  if (realpathSync10(root2) !== realpathSync10(resolve31(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
+  if (realpathSync10(root2) !== realpathSync10(resolve32(cwd))) throw new Error("Run autonomous keep/discard from the Git repository root");
   if (execFileSync5("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf8" }).trim()) {
     throw new Error("Working tree is dirty; commit or stash existing work before autonomous keep/discard");
   }
@@ -14270,7 +14446,7 @@ function discardIteration(cwd, expectedHead) {
   execFileSync5("git", ["clean", "-fd"], { cwd, stdio: "ignore" });
 }
 function recordLesson(cwd, text, commitMessage) {
-  appendFileSync2(join38(cwd, "LESSONS.md"), `
+  appendFileSync2(join39(cwd, "LESSONS.md"), `
 ${text}
 `);
   execFileSync5("git", ["add", "--", "LESSONS.md"], { cwd, stdio: "ignore" });
@@ -14281,8 +14457,8 @@ async function runExperimentLoop(opts, dependencies = {}) {
   const { maxTurns, maxIterations: maxIters } = resolveRunBudgets(loadConfig(), opts);
   const taskFile = opts.taskFile ?? "TASK.md";
   const metricFile = opts.metricFile ?? "METRIC.md";
-  const taskPath = join38(cwd, taskFile);
-  const metricPath = join38(cwd, metricFile);
+  const taskPath = join39(cwd, taskFile);
+  const metricPath = join39(cwd, metricFile);
   if (!existsSync19(taskPath)) {
     throw new Error(`No ${taskFile} in ${cwd} \u2014 write what to improve, then re-run.`);
   }
@@ -14407,17 +14583,17 @@ __export(improve_exports, {
 import { execFileSync as execFileSync6 } from "node:child_process";
 import { cpSync, existsSync as existsSync20, mkdtempSync as mkdtempSync2, readFileSync as readFileSync26, appendFileSync as appendFileSync3, rmSync as rmSync3 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
-import { join as join39, dirname as dirname17, resolve as resolve32 } from "node:path";
+import { join as join40, dirname as dirname17, resolve as resolve33 } from "node:path";
 import { fileURLToPath as fileURLToPath7 } from "node:url";
 import { randomUUID as randomUUID22 } from "node:crypto";
 function sh4(cmd, cwd) {
   return execFileSync6("bash", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
 }
 function runHarnessTests(repoDir) {
-  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join39(tmpdir5(), "rein-validation-")) : repoDir;
+  const dir = repoDir.split(/[\\/]/).includes("node_modules") ? mkdtempSync2(join40(tmpdir5(), "rein-validation-")) : repoDir;
   try {
     if (dir !== repoDir) for (const name of ["src", "test", "vendor", "package.json", "scripts"]) {
-      if (existsSync20(join39(repoDir, name))) cpSync(join39(repoDir, name), join39(dir, name), { recursive: true });
+      if (existsSync20(join40(repoDir, name))) cpSync(join40(repoDir, name), join40(dir, name), { recursive: true });
     }
     const output = execFileSync6(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
       cwd: dir,
@@ -14433,7 +14609,7 @@ function runHarnessTests(repoDir) {
   }
 }
 function harnessLessons(repoDir) {
-  const path2 = join39(repoDir, "LESSONS.md");
+  const path2 = join40(repoDir, "LESSONS.md");
   if (!existsSync20(path2)) return "";
   const text = readFileSync26(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
@@ -14502,7 +14678,7 @@ Continue: pick the next concrete weakness. Inspect current files; discarded edit
         const test = (dependencies.runTests ?? runHarnessTests)(repoDir);
         if (sh4("git rev-parse HEAD", repoDir) !== head) throw new Error("Test command changed Git HEAD; stopping without further changes");
         if (test.pass) {
-          appendFileSync3(join39(repoDir, "LESSONS.md"), `
+          appendFileSync3(join40(repoDir, "LESSONS.md"), `
 - [improve ${tag}] fixed: ${firstLine(report)}
 `);
           if (useGit) sh4(`git add -A && git commit -m "rein improve: ${tag} (auto)"`, repoDir);
@@ -14551,7 +14727,7 @@ var init_improve = __esm({
     init_models();
     init_run_budgets();
     here4 = dirname17(fileURLToPath7(import.meta.url));
-    REIN_REPO = [here4, resolve32(here4, ".."), resolve32(here4, "..", "..")].find((dir) => existsSync20(join39(dir, "test", "smoke.ts"))) ?? resolve32(here4, "..", "..");
+    REIN_REPO = [here4, resolve33(here4, ".."), resolve33(here4, "..", "..")].find((dir) => existsSync20(join40(dir, "test", "smoke.ts"))) ?? resolve33(here4, "..", "..");
   }
 });
 
@@ -14563,8 +14739,8 @@ __export(heartbeat_exports, {
   runHeartbeat: () => runHeartbeat
 });
 import { appendFileSync as appendFileSync4, existsSync as existsSync21, mkdirSync as mkdirSync21, readFileSync as readFileSync27, writeFileSync as writeFileSync21 } from "node:fs";
-import { homedir as homedir23 } from "node:os";
-import { isAbsolute as isAbsolute8, join as join40, resolve as resolve33 } from "node:path";
+import { homedir as homedir24 } from "node:os";
+import { isAbsolute as isAbsolute8, join as join41, resolve as resolve34 } from "node:path";
 function parseHeartbeat(text) {
   const tasks = [];
   let improveGoal;
@@ -14581,15 +14757,15 @@ function parseHeartbeat(text) {
   return { tasks, improveGoal };
 }
 function resolveHeartbeatFile(explicit) {
-  if (explicit) return isAbsolute8(explicit) ? explicit : resolve33(explicit);
-  const local = resolve33(process.cwd(), "HEARTBEAT.md");
+  if (explicit) return isAbsolute8(explicit) ? explicit : resolve34(explicit);
+  const local = resolve34(process.cwd(), "HEARTBEAT.md");
   if (existsSync21(local)) return local;
-  return join40(process.env.REIN_HOME || join40(homedir23(), ".rein"), "HEARTBEAT.md");
+  return join41(process.env.REIN_HOME || join41(homedir24(), ".rein"), "HEARTBEAT.md");
 }
 function logBeat(result2) {
-  const dir = process.env.REIN_HOME || join40(homedir23(), ".rein");
+  const dir = process.env.REIN_HOME || join41(homedir24(), ".rein");
   mkdirSync21(dir, { recursive: true });
-  const path2 = join40(dir, "heartbeat.log");
+  const path2 = join41(dir, "heartbeat.log");
   appendFileSync4(path2, JSON.stringify({
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     file: result2.file,
@@ -14607,7 +14783,7 @@ async function runHeartbeat(opts = {}, dependencies = {}) {
     if (!opts.quiet) console.log(s);
   };
   if (opts.init) {
-    const path2 = opts.file ? isAbsolute8(opts.file) ? opts.file : resolve33(opts.file) : resolve33(process.cwd(), "HEARTBEAT.md");
+    const path2 = opts.file ? isAbsolute8(opts.file) ? opts.file : resolve34(opts.file) : resolve34(process.cwd(), "HEARTBEAT.md");
     writeFileSync21(path2, HEARTBEAT_TEMPLATE);
     say(green(`wrote ${path2} \u2014 edit it, then run: rein heartbeat`));
     return 0;
@@ -14629,7 +14805,7 @@ ${bold("2/4 tasks")}`);
   const results = [];
   if (tasks.length === 0) {
     say(yellow("   idle \u2014 HEARTBEAT.md has no tasks (self-heal only)"));
-  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync21(join40(process.env.REIN_HOME || join40(homedir23(), ".rein"), "config.json"))) {
+  } else if (!opts.modelOverride && !process.env.REIN_BASE_URL && !existsSync21(join41(process.env.REIN_HOME || join41(homedir24(), ".rein"), "config.json"))) {
     say(red(`   ${tasks.length} task(s) queued but no model configured \u2014 run: rein setup`));
     for (const line of tasks) results.push({ line, ok: false, text: "", error: "no model configured" });
   } else {
@@ -15236,8 +15412,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
     if (!busy || approvalAnswer || typing || !text || key.ctrl || key.meta || ["return", "enter"].includes(key.name ?? "")) return;
     presentation.pauseForInput();
     typing = true;
-    typingDone = new Promise((resolve34) => {
-      resolveTyping = resolve34;
+    typingDone = new Promise((resolve35) => {
+      resolveTyping = resolve35;
     });
     rl.setPrompt(presentation.prompt());
     promptVisible = true;
@@ -15341,8 +15517,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
       presentation.flush();
       process.stdout.write(`
 [APPROVAL \xB7 TOOL ${toolActionType(name, args)}] approve ${bold(name)} ${dim(s.length > 100 ? s.slice(0, 100) + "\u2026" : s)} [y/N] `);
-      const line = await new Promise((resolve34) => {
-        approvalAnswer = resolve34;
+      const line = await new Promise((resolve35) => {
+        approvalAnswer = resolve35;
       });
       return /^y(es)?$/i.test(line.trim());
     });
@@ -15352,8 +15528,8 @@ tools: ${runner.toolsMode} (source: ${runner.toolsModeSource})`
   const ask = () => {
     if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift());
     if (inputClosed) return Promise.resolve(null);
-    return new Promise((resolve34) => {
-      resolveLine = (line) => resolve34(line);
+    return new Promise((resolve35) => {
+      resolveLine = (line) => resolve35(line);
       if (!rl.closed && process.stdin.isTTY && process.stdout.isTTY) {
         rl.setPrompt(presentation.prompt());
         promptVisible = true;
@@ -15657,11 +15833,11 @@ async function main(argv = process.argv.slice(2)) {
     console.log(`${mobile ? "rein-kla\u028Ad mobile gateway" : "rein-kla\u028Ad"} is listening at ${handle.url}`);
     console.log(mobile && "tokenFile" in handle && handle.tokenFile ? `The reusable mobile bearer token is stored at ${handle.tokenFile}.` : "The bearer token is in $REIN_HOME/klaud/serve-<port>.token, default ~/.rein.");
     if (mobile && "trustedOrigin" in handle && handle.trustedOrigin) console.log(`The configured private-mesh origin is ${handle.trustedOrigin}.`);
-    await new Promise((resolve34, reject) => {
+    await new Promise((resolve35, reject) => {
       const stop = () => {
         process.removeListener("SIGINT", stop);
         process.removeListener("SIGTERM", stop);
-        handle.close().then(resolve34, reject);
+        handle.close().then(resolve35, reject);
       };
       process.once("SIGINT", stop);
       process.once("SIGTERM", stop);
@@ -15733,11 +15909,11 @@ async function main(argv = process.argv.slice(2)) {
     const canvas = await startCanvas2(_[1]);
     console.log(canvas.url);
     if (flags.browser === true && flags["no-browser"] !== true) openCanvas2(canvas.url);
-    await new Promise((resolve34) => {
+    await new Promise((resolve35) => {
       const stop = () => {
         process.off("SIGINT", stop);
         process.off("SIGTERM", stop);
-        void canvas.close().finally(resolve34);
+        void canvas.close().finally(resolve35);
       };
       process.on("SIGINT", stop);
       process.on("SIGTERM", stop);
@@ -15910,7 +16086,7 @@ config \u2192 ${JSON.stringify({ model: config.model, baseUrl: config.baseUrl, s
     if (auth !== void 0 && auth !== "api-key" && auth !== "cli") throw new Error("--auth must be api-key or cli");
     const cliProvider = stringFlag(flags, "cli-provider");
     if (cliProvider !== void 0 && cliProvider !== "codex" && cliProvider !== "copilot" && cliProvider !== "grok") throw new Error("--cli-provider must be codex, copilot, or grok");
-    const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup(), setup_exports));
+    const { runSetup: runSetup2 } = await Promise.resolve().then(() => (init_setup2(), setup_exports));
     const { runOnboarding: runOnboarding2 } = await Promise.resolve().then(() => (init_onboarding(), onboarding_exports));
     const setup = flags["connection-only"] === true || flags.yes === true || flags.status === true ? runSetup2 : runOnboarding2;
     const code = await setup({
