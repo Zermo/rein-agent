@@ -3591,6 +3591,14 @@ async function runSetup(opts = {}, dependencies = {}) {
     for (const secret of secrets) text = text.split(secret).join("[redacted]");
     logRaw(text);
   };
+  const safeDisplayUrl = (value) => {
+    try {
+      const parsed = new URL(value);
+      return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return "[invalid-url]";
+    }
+  };
   const keyFor2 = dependencies.keyFor ?? apiKeyFor;
   const detect = dependencies.detect ?? detectEndpoint;
   const connection = dependencies.connection ?? testConnection;
@@ -3755,7 +3763,7 @@ Install with: ${info.installCommand}`);
     if (!key && !opts.yes) {
       const url = API_KEY_PAGES[provider];
       if (url) {
-        log(`Create an API key: ${url}`);
+        log(`Create an API key: ${safeDisplayUrl(url)}`);
         if (!opts.noBrowser && !await (dependencies.openBrowser ?? openBrowser)(url)) log("Browser could not open. Use the URL above on this or another device.");
       }
       key = await getPrompt().secret(cloud ? "API key (hidden): " : "API key if required (hidden; Enter for none): ");
