@@ -11,7 +11,7 @@
  * made self-healing — it feeds `rein heartbeat`, the self-sustaining loop.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { dim, green, red, yellow } from "../util/ansi.ts";
@@ -89,9 +89,9 @@ export function formatDoctorCheck(check: DoctorCheck, silent = true): string | u
 	return `  ${mark} ${check.name.padEnd(10)} ${check.detail}${fix}${compatibility}`;
 }
 
-function sh(cmd: string, opts: { input?: string; timeout?: number } = {}): { out: string; err: string } {
+function run(command: string, args: string[], opts: { timeout?: number } = {}): { out: string; err: string } {
 	try {
-		const out = execFileSync("sh", ["-c", cmd], {
+		const out = execFileSync(command, args, {
 			encoding: "utf8",
 			timeout: opts.timeout ?? 15_000,
 			stdio: ["pipe", "pipe", "pipe"],
@@ -177,7 +177,7 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 	let binPath: string | undefined;
 	let repo: string | undefined;
 	{
-		const { out } = sh("command -v rein");
+		const { out } = run("sh", ["-c", "command -v rein"]);
 		binPath = out.trim() || undefined;
 		if (!binPath) {
 			checks.push({ name: "bin", status: "fail", detail: "rein not on PATH", fix: "curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash" });
@@ -203,8 +203,8 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 
 	// 3. repo fresh vs origin
 	if (repo) {
-		const local = sh("git -C " + JSON.stringify(repo) + " rev-parse HEAD").out.trim();
-		const remote = sh("git -C " + JSON.stringify(repo) + " ls-remote origin main", { timeout: 10_000 });
+		const local = run("git", ["-C", repo, "rev-parse", "HEAD"]).out.trim();
+		const remote = run("git", ["-C", repo, "ls-remote", "origin", "main"], { timeout: 10_000 });
 		if (remote.err) {
 			checks.push({ name: "repo", status: "warn", detail: `@ ${local.slice(0, 7)} (offline — could not compare to origin)` });
 		} else {
@@ -215,7 +215,7 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 				detail: `local ${local.slice(0, 7)} / origin ${remoteSha?.slice(0, 7) ?? "?"}`,
 				fix: remoteSha && remoteSha !== local ? "git -C " + repo + " pull --ff-only" : undefined,
 				autoFix: async () => {
-					const r = sh("git -C " + JSON.stringify(repo) + " pull --ff-only", { timeout: 30_000 });
+					const r = run("git", ["-C", repo!, "pull", "--ff-only"], { timeout: 30_000 });
 					if (r.err) throw new Error(r.err);
 					return "git pull --ff-only";
 				},
@@ -227,7 +227,7 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 	if (repo) {
 		const bundle = join(repo, "dist", "rein.js");
 		if (!existsSync(bundle)) {
-			checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => { const r = sh("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 60_000 }); if (r.err) throw new Error(r.err); return "npm run bundle"; } });
+			checks.push({ name: "bundle", status: "fail", detail: "dist/rein.js missing", fix: "npm run bundle", autoFix: async () => { const r = run("npm", ["run", "bundle", "--prefix", repo!], { timeout: 60_000 }); if (r.err) throw new Error(r.err); return "npm run bundle"; } });
 		} else {
 			const bundleMtime = statSync(bundle).mtimeMs;
 			const srcMtime = newestMtime(join(repo, "src"));
@@ -237,7 +237,7 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 				status: fresh ? "ok" : "fail",
 				detail: fresh ? "dist is current" : "dist is older than src",
 				fix: fresh ? undefined : "npm run bundle",
-				autoFix: fresh ? undefined : async () => { const r = sh("npm run bundle --prefix " + JSON.stringify(repo), { timeout: 60_000 }); if (r.err) throw new Error(r.err); return "npm run bundle"; },
+				autoFix: fresh ? undefined : async () => { const r = run("npm", ["run", "bundle", "--prefix", repo!], { timeout: 60_000 }); if (r.err) throw new Error(r.err); return "npm run bundle"; },
 			});
 		}
 	}
@@ -295,7 +295,7 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 			status: (mode & 0o077) === 0 ? "ok" : "warn",
 			detail: `config mode ${mode.toString(8)} (apiKey present)`,
 			fix: (mode & 0o077) === 0 ? undefined : "chmod 600 " + cfgPath,
-			autoFix: (mode & 0o077) === 0 ? undefined : async () => { const r = sh(`chmod 600 ${JSON.stringify(cfgPath)}`); if (r.err) throw new Error(r.err); return "chmod 600 " + cfgPath; },
+			autoFix: (mode & 0o077) === 0 ? undefined : async () => { chmodSync(cfgPath, 0o600); return "chmod 600 " + cfgPath; },
 		});
 	}
 

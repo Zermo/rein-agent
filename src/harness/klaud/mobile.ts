@@ -234,16 +234,22 @@ function requestBody(req: IncomingMessage): Promise<Record<string, unknown>> {
 	});
 }
 
+/** Bind validation permits one scope delimiter and an unreserved zone identifier. */
+function uriIPv6Host(host: string): string {
+	const zoneAt = host.indexOf("%");
+	return zoneAt === -1 ? host : `${host.slice(0, zoneAt)}%25${host.slice(zoneAt + 1)}`;
+}
+
 function displayUrl(host: string, port: number): string {
 	const suffix = port === 80 ? "" : `:${port}`;
-	if (isIP(host.split("%")[0]) === 6) return `http://[${host.replace("%", "%25")}]${suffix}`;
+	if (isIP(host.split("%")[0]) === 6) return `http://[${uriIPv6Host(host)}]${suffix}`;
 	return `http://${host}${suffix}`;
 }
 
 function authorities(host: string, port: number): Set<string> {
 	const suffixes = port === 80 ? ["", ":80"] : [`:${port}`];
 	if (isIP(host.split("%")[0]) !== 6) return new Set(suffixes.map(suffix => host + suffix));
-	return new Set(suffixes.flatMap(suffix => [`[${host}]${suffix}`, `[${host.replace("%", "%25")}]${suffix}`]));
+	return new Set(suffixes.flatMap(suffix => [`[${host}]${suffix}`, `[${uriIPv6Host(host)}]${suffix}`]));
 }
 
 function origins(host: string, port: number, protocol = "http"): Set<string> {

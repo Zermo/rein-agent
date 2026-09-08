@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer, request } from "node:http";
+import { createServer, request, Server } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,6 +73,41 @@ test("mobile bind validation allows private interfaces and refuses wildcard, hos
 	assert.equal(validateMobileBindHost("0:0:0:0:0:0:0:1"), "::1");
 	for (const host of ["0.0.0.0", "::", "localhost", "8.8.8.8", "203.0.113.10", "2001:4860:4860::8888", "fd12:3456::8%en0", " 127.0.0.1"] ) {
 		assert.throws(() => validateMobileBindHost(host), /explicit numeric|only to|scope identifier/);
+	}
+});
+
+test("scoped IPv6 bind validation preserves one raw zone and rejects malformed delimiters", () => {
+	assert.equal(validateMobileBindHost("FE80:0:0:0:0:0:0:8%en-test.0"), "fe80::8%en-test.0");
+	assert.equal(validateMobileBindHost("fe80::8%25"), "fe80::8%25", "a numeric zone is not URI-decoded");
+	for (const host of ["fe80::8%", "fe80::8%en0%en1", "fe80::8%25en0%25en1", "fe80::8%en/0", "fe80::8%en 0", "fe80::8%en0#", "fe80::8%" + "a".repeat(65), "127.0.0.1%en0", "::1%en0"]) {
+		assert.throws(() => validateMobileBindHost(host), /explicit numeric|scope identifier/);
+	}
+});
+
+test("scoped IPv6 gateway URLs encode the zone delimiter and keep exact Host and Origin allowlists", async t => {
+	const host = "fe80::8%en-test.0";
+	const listen = Server.prototype.listen;
+	// Keep this fixture portable: only replace the OS bind with loopback, then
+	// exercise the gateway's real URL formatting and request authentication.
+	t.mock.method(Server.prototype, "listen", function (this: Server, ...args: any[]) {
+		if (args[1] === host) args[1] = "127.0.0.1";
+		return Reflect.apply(listen, this, args);
+	});
+	const server = await fixture(t, { host: "FE80:0:0:0:0:0:0:8%en-test.0" });
+	const port = server.url.slice(server.url.lastIndexOf(":") + 1);
+	assert.equal(server.url, `http://[fe80::8%25en-test.0]:${port}`);
+	const status = (authority: string, origin = `http://${authority}`) => new Promise<number | undefined>((resolve, reject) => {
+		const req = request(`http://127.0.0.1:${port}/v1/mobile/health`, {
+			headers: { Host: authority, Origin: origin, Authorization: `Bearer ${server.token}` },
+		}, response => { response.resume(); resolve(response.statusCode); });
+		req.on("error", reject); req.end();
+	});
+	const encoded = `[fe80::8%25en-test.0]:${port}`, raw = `[fe80::8%en-test.0]:${port}`;
+	assert.equal(await status(encoded), 200);
+	assert.equal(await status(raw), 200);
+	for (const authority of [`[fe80::8%en-test.0%other]:${port}`, `[fe80::8%2525en-test.0]:${port}`, `[fe80::8%25other]:${port}`, `[fe80::9%25en-test.0]:${port}`]) {
+		assert.equal(await status(authority), 403);
+		assert.equal(await status(encoded, `http://${authority}`), 403);
 	}
 });
 
