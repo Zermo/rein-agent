@@ -73,16 +73,19 @@ test("tests refuse to launch the real trainer without the fake-bin override", ()
 	assert.equal(existsSync(marker), false);
 }));
 
-test("a training deadline kills TERM-resistant descendants and restores signal listeners", { timeout: 8000, skip: process.platform === "win32" }, () => fixture(async ({ script, dir }) => {
+test("a training deadline kills TERM-resistant descendants and restores signal listeners", { timeout: 20_000, skip: process.platform === "win32" }, () => fixture(async ({ script, dir }) => {
 	const escaped = join(dir, "escaped"), ready = join(dir, "ready");
-	const descendant = "process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(" + JSON.stringify(ready) + ",'ready');setTimeout(()=>require('node:fs').writeFileSync(" + JSON.stringify(escaped) + ",'escaped'),1200);setInterval(()=>{},1000);";
+	// The deadline must leave time for both real Node fixtures to start under
+	// suite load. The later marker still proves resistant descendants were killed.
+	const timeoutMs = 5000, escapeDelayMs = timeoutMs + 1200;
+	const descendant = "process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(" + JSON.stringify(ready) + ",'ready');setTimeout(()=>require('node:fs').writeFileSync(" + JSON.stringify(escaped) + ",'escaped')," + escapeDelayMs + ");setInterval(()=>{},1000);";
 	script("require('node:child_process').spawn(process.execPath,['-e'," + JSON.stringify(descendant) + "],{stdio:'ignore'}); setInterval(()=>{},1000);");
-	process.env.REIN_TRAIN_TIMEOUT_MS = "600";
+	process.env.REIN_TRAIN_TIMEOUT_MS = String(timeoutMs);
 	const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
 	const result = await runTrain("recipe.yaml");
-	assert.equal(existsSync(ready), true); assert.equal(result.code, 124); assert.match(result.log, /timed out.*600/);
+	assert.equal(existsSync(ready), true); assert.equal(result.code, 124); assert.match(result.log, /timed out.*5000/);
 	assert.deepEqual([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")], before);
-	await new Promise(resolve => setTimeout(resolve, 1300)); assert.equal(existsSync(escaped), false);
+	await new Promise(resolve => setTimeout(resolve, escapeDelayMs + 100)); assert.equal(existsSync(escaped), false);
 }));
 
 test("SIGINT cancels the owned training process and returns exit 130", { timeout: 8000, skip: process.platform === "win32" }, () => fixture(async ({ script, dir }) => {
