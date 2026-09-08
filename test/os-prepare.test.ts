@@ -18,8 +18,12 @@ async function fixture(t: any) {
 	await mkdir(join(root, "vendor/meat"), { recursive: true });
 	await mkdir(join(root, "src/os/assets/rain"), { recursive: true });
 	await mkdir(join(root, "src/os/assets/skins"), { recursive: true });
+	await mkdir(join(root, "apps/klaud"), { recursive: true });
 	for (const path of OS_THEME_FILES) await writeFile(join(root, path), await readFile(new URL(`../${path}`, import.meta.url)));
 	for (const path of OS_SKIN_FILES) await writeFile(join(root, path), await readFile(new URL(`../${path}`, import.meta.url)));
+	await writeFile(join(root, "apps/klaud/main.mjs"), "// fixture klaudbot app entry\n");
+	await writeFile(join(root, "apps/klaud/index.html"), "<html>fixture</html>\n");
+	await writeFile(join(root, "apps/klaud/package.json"), JSON.stringify({ name: "@rein/klaud", main: "main.mjs" }));
 	await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.2.3", secret: "must-not-export" }));
 	await writeFile(join(root, "dist/rein.js"), 'console.log("fixture-rein", process.argv.slice(2).join("|"));\n');
 	await writeFile(join(root, "dist/meat-worker.js"), "// fixture worker\n");
@@ -38,6 +42,8 @@ test("export produces an offline verifiable overlay, not a bootable image", asyn
 	assert.equal(result.manifest.omarchy.commit, "346e69e1cec6c4e8924531874af6ba010a1bc99e");
 	assert.equal(result.manifest.rainmeter.license, "GPL-2.0");
 	assert.match(result.manifest.rainmeter.commit, /^[0-9a-f]{40}$/);
+	const app = result.manifest.files.find(entry => entry.path === "apps/klaud/main.mjs");
+	assert.ok(app && /^[a-f0-9]{64}$/.test(app.sha256), "the klaudbot app entry ships in the kit payload");
 	assert.ok(result.files.includes("install-overlay.mjs"));
 	assert.ok(result.files.includes("fetch-upstream.mjs"));
 	assert.doesNotMatch(await readFile(join(f.output, "payload/package.json"), "utf8"), /secret|must-not-export/);
@@ -50,6 +56,10 @@ test("export produces an offline verifiable overlay, not a bootable image", asyn
 	assert.match(readme, /not a bootable image/);
 	assert.match(readme, /rein os rain --animate/);
 	assert.match(readme, /never selects a wallpaper/);
+	assert.match(readme, /The full Rein system/);
+	assert.match(readme, /rein-kla\u028ad/);
+	assert.match(readme, /rein serve/);
+	assert.match(readme, /bot mode/);
 });
 
 test("existing outputs and payload symlinks are never overwritten or followed", async t => {
@@ -145,6 +155,7 @@ test("bootstrap installs only fixture user files, starts a valid launcher, and p
 	assert.equal(await readFile(join(user, ".rein/config.json"), "utf8"), "preserve-me");
 	assert.equal(await readFile(join(user, ".config/omarchy/themes/existing/theme.json"), "utf8"), "existing-desktop-theme");
 	for (const path of OS_THEME_FILES) assert.deepEqual(await readFile(join(user, ".local/share/rein-os", path)), await readFile(join(f.root, path)));
+	assert.deepEqual(await readFile(join(user, ".local/share/rein-os/apps/klaud/main.mjs"), "utf8"), "// fixture klaudbot app entry\n");
 	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
 	assert.deepEqual(await readFile(join(user, ".local/share/rein-os/dareecho-release"), "utf8"), JSON.stringify(release, null, 2) + "\n");
 });
@@ -237,6 +248,11 @@ test("the ChromeOS bootstrap installs chronos user files only, and preserves use
 	assert.equal(await readFile(join(user, "Documents/note.md"), "utf8"), "preserve-me");
 	assert.equal(await readFile(join(user, ".local/share/myfiles-marker"), "utf8"), "user-data");
 	for (const path of OS_THEME_FILES) assert.deepEqual(await readFile(join(user, ".local/share/rein-os", path)), await readFile(join(f.root, path)));
+	assert.match((await exec(process.execPath, [join(user, ".local/bin/dareecho")], { env })).stdout, /Dareecho 1\.2\.3 \(base: ChromeOS 132\.0\.6834\.0\)/);
+	const crosRelease = JSON.parse(await readFile(join(user, ".local/share/rein-os/dareecho-release"), "utf8"));
+	assert.equal(crosRelease.base.name, "ChromeOS");
+	assert.ok(!("omarchy" in crosRelease.pins), "the ChromeOS identity pins the toolkits, not Omarchy");
+	assert.deepEqual(await readFile(join(user, ".local/share/rein-os/apps/klaud/main.mjs"), "utf8"), "// fixture klaudbot app entry\n");
 	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
 });
 

@@ -9,7 +9,8 @@ import { RAINMETER_BASE } from "./rainmeter.ts";
 
 export const OS_THEME_FILES = ["src/os/assets/rain/theme.json", "src/os/assets/rain/wallpaper.svg"] as const;
 export const OS_SKIN_FILES = ["src/os/assets/skins/dareecho.ini"] as const;
-const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES, ...OS_SKIN_FILES];
+export const OS_APP_FILES = ["apps/klaud/main.mjs"] as const;
+const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES, ...OS_SKIN_FILES, ...OS_APP_FILES];
 const VENDOR = ["meat", "mattpocock", "ponytail", "unlazy", "obscura", "fold", "pi-posthorse"];
 export type OSTarget = "omarchy" | "chromeos";
 export interface OSKitManifest {
@@ -58,9 +59,9 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 	const pkg = JSON.parse((await regularFile(join(root, "package.json"))).toString("utf8"));
 	if (typeof pkg.version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?$/.test(pkg.version)) throw new Error("The Rein package version is invalid.");
 	const payload = new Map<string, Buffer>();
-	for (const directory of ["src", "src/os", "src/os/assets", "src/os/assets/rain", "src/os/assets/skins"]) {
+	for (const directory of ["src", "src/os", "src/os/assets", "src/os/assets/rain", "src/os/assets/skins", "apps", "apps/klaud"]) {
 		const stat = await lstat(join(root, directory));
-		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("OS theme assets must be in ordinary payload directories without symlinks.");
+		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("OS theme assets and the klaudbot app must be in ordinary payload directories without symlinks.");
 	}
 	for (const path of REQUIRED) payload.set(path, await regularFile(join(root, path)));
 	const visit = async (relative: string) => {
@@ -77,6 +78,7 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 		try { await lstat(join(root, "vendor", name)); } catch (error: any) { if (error.code === "ENOENT") continue; throw error; }
 		await visit(`vendor/${name}`);
 	}
+	await visit("apps/klaud");
 	// Package metadata only; local scripts, configuration, account data and sessions never enter a kit.
 	payload.set("package.json", Buffer.from(JSON.stringify({ name: "rein-agent", version: pkg.version, type: "module", engines: { node: ">=18" } }, null, 2) + "\n"));
 	const manifest: OSKitManifest = {
@@ -160,7 +162,7 @@ async function verifyPayload() {
     if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
     result.push([entry.path, data]);
   }
-  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini', 'apps/klaud/main.mjs']) if (!seen.has(name)) fail('Required payload missing: ' + name);
   return result;
 }
 export async function main(args) {
@@ -262,23 +264,27 @@ async function verifyPayload() {
     if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
     result.push([entry.path, data]);
   }
-  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini', 'apps/klaud/main.mjs']) if (!seen.has(name)) fail('Required payload missing: ' + name);
   return result;
 }
 export async function main(args) {
   if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-chromeos.mjs --verify | --check | --install');
-  if (args[0] === '--help') { console.log('Dareecho ChromeOS userland overlay. Verify checks the exported files; check validates the ChromeOS user; install creates a new user-local terminal installation. The verified root and A/B partitions are not touched.'); return; }
+  if (args[0] === '--help') { console.log('Dareecho ChromeOS userland kit. Verify checks the exported files; check validates the ChromeOS user; install creates a new user-local Dareecho installation with its OS identity. The verified root and A/B partitions are not touched.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = await chromeosUserHome();
   // REIN_OS_OSRELEASE exists so this kit can be tested on non-ChromeOS staging hosts.
   const osRelease = await readFile(process.env.REIN_OS_OSRELEASE || '/etc/os-release', 'utf8').catch(() => '');
   validateTarget(process.platform, osRelease);
+  const baseVersion = (osRelease.match(/^(?:CROS_RELEASE|CHROME_RELEASE)=(.+)$/m) || [])[1]?.trim() || 'chromeos';
   const destination = join(userHome, '.local/share/rein-os');
   const launcher = join(userHome, '.local/bin/rein');
+  const identity = join(userHome, '.local/bin/dareecho');
   await absent(destination);
   await absent(launcher);
+  await absent(identity);
   if (args[0] === '--check') { console.log('REIN_OS_TARGET_READY'); return; }
+  const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
   await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
   await mkdir(dirname(launcher), { recursive: true, mode: 0o700 });
   await mkdir(destination, { mode: 0o700 });
@@ -290,7 +296,10 @@ export async function main(args) {
   const entry = join(destination, 'dist/rein.js');
   const wrapper = '#!/usr/bin/env node\n' + 'import("node:child_process").then(({spawn})=>{\n' + 'const child=spawn(process.execPath,[' + JSON.stringify(entry) + ',...process.argv.slice(2)],{stdio:"inherit"});\n' + 'child.on("error",e=>{console.error(e.message);process.exitCode=1});\nchild.on("exit",(code,signal)=>{if(signal)process.kill(process.pid,signal);else process.exitCode=code??1});\n});\n';
   await writeFile(launcher, wrapper, { flag: 'wx', mode: 0o700 });
-  console.log('REIN_OS_CHROMEOS_INSTALLED\nRun ~/.local/bin/rein --version, then ~/.local/bin/rein setup. Your ChromeOS user data, verified root, and A/B partitions are untouched.');
+  await writeFile(join(destination, 'dareecho-release'), JSON.stringify({ name: 'Dareecho', version: manifest.reinVersion, base: { name: 'ChromeOS', installed: baseVersion }, pins: { argent: manifest.argent, rainmeter: manifest.rainmeter } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  const dareechoScript = '#!/usr/bin/env node\n' + 'import("node:fs/promises").then(({readFile})=>{readFile((process.env.HOME||"") + "/.local/share/rein-os/dareecho-release", "utf8").then(text=>{const release=JSON.parse(text);if(process.argv[2]==="--json"){console.log(JSON.stringify(release,null,2));}else{console.log(release.name+" "+release.version+" (base: "+release.base.name+" "+release.base.installed+")");}}).catch(error=>{console.error("Dareecho installation not found: "+error.message);process.exitCode=1;});});\n';
+  await writeFile(identity, dareechoScript, { flag: 'wx', mode: 0o700 });
+  console.log('REIN_OS_CHROMEOS_INSTALLED\nThe user now identifies as Dareecho. Run ~/.local/bin/dareecho for the OS identity, then ~/.local/bin/rein --version and ~/.local/bin/rein setup. Your ChromeOS user data, verified root, and A/B partitions are untouched.');
 }
 const invoked = process.argv[1] && await realpath(process.argv[1]).catch(() => '');
 if (invoked === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
@@ -363,6 +372,18 @@ The payload also ships the terminal skin engine (Rainmeter rebuild) and the Arge
 \`\`\`
 
 Skins render in the current terminal only; the terminal device provider drives a persistent tmux pane. Neither starts a service, and device targets (iOS, Android, TV, desktop) remain parity gates until driven end to end on real hardware.
+
+## The full Rein system
+
+Dareecho is the full Rein takeover — three tiers on one machine:
+
+| Tier | Component | What it is | Here |
+| --- | --- | --- | --- |
+| agent | rein-agent | CLI agent, always-running gateway (\`rein serve\`), bots, tmux harness | included in this kit |
+| gui | rein-klaʊd | the GUI for the gateway, with bot mode | app source at \`~/.local/share/rein-os/apps/klaud\`; running it inside ChromeOS needs a validated runtime — a gate |
+| os | Dareecho | userland OS identity (the verified root stays ChromeOS) | \`~/.local/bin/dareecho\`, \`dareecho-release\` |
+
+The agent tier runs in the \`arc\` shell exactly as on the VM: \`~/.local/bin/rein serve --port 4317\` for the loopback gateway with bots. The GUI is the parity gate on this target.
 
 ## Acceptance gates before treating ChromeOS as a supported target
 
@@ -466,6 +487,25 @@ The same bundle carries the Argent device toolkit (pinned Apache-2.0 upstream, r
 \`\`\`
 
 The terminal provider drives a persistent Rein tmux pane (type, key, screenshot, capture-text). iOS, Android, TV and desktop targets are parity gates: the contract and flows are device-agnostic, and a target counts as supported only once a real device has been driven end to end.
+
+## The full Rein system
+
+Dareecho is the full Rein takeover — three tiers on one machine:
+
+| Tier | Component | What it is | Here |
+| --- | --- | --- | --- |
+| agent | rein-agent | CLI agent, always-running gateway (\`rein serve\`), bots, tmux harness | included in this kit |
+| gui | rein-klaʊd | the GUI for the gateway, with bot mode | app source at \`~/.local/share/rein-os/apps/klaud\`; an Electron runtime for Linux is a gate. On macOS the published app connects to \`rein serve\` |
+| os | Dareecho | clean install with OS identity | \`~/.local/bin/dareecho\`, \`dareecho-release\` |
+
+Run the stack in the VM (the gateway is the always-running part; nothing here is a background service until you start it):
+
+\`\`\`sh
+~/.local/bin/rein serve --port 4317     # loopback AG-UI gateway: agent + bots
+~/.local/bin/rein serve --mobile --host <private-ip> --port 4318   # opt-in device gateway
+\`\`\`
+
+The gateway API is HTTP on loopback: \`/health\`, \`/state\`, \`/bots\` (list and create bot identities), \`/bots/<id>/messages\`, \`/run\`. Bots are named persistent agent identities with their own stored conversations — that is the bot mode the GUI displays. The macOS app (apps/klaud, published separately) renders the same gateway; the app source in this kit is the reviewed reference for that GUI, and driving it on Linux needs a validated Electron runtime before it counts.
 
 ## Acceptance gates before making a reusable image
 
