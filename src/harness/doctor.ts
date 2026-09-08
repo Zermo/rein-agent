@@ -89,7 +89,7 @@ export function formatDoctorCheck(check: DoctorCheck, silent = true): string | u
 	return `  ${mark} ${check.name.padEnd(10)} ${check.detail}${fix}${compatibility}`;
 }
 
-function run(command: string, args: string[], opts: { timeout?: number } = {}): { out: string; err: string } {
+function run(command: "git" | "npm", args: string[], opts: { timeout?: number } = {}): { out: string; err: string } {
 	try {
 		const out = execFileSync(command, args, {
 			encoding: "utf8",
@@ -177,8 +177,12 @@ export async function runDoctor(opts: { fix?: boolean; quiet?: boolean; silent?:
 	let binPath: string | undefined;
 	let repo: string | undefined;
 	{
-		const { out } = run("sh", ["-c", "command -v rein"]);
-		binPath = out.trim() || undefined;
+		// Keep this fixed shell builtin separate from commands with path arguments.
+		try {
+			binPath = execFileSync("sh", ["-c", "command -v rein"], {
+				encoding: "utf8", timeout: 15_000, stdio: ["pipe", "pipe", "pipe"],
+			}).trim() || undefined;
+		} catch { /* Not installed or unavailable on PATH. */ }
 		if (!binPath) {
 			checks.push({ name: "bin", status: "fail", detail: "rein not on PATH", fix: "curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash" });
 		} else {
