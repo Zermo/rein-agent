@@ -170,6 +170,14 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 	if (config.apiKey) secrets.add(config.apiKey);
 	for (const name of ["REIN_API_KEY", ...Object.values(PROVIDER_PRESETS).map(p => p.keyEnv)]) if (process.env[name]) secrets.add(process.env[name]!);
 	const log = (text: string) => { for (const secret of secrets) text = text.split(secret).join("[redacted]"); logRaw(text); };
+	const safeDisplayUrl = (value: string) => {
+		try {
+			const parsed = new URL(value);
+			return `${parsed.origin}${parsed.pathname}`;
+		} catch {
+			return "[invalid-url]";
+		}
+	};
 	const keyFor = dependencies.keyFor ?? apiKeyFor;
 	const detect = dependencies.detect ?? detectEndpoint;
 	const connection = dependencies.connection ?? testConnection;
@@ -323,7 +331,7 @@ export async function runSetup(opts: SetupOptions = {}, dependencies: SetupDepen
 		if (!key && !opts.yes) {
 			const url = API_KEY_PAGES[provider];
 			if (url) {
-				log(`Create an API key: ${url}`);
+				log(`Create an API key: ${safeDisplayUrl(url)}`);
 				if (!opts.noBrowser && !await (dependencies.openBrowser ?? openBrowser)(url)) log("Browser could not open. Use the URL above on this or another device.");
 			}
 			key = await getPrompt().secret(cloud ? "API key (hidden): " : "API key if required (hidden; Enter for none): ");

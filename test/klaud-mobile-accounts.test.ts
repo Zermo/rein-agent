@@ -41,11 +41,13 @@ else {
 `);
 	chmodSync(executable, 0o700);
 	const log = join(home, "commands.jsonl"), pid = join(home, "descendant.pid");
-	const accounts = createMobileAccounts({ home, executables: { codex: executable, copilot: executable, grok: executable }, loginTimeoutMs: 5000, challengeTimeoutMs: 1500, ...extra, env: { FIXTURE_LOG: log, FIXTURE_PID: pid, OPENAI_API_KEY: "fixture-not-for-cli", GITHUB_TOKEN: "fixture-not-for-cli", ...(extra.env as NodeJS.ProcessEnv ?? {}) } });
+	// Normal auth-flow tests allow slow fixture startup. Deadline tests below
+	// override these limits explicitly and still check prompt cancellation.
+	const accounts = createMobileAccounts({ home, executables: { codex: executable, copilot: executable, grok: executable }, loginTimeoutMs: 20_000, challengeTimeoutMs: 10_000, ...extra, env: { FIXTURE_LOG: log, FIXTURE_PID: pid, OPENAI_API_KEY: "fixture-not-for-cli", GITHUB_TOKEN: "fixture-not-for-cli", ...(extra.env as NodeJS.ProcessEnv ?? {}) } });
 	t.after(async () => { await accounts.close(); for (const [name, value] of previous) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } rmSync(home, { recursive: true, force: true }); });
 	return { home, accounts, log, pid, rows: () => existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [] };
 }
-async function waitFor<T>(get: () => T, accept: (value: T) => boolean, timeout = 2500): Promise<T> {
+async function waitFor<T>(get: () => T, accept: (value: T) => boolean, timeout = 10_000): Promise<T> {
 	const deadline = Date.now() + timeout;
 	while (Date.now() < deadline) { const value = get(); if (accept(value)) return value; await new Promise(resolve => setTimeout(resolve, 10)); }
 	assert.fail("Fixture did not reach the expected state.");
@@ -166,7 +168,7 @@ test("missing CLI installation reports only an actionable official installation 
 test("device challenges expire and gateway shutdown reaps active login children", async t => {
 	const f = fixture(t, { loginTimeoutMs: 150 });
 	const login = f.accounts.start({ provider: "codex" });
-	const expired = await waitFor(() => f.accounts.get(login.id), value => value.status === "expired");
+	const expired = await waitFor(() => f.accounts.get(login.id), value => value.status === "expired", 2500);
 	assert.equal(expired.verificationURL, undefined); assert.equal(expired.userCode, undefined);
 	await f.accounts.close();
 	assert.throws(() => f.accounts.get(login.id), expectHttp(503));
@@ -191,15 +193,18 @@ test("mobile account routes share gateway bearer checks and only alter next-run 
 test("a terminal-only hanging CLI fails promptly without waiting out the device deadline", async t => {
 	const f = fixture(t, { env: { FIXTURE_MODE: "no-challenge" }, challengeTimeoutMs: 200 });
 	const login = f.accounts.start({ provider: "codex" });
-	const failed = await waitFor(() => f.accounts.get(login.id), value => value.status === "failed");
+	const failed = await waitFor(() => f.accounts.get(login.id), value => value.status === "failed", 2500);
 	assert.match(failed.message, /supported device challenge/);
 	await f.accounts.close();
 });
 
 test("unbounded CLI output is stopped with a fixed sanitized error", async t => {
-	const f = fixture(t, { env: { FIXTURE_MODE: "overflow" } });
+	// Exercise the output guard, not child startup latency. Under parallel builds
+	// the shared 1.5s challenge deadline can expire before this CLI gets CPU.
+	// The short no-challenge deadline has its own regression above.
+	const f = fixture(t, { env: { FIXTURE_MODE: "overflow" }, challengeTimeoutMs: 10_000, loginTimeoutMs: 15_000 });
 	const login = f.accounts.start({ provider: "codex" });
-	const failed = await waitFor(() => f.accounts.get(login.id), value => value.status === "failed");
+	const failed = await waitFor(() => f.accounts.get(login.id), value => value.status === "failed", 10_000);
 	assert.match(failed.message, /output limit|unsupported response/); assert.ok(JSON.stringify(failed).length < 500);
 	await f.accounts.close();
 });
@@ -220,7 +225,7 @@ test("cancellation kills a TERM-resistant descendant after its parent exits", { 
 	const pid = Number(readFileSync(f.pid, "utf8"));
 	process.kill(pid, 0);
 	f.accounts.cancel(login.id); await f.accounts.close();
-	await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, value => value);
+	await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, value => value, 2500);
 });
 
 test("account setup refuses a configuration home that differs from the live runner", t => {

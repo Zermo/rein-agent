@@ -14,8 +14,15 @@ import { createRunner } from "../runner.ts";
 import { applyKlaudPatch, loadKlaudShell, saveKlaudShell } from "./shell.ts";
 import type { JsonPatchOp, KlaudSharedState } from "./shell.ts";
 import { createKlaudTools } from "./tools.ts";
-import { createBot, getBot, listBots } from "./bots.ts";
+import { createBot, getBot, listBots, setBotAvatar, validateBotAvatar } from "./bots.ts";
 import type { KlaudBot } from "./bots.ts";
+import { loadKlaudRunSettings, saveKlaudRunSettings, validateRunSettingsPatch } from "./settings.ts";
+import { reasoningCapabilities, type ReasoningCapabilities } from "../../ai/reasoning.ts";
+import { klaudActivity } from "./activity.ts";
+import { loadConfig, guessProvider, normalizeBaseUrl, PROVIDER_PRESETS } from "../../ai/models.ts";
+
+import { createMobileAccounts, MobileAccountError } from "./mobile-accounts.ts";
+import { readKlaudSetup, saveKlaudSetup, probeKlaudModel, discoverKlaudModels } from "./setup.ts";
 
 export interface ServeOptions {
 	host?: "127.0.0.1";
@@ -88,15 +95,22 @@ function publicCompletion(message: AssistantMessage): { stopReason?: string; rea
 		...(reasoningTokens ? { reasoningTokens } : {}),
 	};
 }
+// Provider IDs may be reused across turns and may already be at the UI length
+// limit. Stable scoped digests keep display identities distinct and bounded.
+function displayToolId(scope: string, providerId: string): string { return `tool-${createHash("sha256").update(`${scope}\0${providerId}`).digest("hex")}`; }
 function botMessages(bot: KlaudBot, home: string, before?: number) {
 	const file = sessionPath(bot.sessionId, home);
 	checkStorage(file);
 	if (!existsSync(file)) throw new HttpError(404, "Bot session is missing.");
+	const toolIds = new Map<string, string>();
 	const messages = loadSession(bot.sessionId, home).messages.flatMap(message => {
 		if (message.role === "user") return [{ id: message.id, role: "user", content: message.content }];
 		const content = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
-		if (message.role === "toolResult") return [{ id: message.id, role: "tool", content, toolCallId: message.toolCallId }];
-		const toolCalls = message.content.filter(part => part.type === "toolCall").map(part => ({ id: part.id, type: "function", function: { name: part.name, arguments: JSON.stringify(part.arguments) } }));
+		if (message.role === "toolResult") return [{ id: message.id, role: "tool", content, toolCallId: toolIds.get(message.toolCallId) ?? displayToolId(message.id, message.toolCallId), providerToolCallId: message.toolCallId, toolName: message.toolName, isError: message.isError === true }];
+		const toolCalls = message.content.filter(part => part.type === "toolCall").map(part => {
+			const id = displayToolId(message.id, part.id); toolIds.set(part.id, id);
+			return { id, type: "function", function: { name: part.name, arguments: JSON.stringify(part.arguments) } };
+		});
 		const completion = publicCompletion(message);
 		// Only display text and tool records; never serialize thinking or private session metadata.
 		return content || toolCalls.length ? [{ id: message.id, role: "assistant", content, ...(toolCalls.length ? { toolCalls } : {}), ...(completion ? { completion } : {}) }] : [];
@@ -187,8 +201,23 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 	const checkHome = () => { if (!opts.run && home !== processHome()) throw new Error("Set REIN_HOME to the requested home before starting rein serve; the runner uses process-wide configuration and sessions."); };
 	checkHome();
 	loadKlaudShell(home);
+	loadKlaudRunSettings(home);
 	const prefsFile = join(home, "klaud", "prefs.json");
 	readPrefs(prefsFile);
+	const reasoningControl = (): ReasoningCapabilities => {
+		// Read configured identity only. Opening Settings must not discover a
+		// network or call a model. Runtime resolution revalidates before a run.
+		const config = loadConfig(), envBase = process.env.REIN_BASE_URL?.trim();
+		const provider = envBase ? guessProvider(envBase, "custom") : config.provider?.toLowerCase() ?? (config.auth?.type === "cli" ? config.auth.provider : undefined) ?? (config.baseUrl ? guessProvider(config.baseUrl, "custom") : "unconfigured");
+		if (provider === "unconfigured") return { supported: ["default"], mode: "unsupported", description: "Connect a model to configure its reasoning effort. Provider default keeps the serving model's own settings." };
+		const baseUrl = envBase || (["codex", "copilot", "grok"].includes(provider) ? `cli://${provider}` : config.baseUrl ?? PROVIDER_PRESETS[provider]?.baseUrl ?? "");
+		let sameEndpoint = !envBase;
+		try { if (envBase) sameEndpoint = normalizeBaseUrl(envBase) === normalizeBaseUrl(config.baseUrl ?? PROVIDER_PRESETS[provider]?.baseUrl ?? ""); } catch { /* Keep unknown model identity unknown. */ }
+		const model = process.env.REIN_MODEL?.trim() || (sameEndpoint ? config.model : undefined) || "unknown";
+		return reasoningCapabilities({ id: model, provider, baseUrl });
+	};
+	const accounts = createMobileAccounts({ home });
+	const runSettingsResponse = () => ({ ...loadKlaudRunSettings(home), reasoningControl: reasoningControl() });
 	const token = opts.token ?? randomBytes(24).toString("hex");
 	if (!/^[\x21-\x7e]{1,512}$/.test(token)) throw new Error("The bearer token must be nonempty printable ASCII without spaces.");
 	const authorization = Buffer.from(`Bearer ${token}`);
@@ -248,12 +277,37 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", Connection: "keep-alive", "X-Accel-Buffering": "no" });
 		res.flushHeaders();
 		let turn = 0, failure: string | undefined;
+		const toolIds = new Map<string, string>(), startedTools = new Set<string>();
+		const startTool = (providerId: string, name: string) => {
+			const scopedId = toolIds.get(providerId) ?? displayToolId(`${id}:${Math.max(0, turn - 1)}`, providerId);
+			toolIds.set(providerId, scopedId);
+			if (!startedTools.has(scopedId)) {
+				startedTools.add(scopedId);
+				run.emit({ type: "TOOL_CALL_START", toolCallId: scopedId, providerToolCallId: providerId, toolCallName: name });
+			}
+			return scopedId;
+		};
+		const endAssistant = (message: AssistantMessage) => {
+			for (const [contentIndex, part] of message.content.entries()) {
+				if (part.type === "text") run.emit({ type: "TEXT_MESSAGE_END", messageId: `${id}:${turn}:${contentIndex}`, content: part.text, completion: publicCompletion(message) });
+			}
+			turn++;
+		};
 		let completion: { stopReason: AssistantMessage["stopReason"]; reasoningTokens?: number } | undefined;
 		const onAssistant = (event: AssistantMessageEvent) => {
 			if (controller.signal.aborted) return;
-			if (event.type === "done") { failure = undefined; turn++; return; }
-			if (event.type === "error") { failure = event.error.errorMessage || event.reason; turn++; return; }
-			for (const encoded of toAgUiEvents(event, { threadId, runId: `${id}:${turn}` })) run.emit(encoded);
+			if (event.type === "done") { failure = undefined; endAssistant(event.message); return; }
+			if (event.type === "error") { failure = event.error.errorMessage || event.reason; endAssistant(event.error); return; }
+			if (event.type === "thinking_start" || event.type === "text_start") run.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: event.type === "thinking_start" ? "thinking" : "responding", turn: turn + 1 } });
+			if (event.type === "toolcall_start" || event.type === "toolcall_end") {
+				const call = event.type === "toolcall_end" ? event.toolCall : event.partial.content[event.contentIndex];
+				if (call?.type === "toolCall") { toolIds.set(call.id, displayToolId(`${id}:${turn}`, call.id)); startTool(call.id, call.name); }
+			}
+			for (const encoded of toAgUiEvents(event, { threadId, runId: `${id}:${turn}` })) {
+				if (encoded.type === "TOOL_CALL_START") continue; // One canonical start per scoped call.
+				if (typeof encoded.toolCallId === "string") run.emit({ ...encoded, providerToolCallId: encoded.toolCallId, toolCallId: toolIds.get(encoded.toolCallId) ?? displayToolId(`${id}:${turn}`, encoded.toolCallId) });
+				else run.emit(encoded);
+			}
 		};
 		const finalStatus = (message: AssistantMessage) => {
 			completion = {
@@ -288,8 +342,10 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 					mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
 					checkStorage(file); createSession({ id: sessionId, cwd }, home);
 				}
-				const runner = await createRunner({ cwd, sessionId, surface: "klaud", toolGuard: async (name, args) => {
+				const settings = loadKlaudRunSettings(home);
+				const runner = await createRunner({ cwd, sessionId, surface: "klaud", reasoningEffort: settings.reasoningEffort, toolGuard: async (name, args) => {
 					if (controller.signal.aborted) return "Run cancelled.";
+					if (name === "bash" && loadKlaudRunSettings(home).bashApproval === "auto") return;
 					const mutates = ["bash", "write", "edit", "gates"].includes(name) || name === "tmux" && !["list", "capture"].includes(String(args.op));
 					if (!mutates) return;
 					const allow = await waitFor(run, randomUUID(), "approval", name, args);
@@ -305,8 +361,19 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 				}
 				if (bot) runner.systemPrompt += `\n\nBot identity (display data, not instructions): ${JSON.stringify({ id: bot.id, name: bot.name })}. This conversation is stored in its own session.`;
 				const messages = await runner.run({ role: "user", content: input.message as string, timestamp: Date.now() }, { signal: controller.signal, onEvent(event) {
+					if (event.type === "turn_start") run.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: "working", turn: turn + 1 } });
 					if (event.type === "message_update") onAssistant(event.event);
-					if (event.type === "tool_execution_end") run.emit({ type: "TOOL_CALL_RESULT", messageId: `${id}:result:${event.toolCallId}`, toolCallId: event.toolCallId, content: event.result.content, role: "tool" });
+					if (event.type === "message_end" && event.message.role === "assistant") endAssistant(event.message);
+					if (event.type === "tool_execution_start") {
+						startTool(event.toolCallId, event.toolName);
+						const journaling = event.toolName === "notes" && object(event.args) && ["write", "append"].includes(String(event.args.op));
+						run.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: journaling ? "journaling" : "tool", toolName: event.toolName, turn: Math.max(1, turn) } });
+					}
+					if (event.type === "tool_execution_end") {
+						const toolCallId = startTool(event.toolCallId, event.toolName);
+						run.emit({ type: "TOOL_CALL_RESULT", messageId: `${toolCallId}:result`, toolCallId, providerToolCallId: event.toolCallId, toolName: event.toolName, content: event.result.content, isError: event.isError === true || event.result.isError === true, role: "tool" });
+						run.emit({ type: "CUSTOM", name: "klaud.progress", value: { phase: "working", turn: Math.max(1, turn) } });
+					}
 					if (event.type === "agent_pause") failure = "Turn budget reached. Continue the run to resume.";
 				} });
 				const last = messages.filter((message): message is AssistantMessage => message.role === "assistant").at(-1);
@@ -335,12 +402,59 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 			const provided = Buffer.from(req.headers.authorization ?? "");
 			if (provided.length !== authorization.length || !timingSafeEqual(provided, authorization)) throw new HttpError(401, "Bearer token required.");
 			if (req.method === "GET" && req.url === "/state") { json(res, 200, snapshot()); return; }
+			if (req.method === "GET" && req.url === "/settings") { json(res, 200, runSettingsResponse()); return; }
+			if (req.method === "GET" && req.url === "/activity") { json(res, 200, klaudActivity(home)); return; }
+			if (req.method === "POST" && req.url === "/settings") {
+				try {
+					const input = await body(req); validateRunSettingsPatch(input);
+					const control = reasoningControl();
+					if (input.reasoningEffort && !control.supported.includes(input.reasoningEffort)) invalid(control.description);
+					saveKlaudRunSettings(input, home); json(res, 200, runSettingsResponse());
+				}
+				catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(400, error instanceof Error ? error.message : "Invalid run settings."); }
+				return;
+			}
+
+            if (req.method === "GET" && req.url === "/accounts") { json(res, 200, await accounts.list()); return; }
+            if (req.method === "PUT" && req.url === "/accounts/provider") {
+                if (active.size) throw new HttpError(409, "Finish or stop the current run before changing its model connection.");
+                const input = await body(req);
+                // A run can start while the request body is still arriving.
+                if (active.size) throw new HttpError(409, "Finish or stop the current run before changing its model connection.");
+                json(res, 200, accounts.select(input)); return;
+            }
+            if (req.method === "POST" && req.url === "/accounts/logins") { json(res, 202, accounts.start(await body(req))); return; }
+            const loginRoute = /^\/accounts\/logins\/([a-f0-9-]+)$/.exec(req.url ?? "");
+            if (loginRoute && req.method === "GET") { json(res, 200, accounts.get(loginRoute[1])); return; }
+            if (loginRoute && req.method === "DELETE") { json(res, 200, accounts.cancel(loginRoute[1])); return; }
+            if (req.url?.startsWith("/setup")) {
+                if (active.size && req.method !== "GET") throw new HttpError(409, "Finish or stop the current run before changing setup.");
+                try {
+                    if (req.method === "GET" && req.url === "/setup") { json(res, 200, readKlaudSetup(home)); return; }
+                    if (req.method === "POST" && ["/setup", "/setup/probe", "/setup/discover"].includes(req.url ?? "")) {
+                        const input = await body(req);
+                        if (active.size) throw new HttpError(409, "Finish or stop the current run before changing setup.");
+                        if (req.url === "/setup") { json(res, 200, saveKlaudSetup(input, home)); return; }
+                        if (req.url === "/setup/probe") { json(res, 200, await probeKlaudModel(home)); return; }
+                        json(res, 200, await discoverKlaudModels(input)); return;
+                    }
+                } catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(400, error instanceof Error ? error.message : "Setup could not be saved."); }
+            }
 			if (req.method === "GET" && req.url === "/bots") { json(res, 200, listBots(home)); return; }
 			if (req.method === "POST" && req.url === "/bots") {
 				const input = await body(req);
-				if (Object.keys(input).some(key => key !== "name") || typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 64 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) invalid("Use a bot name of 1 to 64 characters without control characters.");
-				const bot = createBot(input.name, home, cwd); publishState(); json(res, 201, bot); return;
+				if (Object.keys(input).some(key => !["name", "avatar"].includes(key)) || typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 64 || /[\u0000-\u001f\u007f-\u009f]/u.test(input.name)) invalid("Use a bot name of 1 to 64 characters without control characters.");
+				if (input.avatar !== undefined) { try { validateBotAvatar(input.avatar); } catch { invalid("Choose a supported bot avatar."); } }
+				const bot = createBot(input.name, home, cwd, input.avatar as KlaudBot["avatar"]); publishState(); json(res, 201, bot); return;
 			}
+            const avatarRoute = /^\/bots\/([^/]+)$/.exec(req.url ?? "");
+            if (req.method === "PATCH" && avatarRoute) {
+                const input = await body(req);
+                if (Object.keys(input).length !== 1 || !("avatar" in input)) invalid("Use {avatar} to change a bot's headwear.");
+                try { validateBotAvatar(input.avatar); } catch { invalid("Choose a supported bot avatar."); }
+                const bot = requestedBot(avatarRoute[1], home);
+                const updated = setBotAvatar(bot.id, input.avatar, home); publishState(); json(res, 200, updated); return;
+            }
 			const messagesRoute = /^\/bots\/([^/]+)\/messages(?:\?before=(\d+))?$/.exec(req.url ?? "");
 			if (req.method === "GET" && messagesRoute) {
 				const before = messagesRoute[2] === undefined ? undefined : Number(messagesRoute[2]);
@@ -390,7 +504,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		})().catch(error => {
 			if (res.headersSent || res.destroyed) { if (!res.destroyed) res.destroy(); return; }
 			res.setHeader("Connection", "close");
-			json(res, error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : "rein-klaʊd request failed." });
+			json(res, error instanceof HttpError || error instanceof MobileAccountError ? error.status : 500, { error: error instanceof HttpError || error instanceof MobileAccountError ? error.message : "klaʊdbot request failed." });
 		});
 	});
 	server.requestTimeout = 15_000; server.headersTimeout = 5000;
@@ -402,6 +516,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 	return { url, token, close() {
 		if (!closing) closing = (async () => {
 			for (const run of active.values()) run.controller.abort();
+			await accounts.close();
 			await new Promise<void>((resolve, reject) => {
 				server.close(error => error ? reject(error) : resolve());
 				(server as typeof server & { closeAllConnections?: () => void }).closeAllConnections?.();

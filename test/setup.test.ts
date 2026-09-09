@@ -98,8 +98,28 @@ test("interactive cloud setup opens the official keys page before authenticated 
 	}), 0, logs.join("\n"));
 	assert.deepEqual(order, ["browser", "secret", "detect"]); assert.equal(closed, 1);
 	assert.equal(JSON.parse(readFileSync(path, "utf8")).apiKey, "typed-secret-example");
+	assert.ok(logs.includes(`Create an API key: ${API_KEY_PAGES.openai}`));
 	assert.match(logs.join("\n"), /Browser could not open/); assert.doesNotMatch(logs.join("\n"), /typed-secret-example/);
 }));
+
+test("API key page instructions exclude URL credentials, query, and fragment and fail closed on invalid URLs", async () => {
+	const original = API_KEY_PAGES.openai;
+	try {
+		for (const [url, display] of [
+			["https://fixture-user:fixture-password@fixture.invalid/account/keys?token=query-secret#fragment-secret", "https://fixture.invalid/account/keys"],
+			["invalid URL with fixture-secret", "[invalid-url]"],
+		]) await isolated(async () => {
+			API_KEY_PAGES.openai = url;
+			const logs: string[] = [];
+			assert.equal(await runSetup({ provider: "openai", model: "fixture-model", noBrowser: true }, {
+				...deps(logs),
+				prompt: { ask: async () => { throw new Error("Model supplied"); }, secret: async () => "typed-fixture-key", close() {} },
+			}), 0, logs.join("\n"));
+			assert.ok(logs.includes(`Create an API key: ${display}`));
+			assert.doesNotMatch(logs.join("\n"), /fixture-user|fixture-password|query-secret|fragment-secret|fixture-secret|typed-fixture-key/);
+		});
+	} finally { API_KEY_PAGES.openai = original; }
+});
 
 test("CLI setup keeps official credentials out of Rein config and --yes never logs in", async () => isolated(async (_home, path) => {
 	writeFileSync(path, JSON.stringify({ apiKey: "old-api-secret", provider: "openai", baseUrl: "https://api.openai.com/v1", model: "old" }));

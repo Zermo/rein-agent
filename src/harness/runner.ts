@@ -24,6 +24,7 @@ import { createMeatTool } from "./meat/tool.ts";
 import { ActivityJournal, activityFile } from "./activity/store.ts";
 import { createKlaudTools } from "./klaud/tools.ts";
 import type { DesktopSurface } from "./desktop/surface.ts";
+import { reasoningCapabilities, reasoningRequestFields, validateReasoningEffort, type ReasoningEffort, type ReasoningCapabilities } from "../ai/reasoning.ts";
 
 export interface RunnerOptions {
 	cwd: string;
@@ -43,6 +44,7 @@ export interface RunnerOptions {
 	toolsMode?: ToolMode;
 	maxTurns?: number;
 	temperature?: number;
+	reasoningEffort?: ReasoningEffort;
 	/** Replace the default system prompt (improve/loop modes). */
 	systemPrompt?: string;
 	/** Replace the default toolset. */
@@ -58,6 +60,8 @@ export interface RunnerOptions {
 
 export interface Runner {
 	model: Model;
+	readonly reasoningEffort: ReasoningEffort;
+	readonly reasoningControl: ReasoningCapabilities;
 	readonly maxTurns: number;
 	apiKey?: string;
 	toolsMode: "native" | "text";
@@ -96,6 +100,9 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 		api: opts.api,
 	});
 	if (opts.contextWindow !== undefined) model.contextWindow = opts.contextWindow;
+	const reasoningEffort = validateReasoningEffort(opts.reasoningEffort !== undefined ? opts.reasoningEffort : config.reasoningEffort);
+	reasoningRequestFields(model, reasoningEffort);
+	model.reasoningEffort = reasoningEffort;
 	const apiKey = apiKeyFor(model.provider, model.baseUrl, model.sshHost);
 	const repeatToolLimit = config.repeatToolLimit ?? 3;
 	if (!Number.isSafeInteger(repeatToolLimit) || repeatToolLimit < 0 || repeatToolLimit === 1 || repeatToolLimit > 50) throw new Error("repeatToolLimit must be 0 (disabled) or an integer from 2 to 50.");
@@ -144,6 +151,8 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 
 	const runner: Runner = {
 		model,
+		reasoningEffort,
+		reasoningControl: reasoningCapabilities(model),
 		maxTurns: budgets.maxTurns,
 		activityId: activity?.snapshot.id,
 		apiKey,
@@ -199,7 +208,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					transformContext: async (messages) => posthorse.prepare(messages),
 					afterToolBatch: (info) => posthorse.afterBatch(info),
 					recoverFromError: ({ message, context: loopContext }) => posthorse.recover(message, loopContext.messages),
-					streamFn: (m, ctx, o) => cliProvider ? streamCli(m, ctx, o) : openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
+					streamFn: (m, ctx, o) => cliProvider ? streamCli(m, ctx, o) : openaiStream(m, ctx, { ...o, apiKey, temperature: opts.temperature ?? config.temperature, reasoningEffort, maxTokens: model.maxTokens, toolsMode: runner.toolsMode }),
 					maxTurns: budgets.maxTurns,
 					stopConditions: { doomLoop: repeatToolLimit ? { enabled: true, repeatedToolCalls: repeatToolLimit } : { enabled: false } },
 					getSteeringMessages: () => steering.splice(0, steering.length),

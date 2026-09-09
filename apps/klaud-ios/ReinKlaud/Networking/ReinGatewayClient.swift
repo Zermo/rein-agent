@@ -5,7 +5,8 @@ protocol ReinGatewayClientProtocol: Sendable {
     func state() async throws -> ReinState
     func bots() async throws -> [ReinBot]
     func messages(botID: String, before: Int?) async throws -> MessagePage
-    func createBot(name: String) async throws -> ReinBot
+    func createBot(name: String, avatar: String?) async throws -> ReinBot
+    func updateBotAvatar(botID: String, avatar: String) async throws -> ReinBot
     func patchShell(_ patch: [ShellPatch]) async throws -> ReinState
     func setPreference(lastBotID: String) async throws -> ReinState
     func startRun(_ request: RunRequest) async throws -> MobileRunReceipt
@@ -59,8 +60,13 @@ final class ReinGatewayClient: ReinGatewayClientProtocol, @unchecked Sendable {
         if let before { query = [URLQueryItem(name: "before", value: String(before))] }
         return try await json(method: "GET", path: root + ["bots", botID, "messages"], query: query, as: MessagePage.self)
     }
-    func createBot(name: String) async throws -> ReinBot {
-        try await json(method: "POST", path: root + ["bots"], body: ["name": name], as: ReinBot.self)
+    func createBot(name: String, avatar: String?) async throws -> ReinBot {
+        var body = ["name": name]
+        if let avatar { body["avatar"] = avatar }
+        return try await json(method: "POST", path: root + ["bots"], body: body, as: ReinBot.self)
+    }
+    func updateBotAvatar(botID: String, avatar: String) async throws -> ReinBot {
+        try await json(method: "PATCH", path: root + ["bots", botID], body: ["avatar": avatar], as: ReinBot.self)
     }
     func patchShell(_ patch: [ShellPatch]) async throws -> ReinState {
         try await json(method: "POST", path: root + ["state"], body: PatchBody(patch: patch), as: ReinState.self)

@@ -10,6 +10,13 @@ export interface KlaudBot {
 	name: string;
 	sessionId: string;
 	created: string;
+	avatar?: BotAvatar;
+}
+
+export const BOT_AVATARS = ["aviator", "motorcycle", "builder", "baseball", "medic", "explorer"] as const;
+export type BotAvatar = (typeof BOT_AVATARS)[number];
+export function validateBotAvatar(value: unknown): asserts value is BotAvatar {
+	if (!(BOT_AVATARS as readonly unknown[]).includes(value)) throw new Error("Choose a supported bot avatar.");
 }
 
 const BOT_ID = /^klaud-bot-[0-9a-f]{8}$/;
@@ -59,7 +66,7 @@ function validateRegistry(value: unknown): asserts value is { version: 1; bots: 
 	const ids = new Set<string>();
 	const sessions = new Set<string>();
 	for (const bot of value.bots) {
-		if (!hasKeys(bot, ["id", "name", "sessionId", "created"])
+		if (!(hasKeys(bot, ["id", "name", "sessionId", "created"]) || hasKeys(bot, ["id", "name", "sessionId", "created", "avatar"]) && (BOT_AVATARS as readonly unknown[]).includes(bot.avatar))
 			|| typeof bot.id !== "string" || !BOT_ID.test(bot.id)
 			|| typeof bot.sessionId !== "string" || !SESSION_ID.test(bot.sessionId)
 			|| typeof bot.created !== "string" || !Number.isFinite(Date.parse(bot.created))
@@ -135,7 +142,8 @@ function saveRegistry(home: string, bots: KlaudBot[]): void {
 	}
 }
 
-export function createBot(name: string, home?: string, cwd = process.cwd()): KlaudBot {
+export function createBot(name: string, home?: string, cwd = process.cwd(), avatar?: BotAvatar): KlaudBot {
+	if (avatar !== undefined) validateBotAvatar(avatar);
 	const normalizedName = botName(name);
 	const root = botHome(home);
 	checkStorage(root);
@@ -157,7 +165,7 @@ export function createBot(name: string, home?: string, cwd = process.cwd()): Kla
 		const owned = checkPath(file, false)!;
 		try {
 			if (bots.some(bot => bot.sessionId === sessionId)) throw new Error("Bot session id collision.");
-			const bot = { id, name: normalizedName, sessionId, created: new Date().toISOString() };
+			const bot = { id, name: normalizedName, sessionId, created: new Date().toISOString(), ...(avatar === undefined ? {} : { avatar }) };
 			saveRegistry(root, [...bots, bot]);
 			return bot;
 		} catch (error) {
@@ -172,4 +180,20 @@ export function getBot(id: string, home?: string): KlaudBot {
 	const bot = listBots(home).find(bot => bot.id === id);
 	if (!bot) throw new Error(`No such bot: ${id}`);
 	return bot;
+}
+
+/** Update only the visual identity; session IDs and durable history stay intact. */
+export function setBotAvatar(id: string, avatar: unknown, home?: string): KlaudBot {
+    validateBotAvatar(avatar);
+    const root = botHome(home);
+    getBot(id, root);
+    const unlock = lockRegistry(root);
+    try {
+        const bots = listBots(root), index = bots.findIndex(bot => bot.id === id);
+        if (index < 0) throw new Error("No such bot.");
+        const bot = { ...bots[index], avatar };
+        bots[index] = bot;
+        saveRegistry(root, bots);
+        return bot;
+    } finally { unlock(); }
 }

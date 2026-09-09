@@ -7,6 +7,8 @@ await build({ entryPoints: ["renderer.jsx"], bundle: true, outfile: "dist/render
 const staticFiles = [
   ["index.html", "index.html"],
   ["styles.css", "styles.css"],
+  ["avatars.css", "avatars.css"],
+  ["setup.css", "setup.css"],
   ["../../tokens.css", "tokens.css"],
   ["icon.svg", "icon.svg"],
   ["icon.png", "icon.png"],

@@ -234,16 +234,22 @@ function requestBody(req: IncomingMessage): Promise<Record<string, unknown>> {
 	});
 }
 
+/** Bind validation permits one scope delimiter and an unreserved zone identifier. */
+function uriIPv6Host(host: string): string {
+	const zoneAt = host.indexOf("%");
+	return zoneAt === -1 ? host : `${host.slice(0, zoneAt)}%25${host.slice(zoneAt + 1)}`;
+}
+
 function displayUrl(host: string, port: number): string {
 	const suffix = port === 80 ? "" : `:${port}`;
-	if (isIP(host.split("%")[0]) === 6) return `http://[${host.replace("%", "%25")}]${suffix}`;
+	if (isIP(host.split("%")[0]) === 6) return `http://[${uriIPv6Host(host)}]${suffix}`;
 	return `http://${host}${suffix}`;
 }
 
 function authorities(host: string, port: number): Set<string> {
 	const suffixes = port === 80 ? ["", ":80"] : [`:${port}`];
 	if (isIP(host.split("%")[0]) !== 6) return new Set(suffixes.map(suffix => host + suffix));
-	return new Set(suffixes.flatMap(suffix => [`[${host}]${suffix}`, `[${host.replace("%", "%25")}]${suffix}`]));
+	return new Set(suffixes.flatMap(suffix => [`[${host}]${suffix}`, `[${uriIPv6Host(host)}]${suffix}`]));
 }
 
 function origins(host: string, port: number, protocol = "http"): Set<string> {
@@ -414,7 +420,7 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			}
 		}
 		if (event.type === "TOOL_CALL_RESULT" && typeof event.toolCallId === "string") {
-			run.pending.delete(event.toolCallId);
+			run.pending.delete(typeof event.providerToolCallId === "string" ? event.providerToolCallId : event.toolCallId);
 			if (run.status === "waiting" && run.pending.size === 0) run.status = "running";
 		}
 		if (event.type === "STATE_SNAPSHOT" && object(event.snapshot) && Array.isArray(event.snapshot.approvals)) {
@@ -534,6 +540,9 @@ export async function startKlaudMobileGateway(opts: MobileGatewayOptions): Promi
 			}
 			if (req.method === "POST" && [`${API_ROOT}/state`, `${API_ROOT}/bots`, `${API_ROOT}/prefs`].includes(parsed.pathname)) {
 				await proxy(res, "POST", relative, await requestBody(req)); return;
+			}
+			if (req.method === "PATCH" && /^\/v1\/mobile\/bots\/[^/]+$/.test(parsed.pathname)) {
+				await proxy(res, "PATCH", relative, await requestBody(req)); return;
 			}
 			if (req.method === "POST" && parsed.pathname === `${API_ROOT}/runs`) {
 				const input = await requestBody(req); validateRunInput(input);

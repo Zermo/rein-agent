@@ -46,8 +46,19 @@ try {
   const state = await response.json();
   assert.ok(Array.isArray(state.bots));
   assert.equal(state.shell.version, 1);
+  const settingsHeaders = { Authorization: `Bearer ${token}`, Origin: url, "Content-Type": "application/json" };
+  const settings = await fetch(`${url}/settings`, { headers: settingsHeaders, signal: AbortSignal.timeout(10_000) });
+  assert.equal(settings.status, 200);
+  const defaults = await settings.json();
+  assert.equal(defaults.bashApproval, "auto");
+  assert.equal(defaults.reasoningEffort, "default");
+  assert.ok(defaults.reasoningControl.supported.includes("default"));
+  const saved = await fetch(`${url}/settings`, { method: "POST", headers: settingsHeaders, body: JSON.stringify({ bashApproval: "ask" }), signal: AbortSignal.timeout(10_000) });
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).bashApproval, "ask");
+  assert.equal(JSON.parse(readFileSync(join(runtime.home, "klaud", "run-settings.json"), "utf8")).bashApproval, "ask");
   assert.equal(digest(runtime.entry), before);
-  console.log("Packaged headless runtime passed: standalone CLI, bundled skills, local gateway, private state, immutable code.");
+  console.log("Packaged headless runtime passed: standalone CLI, bundled skills, local gateway, saved run settings, private state, immutable code.");
 } finally {
   await stopChild(child);
   rmSync(home, { recursive: true, force: true });

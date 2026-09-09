@@ -202,7 +202,10 @@ test("owned worker launches only serve and never an app or chat command", async 
 	assert.equal(await guardianPortAvailable(baseUrl), true);
 	writeFileSync(join(autonomyDirectory(), "guardian-runtime.json"), JSON.stringify({ version: 1, kind: "rein-headless-guardian", executable, baseUrl }));
 	const controller = new AbortController(), task = runGuardianServer(controller.signal);
-	try { for (let attempt = 0; attempt < 100 && !existsSync(output); attempt++) await new Promise(resolve => setTimeout(resolve, 10)); assert.ok(existsSync(output)); }
+	// Verify the launch arguments after the fixture is ready, without treating
+	// process startup under a parallel suite as part of the runtime contract.
+	const deadline = Date.now() + 10_000;
+	try { while (!existsSync(output) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10)); assert.ok(existsSync(output)); }
 	finally { controller.abort(); await task; }
 	const captured = JSON.parse(readFileSync(output, "utf8")); assert.deepEqual(captured.args, ["serve"]); assert.equal(captured.host, `127.0.0.1:${port}`); assert.equal(captured.home, join(home, "autonomy", "guardian-home"));
 });
