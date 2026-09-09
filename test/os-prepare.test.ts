@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { OS_THEME_FILES, prepareReinOS } from "../src/os/prepare.ts";
+import { OS_THEME_FILES, OS_SKIN_FILES, prepareReinOS } from "../src/os/prepare.ts";
 const exec = promisify(execFile);
 
 async function fixture(t: any) {
@@ -17,7 +17,13 @@ async function fixture(t: any) {
 	await mkdir(join(root, "dist"), { recursive: true });
 	await mkdir(join(root, "vendor/meat"), { recursive: true });
 	await mkdir(join(root, "src/os/assets/rain"), { recursive: true });
+	await mkdir(join(root, "src/os/assets/skins"), { recursive: true });
+	await mkdir(join(root, "apps/klaud"), { recursive: true });
 	for (const path of OS_THEME_FILES) await writeFile(join(root, path), await readFile(new URL(`../${path}`, import.meta.url)));
+	for (const path of OS_SKIN_FILES) await writeFile(join(root, path), await readFile(new URL(`../${path}`, import.meta.url)));
+	await writeFile(join(root, "apps/klaud/main.mjs"), "// fixture klaudbot app entry\n");
+	await writeFile(join(root, "apps/klaud/index.html"), "<html>fixture</html>\n");
+	await writeFile(join(root, "apps/klaud/package.json"), JSON.stringify({ name: "@rein/klaud", main: "main.mjs" }));
 	await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.2.3", secret: "must-not-export" }));
 	await writeFile(join(root, "dist/rein.js"), 'console.log("fixture-rein", process.argv.slice(2).join("|"));\n');
 	await writeFile(join(root, "dist/meat-worker.js"), "// fixture worker\n");
@@ -34,6 +40,10 @@ test("export produces an offline verifiable overlay, not a bootable image", asyn
 	assert.equal(result.manifest.bootable, false);
 	assert.equal(result.manifest.reinVersion, "1.2.3");
 	assert.equal(result.manifest.omarchy.commit, "346e69e1cec6c4e8924531874af6ba010a1bc99e");
+	assert.equal(result.manifest.rainmeter.license, "GPL-2.0");
+	assert.match(result.manifest.rainmeter.commit, /^[0-9a-f]{40}$/);
+	const app = result.manifest.files.find(entry => entry.path === "apps/klaud/main.mjs");
+	assert.ok(app && /^[a-f0-9]{64}$/.test(app.sha256), "the klaudbot app entry ships in the kit payload");
 	assert.ok(result.files.includes("install-overlay.mjs"));
 	assert.ok(result.files.includes("fetch-upstream.mjs"));
 	assert.doesNotMatch(await readFile(join(f.output, "payload/package.json"), "utf8"), /secret|must-not-export/);
@@ -46,6 +56,10 @@ test("export produces an offline verifiable overlay, not a bootable image", asyn
 	assert.match(readme, /not a bootable image/);
 	assert.match(readme, /rein os rain --animate/);
 	assert.match(readme, /never selects a wallpaper/);
+	assert.match(readme, /The full Rein system/);
+	assert.match(readme, /rein-kla\u028ad/);
+	assert.match(readme, /rein serve/);
+	assert.match(readme, /bot mode/);
 });
 
 test("existing outputs and payload symlinks are never overwritten or followed", async t => {
@@ -128,10 +142,38 @@ test("bootstrap installs only fixture user files, starts a valid launcher, and p
 	assert.match((await exec(process.execPath, [runner, "--install"], { env })).stdout, /REIN_OS_OVERLAY_INSTALLED/);
 	const launcher = join(user, ".local/bin/rein");
 	assert.match((await exec(process.execPath, [launcher, "--version"], { env })).stdout, /fixture-rein --version/);
+	const identity = join(user, ".local/bin/dareecho");
+	assert.match((await exec(process.execPath, [identity], { env })).stdout, /Dareecho 1\.2\.3 \(base: Omarchy 4\.0\.2\)/);
+	const release = JSON.parse(await readFile(join(user, ".local/share/rein-os/dareecho-release"), "utf8"));
+	assert.equal(release.name, "Dareecho");
+	assert.equal(release.version, "1.2.3");
+	assert.equal(release.base.name, "Omarchy");
+	assert.equal(release.base.installed, "4.0.2");
+	assert.equal(release.pins.omarchy.commit, "346e69e1cec6c4e8924531874af6ba010a1bc99e");
+	assert.equal(release.pins.argent.license, "Apache-2.0");
+	assert.equal(release.pins.rainmeter.license, "GPL-2.0");
 	assert.equal(await readFile(join(user, ".rein/config.json"), "utf8"), "preserve-me");
 	assert.equal(await readFile(join(user, ".config/omarchy/themes/existing/theme.json"), "utf8"), "existing-desktop-theme");
 	for (const path of OS_THEME_FILES) assert.deepEqual(await readFile(join(user, ".local/share/rein-os", path)), await readFile(join(f.root, path)));
+	assert.deepEqual(await readFile(join(user, ".local/share/rein-os/apps/klaud/main.mjs"), "utf8"), "// fixture klaudbot app entry\n");
 	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
+	assert.deepEqual(await readFile(join(user, ".local/share/rein-os/dareecho-release"), "utf8"), JSON.stringify(release, null, 2) + "\n");
+});
+
+test("an existing Dareecho identity is preserved, never rewritten", async t => {
+	const f = await fixture(t);
+	await prepareReinOS({ output: f.output, bundleRoot: f.root });
+	const user = join(f.base, "user");
+	await mkdir(join(user, ".local/share/omarchy"), { recursive: true });
+	await mkdir(join(user, ".local/bin"), { recursive: true });
+	await writeFile(join(user, ".local/share/omarchy/version"), "4.0.2\n");
+	await writeFile(join(user, ".local/bin/dareecho"), "not-mine\n");
+	const runner = join(f.base, "fixture-runner.mjs");
+	await writeFile(runner, `Object.defineProperty(process,'platform',{value:'linux'}); Object.defineProperty(process,'arch',{value:'x64'}); process.getuid=()=>1000; const {main}=await import(${JSON.stringify(pathToFileURL(join(f.output, "install-overlay.mjs")).href)}); await main(process.argv.slice(2));`);
+	const env = { ...process.env, HOME: user, USERPROFILE: user };
+	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
+	assert.equal(await readFile(join(user, ".local/bin/dareecho"), "utf8"), "not-mine\n");
+	await assert.rejects(access(join(user, ".local/share/rein-os")));
 });
 
 test("rain assets are required hashed payloads and same-size tampering is rejected", async t => {
@@ -163,6 +205,8 @@ test("the ChromeOS kit exports a userland installer, not the Omarchy fetch", asy
 	assert.equal(kit.manifest.kind, "chromeos-user-overlay");
 	assert.equal(kit.manifest.target, "chromeos");
 	assert.equal(kit.manifest.omarchy, undefined);
+	assert.equal(kit.manifest.argent.repository, "https://github.com/software-mansion/argent.git");
+	assert.equal(kit.manifest.argent.license, "Apache-2.0");
 	assert.ok(kit.files.includes("install-chromeos.mjs"));
 	assert.ok(!kit.files.includes("install-overlay.mjs"));
 	assert.ok(!kit.files.includes("fetch-upstream.mjs"));
@@ -209,6 +253,11 @@ test("the ChromeOS bootstrap installs chronos user files only, and preserves use
 	assert.equal(await readFile(join(user, "Documents/note.md"), "utf8"), "preserve-me");
 	assert.equal(await readFile(join(user, ".local/share/myfiles-marker"), "utf8"), "user-data");
 	for (const path of OS_THEME_FILES) assert.deepEqual(await readFile(join(user, ".local/share/rein-os", path)), await readFile(join(f.root, path)));
+	assert.match((await exec(process.execPath, [join(user, ".local/bin/dareecho")], { env })).stdout, /Dareecho 1\.2\.3 \(base: ChromeOS 132\.0\.6834\.0\)/);
+	const crosRelease = JSON.parse(await readFile(join(user, ".local/share/rein-os/dareecho-release"), "utf8"));
+	assert.equal(crosRelease.base.name, "ChromeOS");
+	assert.ok(!("omarchy" in crosRelease.pins), "the ChromeOS identity pins the toolkits, not Omarchy");
+	assert.deepEqual(await readFile(join(user, ".local/share/rein-os/apps/klaud/main.mjs"), "utf8"), "// fixture klaudbot app entry\n");
 	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
 });
 
