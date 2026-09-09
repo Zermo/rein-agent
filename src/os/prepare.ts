@@ -106,7 +106,7 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 		if (target === "omarchy") {
 			await put("install-overlay.mjs", INSTALL_OVERLAY);
 			await put("fetch-upstream.mjs", FETCH_UPSTREAM);
-			await put("README.md", KIT_README);
+			await put("README.md", KIT_README.replace("{{REIN_VERSION}}", pkg.version));
 		} else {
 			await put("install-chromeos.mjs", INSTALL_CHROMEOS);
 			await put("README.md", CHROMEOS_README);
@@ -406,7 +406,7 @@ Dareecho is a replacement OS for an empty machine. The pinned base system (Omarc
 
 \`\`\`sh
 ~/.local/bin/dareecho
-Dareecho 0.14.2 (base: Omarchy 4.0.2)
+Dareecho {{REIN_VERSION}} (base: Omarchy 4.0.2)
 \`\`\`
 
 \`~/.local/share/rein-os/dareecho-release\` records the version, the detected base, and every pinned upstream (Omarchy, Argent, Rainmeter). The kit itself is not a bootable image; the base ISO is the installation media. A fully Dareecho-built image — own base system, kernel, and bootable media — remains a build gate; this kit is the clean-install path for an empty machine today. The native Rein klaud desktop package is not included in this first release.
