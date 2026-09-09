@@ -48,6 +48,8 @@ Usage:
   rein models                   show detected local servers and provider presets
   rein model help               pinned GGUF downloads, serving and background model services
   rein model plan <repo> --file <gguf> [--revision <ref>] [--json]
+  rein os help                    Dareecho — the OS tier: full Rein takeover with complete
+                                  rein-agent control (clean install, skins, Argent toolkit)
   rein os plan [--mode host|image] [--json]    native host and OS installation gates
   rein os prepare --output <dir>             prepare a pinned Omarchy VM overlay kit
   rein os skin render <file|dir> [--frames n]  Rainmeter-rebuilt skin engine, static by default
