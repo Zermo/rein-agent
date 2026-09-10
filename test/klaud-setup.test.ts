@@ -10,6 +10,21 @@ import { OPERATOR_FILES, readOperatorProfile } from "../src/harness/operator-pro
 import { startKlaudServe } from "../src/harness/klaud/serve.ts";
 import { createBot } from "../src/harness/klaud/bots.ts";
 import { sessionPath } from "../src/agent/session.ts";
+import { createServer } from "node:http";
+
+test("GUI discovery includes the saved model endpoint at its nonstandard port", async t => {
+  fixture(t);
+  const server = createServer((req, res) => {
+    if (req.headers.authorization !== "Bearer fixture-discovery-key") { res.writeHead(401); res.end(); return; }
+    res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "saved-model" }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  saveConfig({ provider: "custom", model: "saved-model", baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`, apiKey: "fixture-discovery-key" });
+  const result = await discoverKlaudModels({ network: false });
+  assert.ok(result.servers.some(server => server.source === "configured" && server.models.includes("saved-model")));
+  assert.doesNotMatch(JSON.stringify(result), /fixture-discovery-key/);
+});
 
 function fixture(t: test.TestContext) {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "rein-klaud-setup-"))), home = join(root, "rein-home");
@@ -117,7 +132,7 @@ test("setup and account routes enforce authentication and origin before any acti
 	const f = fixture(t);
 	const server = await startKlaudServe({ home: f.home, run: async function* () {} });
 	try {
-		const routes = [["GET", "/setup"], ["POST", "/setup"], ["POST", "/setup/probe"], ["POST", "/setup/discover"], ["GET", "/accounts"], ["PUT", "/accounts/provider"], ["POST", "/accounts/logins"], ["PATCH", "/bots/klaud-bot-aaaaaaaa"]];
+		const routes = [["GET", "/setup"], ["POST", "/setup"], ["POST", "/setup/probe"], ["POST", "/setup/discover"], ["POST", "/setup/hardware"], ["GET", "/accounts"], ["PUT", "/accounts/provider"], ["POST", "/accounts/logins"], ["PATCH", "/bots/klaud-bot-aaaaaaaa"]];
 		const existing = readdirSync(join(f.home, "klaud"));
 		for (const [method, path] of routes) {
 			const headers = { "Content-Type": "application/json" }, body = method === "GET" ? undefined : "{}";

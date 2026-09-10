@@ -1,6 +1,8 @@
 /** Deterministic starting recipes, not an auto-installer or a benchmark runner. */
 import { access, constants } from "node:fs/promises";
 import { delimiter, join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { CATALOG, type CatalogModel } from "./catalog.ts";
 import { assessFit, bestAssessment, planContext, type FitAssessment } from "./fit.ts";
 import type { HardwareProfile } from "./profile.ts";
@@ -155,15 +157,19 @@ export function servingRecommendations(profile: HardwareProfile, opts: ServingOp
 	return { scope: "current-machine", focus, contextTokens, recommendations, best, recipes, notes };
 }
 
-/** PATH presence only. Does not invoke tools, start daemons, or inspect model data. */
-export async function probeServingTools(): Promise<Record<ServingRecipe["engine"], { onPath: boolean }>> {
+/** PATH and executable-name evidence only; never reads process arguments or starts servers. */
+export async function probeServingTools(): Promise<Record<ServingRecipe["engine"], { onPath: boolean; running?: boolean }>> {
 	const names = { ollama: "ollama", lmstudio: "lms", "llama.cpp": "llama-server", vllm: "vllm" };
+	let processes: string[] = [];
+	if (process.platform !== "win32") {
+		try { processes = (await promisify(execFile)("ps", ["-e", "-o", "comm="], { timeout: 1200, maxBuffer: 1024 * 1024 })).stdout.split(/\r?\n/).map(value => value.trim().split("/").pop() ?? ""); } catch { /* Process visibility is optional. */ }
+	}
 	return Object.fromEntries(await Promise.all(Object.entries(names).map(async ([engine, binary]) => {
 		const paths = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
 		const suffixes = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
 		const candidates = await Promise.all(paths.flatMap(dir => suffixes.map(async ext => {
 			try { await access(join(dir, binary + ext), constants.X_OK); return true; } catch { return false; }
 		})));
-		return [engine, { onPath: candidates.some(Boolean) }];
-	}))) as Record<ServingRecipe["engine"], { onPath: boolean }>;
+		return [engine, { onPath: candidates.some(Boolean), running: processes.some(name => name === binary || engine === "vllm" && name.startsWith("VLLM::")) }];
+	}))) as Record<ServingRecipe["engine"], { onPath: boolean; running?: boolean }>;
 }

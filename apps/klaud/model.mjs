@@ -71,6 +71,7 @@ export function requestRoute(operation, input = {}) {
     case "saveSetup": return { method: "POST", path: "/setup", body: input };
     case "probeModel": return { method: "POST", path: "/setup/probe", body: {} };
     case "discoverModels": return { method: "POST", path: "/setup/discover", body: input };
+    case "inspectHardware": return { method: "POST", path: "/setup/hardware", body: input };
     case "setBotAvatar":
       if (!avatarIds.includes(input.avatar)) throw new Error("Choose a supported bot avatar.");
       return { method: "PATCH", path: `/bots/${id(input.id)}`, body: { avatar: input.avatar } };

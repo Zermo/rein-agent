@@ -3,9 +3,8 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readConfig, saveConfig } from "../../ai/config.ts";
-import { apiKeyFor } from "../../ai/models.ts";
+import { apiKeyFor, discoverServers } from "../../ai/models.ts";
 import { detectEndpoint, PROVIDER_PRESETS } from "../../ai/endpoints.ts";
-import { discoverServers } from "../../ai/discovery.ts";
 import { ITEMS, PACKS, createOperatorProfile, readOperatorProfile, operatorFilesFingerprint, saveOperatorProfile } from "../operator-profile.ts";
 import type { PackId } from "../operator-profile.ts";
 import { resolveRunBudgets } from "../run-budgets.ts";
@@ -45,7 +44,7 @@ export async function probeKlaudModel(home: string) {
   const provider = typeof config.provider === "string" ? config.provider : "custom";
   const baseUrl = typeof config.baseUrl === "string" ? config.baseUrl : PROVIDER_PRESETS[provider]?.baseUrl;
   if (!baseUrl) throw new Error("Save a model connection before checking it.");
-  const result = await detectEndpoint(baseUrl, { provider, apiKey: apiKeyFor(provider, baseUrl, config.sshHost as string | undefined), sshHost: config.sshHost as string | undefined, timeoutMs: 5000 });
+  const result = await detectEndpoint(baseUrl, { provider, apiKey: apiKeyFor(provider, baseUrl, config.sshHost as string | undefined), sshHost: config.sshHost as string | undefined, timeoutMs: 8000 });
   return { status: result.status, models: result.models, baseUrl: result.baseUrl,
     selectedModelAvailable: typeof config.model === "string" && result.models.includes(config.model),
     message: result.status === "ready" ? "The server returned a model list. Your first message will check generation." : result.error ?? "The server did not return a usable model list." };
@@ -53,5 +52,5 @@ export async function probeKlaudModel(home: string) {
 export async function discoverKlaudModels(input: Record<string, unknown>) {
   if (Object.keys(input).some(key => key !== "network") || input.network !== undefined && typeof input.network !== "boolean") throw new Error("Choose whether to include known network peers.");
   const report = await discoverServers({ network: input.network === true, budgetMs: 8000, timeoutMs: 1500, maxCandidates: 40 });
-  return { servers: report.servers, scanned: report.scanned, timedOut: report.timedOut };
+  return { servers: report.servers.map(({ sshHost, ...server }) => ({ ...server, savedConnection: !!sshHost && server.source === "configured" })), scanned: report.scanned, timedOut: report.timedOut, truncated: report.truncated, sources: report.sources };
 }

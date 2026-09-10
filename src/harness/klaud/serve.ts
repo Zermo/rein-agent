@@ -23,6 +23,7 @@ import { loadConfig, guessProvider, normalizeBaseUrl, PROVIDER_PRESETS } from ".
 
 import { createMobileAccounts, MobileAccountError } from "./mobile-accounts.ts";
 import { readKlaudSetup, saveKlaudSetup, probeKlaudModel, discoverKlaudModels } from "./setup.ts";
+import { inspectHardware } from "../../hardware/inspection.ts";
 
 export interface ServeOptions {
 	host?: "127.0.0.1";
@@ -431,11 +432,12 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
                 if (active.size && req.method !== "GET") throw new HttpError(409, "Finish or stop the current run before changing setup.");
                 try {
                     if (req.method === "GET" && req.url === "/setup") { json(res, 200, readKlaudSetup(home)); return; }
-                    if (req.method === "POST" && ["/setup", "/setup/probe", "/setup/discover"].includes(req.url ?? "")) {
+                    if (req.method === "POST" && ["/setup", "/setup/probe", "/setup/discover", "/setup/hardware"].includes(req.url ?? "")) {
                         const input = await body(req);
                         if (active.size) throw new HttpError(409, "Finish or stop the current run before changing setup.");
                         if (req.url === "/setup") { json(res, 200, saveKlaudSetup(input, home)); return; }
                         if (req.url === "/setup/probe") { json(res, 200, await probeKlaudModel(home)); return; }
+                        if (req.url === "/setup/hardware") { json(res, 200, await inspectHardware(input)); return; }
                         json(res, 200, await discoverKlaudModels(input)); return;
                     }
                 } catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(400, error instanceof Error ? error.message : "Setup could not be saved."); }

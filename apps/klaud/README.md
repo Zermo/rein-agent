@@ -75,6 +75,17 @@ the operator through:
 3. **Meet your bot.** Continue an imported bot or create one with a name and
    avatar. A suggested first task fills the message box without sending it.
 
+The model setup page also offers **Inspect this computer** and **Inspect saved
+model host**. The latter uses the saved SSH connection to run the shipped,
+read-only hardware probe through standard input; the host needs Node.js 18 or
+newer, but Rein is not installed there by the check. The report identifies which
+machine was measured, available memory, GPU memory sharing, serving CLIs on PATH,
+and recognized server process names. It does not read process arguments.
+Model-fit rows are catalog estimates at 16,384 context tokens and one concurrent
+request, not a benchmark of the configured model. An API URL without an SSH
+connection cannot supply the remote hardware report. No serving software or
+models are installed or started by inspection.
+
 The local gateway uses `~/.klaudbot/workspace` as its writable working directory,
 including during source development. Packaged apps launch the embedded Rein
 bundle; source runs use the checkout's `dist/rein.js`, or `bin/rein.js` when that

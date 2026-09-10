@@ -65,7 +65,7 @@ async function http(method, path, body, signal = AbortSignal.timeout(15_000)) {
     // These authenticated setup endpoints return deliberately safe validation errors.
     // Keep ordinary model/tool responses opaque; they may contain private content.
     let detail;
-    if (/^\/(?:setup(?:\/(?:probe|discover))?|accounts(?:\/provider|\/logins(?:\/[a-f0-9-]+)?)?)$/.test(path)
+    if (/^\/(?:setup(?:\/(?:probe|discover|hardware))?|accounts(?:\/provider|\/logins(?:\/[a-f0-9-]+)?)?)$/.test(path)
       && response.headers.get("content-type")?.split(";")[0].trim() === "application/json" && response.body) {
       const reader = response.body.getReader();
       const chunks = []; let bytes = 0;

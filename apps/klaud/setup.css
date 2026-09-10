@@ -45,6 +45,10 @@
 .discovered-model { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin: var(--space-md) 0; }
 .discovered-model strong { flex-basis: 100%; overflow-wrap: anywhere; font-size: 14px; }
 .setup-reopen { margin-bottom: var(--space-lg); }
+.hardware-report { margin-top: var(--space-md); }
+.hardware-table { overflow-x: auto; }
+.hardware-table table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
+.hardware-table th, .hardware-table td { padding: var(--space-sm); border-bottom: 1px solid var(--rule); }
 .bot-dressing { margin-top: var(--space-sm); }
 .bot-dressing .avatar-picker { margin-bottom: var(--space-sm); }
 .bot .bot-avatar { margin-left: calc(-1 * var(--space-xs)); }

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection, createServer } from "node:net";
+import { sshRouteArguments } from "./ssh-route.ts";
 
 export interface TunnelOptions {
 	signal?: AbortSignal;
@@ -50,6 +51,8 @@ export async function withSshTunnel<T>(baseUrl: string, sshHost: string | undefi
 	if (options.signal?.aborted) throw new DOMException("SSH connection aborted", "AbortError");
 	const port = await unusedPort();
 	const args = sshArguments(sshHost, baseUrl, port);
+	if (!options.spawnSsh) args.unshift(...await sshRouteArguments(sshHost));
+	if (options.signal?.aborted) throw new DOMException("SSH connection aborted", "AbortError");
 	const child = options.spawnSsh ? options.spawnSsh(args) : spawn("ssh", args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
 	let failure: Error | undefined;
 	let closed = false;

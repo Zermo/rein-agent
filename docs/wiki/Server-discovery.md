@@ -56,6 +56,18 @@ Rein only attempts saved/explicit SSH routes. It does not try aliases from your
 SSH config on its own. With `--ssh`, the URL belongs to the remote machine.
 Without it, `127.0.0.1` means the computer running Rein.
 
+For a saved private IPv4 SSH host on port 22, Rein can recover an unreachable
+address through another private address already recorded with the same host key
+in the default SSH known-hosts file. OpenSSH still verifies the original host
+identity with strict checking. The recovery changes no SSH settings or trust
+records. Custom proxies, host-key aliases, trust stores, hashed-only records,
+and other ports retain their configured route. At most four alternate addresses
+are checked. This does not repair a mesh service or sweep a subnet.
+
+The desktop setup's model search includes the saved endpoint and its SSH route.
+Selecting that saved result preserves the connection instead of treating the
+remote loopback URL as a server on the laptop.
+
 Discovery reads model metadata only. Saved credentials are used only for their
 exact configured API URL and SSH route; keys are never attached to newly found
 peers. Cross-origin redirects are rejected. Setup collects any needed key after
