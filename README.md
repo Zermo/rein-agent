@@ -65,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | 
 
 Rein runs in the terminal you already use: Ghostty, Terminal, a NodeTerm terminal
 node, or another compatible shell. On macOS the installer also installs the
-native rein-klaud app and opens it after successful guided setup. On Linux and
+native klaʊdbot app and opens it after successful guided setup. On Linux and
 WSL it starts interactive Rein in the current terminal. Neither path requires
 NodeTerm or a browser activity page.
 
@@ -105,7 +105,7 @@ The optional NodeTerm installer downloads a verified upstream release on a local
 macOS desktop. See [terminal and desktop integration](docs/nodeterm-desktop.md)
 for supported platforms and native-app limits.
 
-The [rein-klaʊd desktop](docs/klaud.md) adds named bots, saved chat,
+The [klaʊdbot desktop](docs/klaud.md) adds named bots, saved chat,
 live shell preferences, and approval dialogs over Rein's loopback AG-UI server.
 The Mac app includes the CLI and its runtime. From a development checkout,
 run `npm --prefix apps/klaud ci` once, then `rein klaud`.

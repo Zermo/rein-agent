@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatReinOSPlan, OMARCHY_BASE, planReinOS } from "../src/os/plan.ts";
+import { dareechoStack, formatReinOSPlan, OMARCHY_BASE, planReinOS } from "../src/os/plan.ts";
 import type { HardwareProfile } from "../src/hardware/profile.ts";
 
 function profile(os: string, arch: string): HardwareProfile {
@@ -76,4 +76,20 @@ test("planner validates input and preserves its caller's data", () => {
 	assert.throws(() => planReinOS(null as any), /hardware profile/);
 	assert.throws(() => planReinOS({ ...hardware, gpus: [null] } as any), /hardware profile/);
 	assert.match(OMARCHY_BASE.commit, /^[a-f0-9]{40}$/);
+});
+
+test("the full Rein system is three tiers: agent, GUI, and OS", () => {
+	const darwin = dareechoStack({ os: "darwin", arch: "arm64" });
+	assert.deepEqual(darwin.map(tier => tier.tier), ["agent", "gui", "os"]);
+	assert.equal(darwin[0].status, "included");
+	assert.equal(darwin[1].status, "app");
+	assert.equal(darwin[2].status, "gate");
+	const linux = dareechoStack({ os: "linux", arch: "x64" });
+	assert.equal(linux[2].status, "included");
+	assert.equal(linux[1].status, "gate");
+	assert.equal(dareechoStack({ os: "linux", arch: "x64" }, { chromeos: true })[2].runs, "userland kit with OS identity; the verified ChromeOS root stays ChromeOS");
+	assert.equal(dareechoStack({ os: "freebsd", arch: "x64" })[2].status, "gate");
+	const plan = planReinOS(profile("linux", "x64"), { mode: "image" });
+	assert.deepEqual(plan.stack.map(tier => tier.tier), ["agent", "gui", "os"]);
+	assert.match(formatReinOSPlan(plan), /rein-kla\u028ad/);
 });

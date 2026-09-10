@@ -1,0 +1,49 @@
+.bot-avatar {
+  --avatar-ink: var(--ink, var(--color-ink));
+  --avatar-rust: var(--color-accent);
+  --avatar-paper: var(--surface, var(--color-paper));
+  --avatar-gold: var(--color-signal-gold);
+  display: inline-block;
+  flex: 0 0 auto;
+  vertical-align: middle;
+  overflow: visible;
+}
+:root[data-dark="true"] .bot-avatar { --avatar-rust: var(--color-night-accent); }
+.bot-avatar-portrait, .bot-avatar-glasses,
+.bot-avatar-brow-left, .bot-avatar-brow-right { transform-box: view-box; }
+.bot-avatar-portrait { transform-origin: 64px 64px; }
+.bot-avatar-glasses { transform-origin: 64px 80px; }
+.bot-avatar-brow-left { transform-origin: 48px 63px; }
+.bot-avatar-brow-right { transform-origin: 80px 63px; }
+.bot-avatar[data-animated="true"] .bot-avatar-portrait { will-change: transform; }
+.avatar-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: var(--space-xs); }
+.avatar-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+  min-height: 116px;
+  padding: var(--space-xs);
+  border: 1px solid var(--rule-strong, var(--color-rule-strong));
+  border-radius: var(--radius-control);
+  background: var(--surface, var(--color-paper));
+  color: var(--ink, var(--color-ink));
+  font: 600 var(--text-sm)/1.4 var(--font-mono);
+  cursor: pointer;
+}
+.avatar-choice[aria-pressed="true"] { border-color: var(--klaud-accent, var(--color-accent)); background: var(--surface-alt, var(--color-paper-2)); box-shadow: inset 0 -3px 0 var(--klaud-accent, var(--color-accent)); }
+.avatar-choice-mark { position: absolute; top: var(--space-2xs); right: var(--space-xs); color: var(--klaud-accent, var(--color-accent)); }
+.avatar-choice:disabled { cursor: default; opacity: .55; }
+.avatar-choice:focus-visible { outline: 2px solid var(--focus, var(--color-focus)); outline-offset: 3px; }
+@media (hover: hover) and (pointer: fine) {
+  .avatar-choice:not(:disabled):hover { border-color: var(--klaud-accent, var(--color-accent)); transform: translateY(-1px); }
+  .avatar-choice:not(:disabled):active { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-avatar-portrait, .bot-avatar-glasses,
+  .bot-avatar-brow-left, .bot-avatar-brow-right { transform: none !important; will-change: auto !important; }
+  .avatar-choice { transform: none !important; }
+}

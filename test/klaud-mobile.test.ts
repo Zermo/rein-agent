@@ -274,6 +274,70 @@ test("pending frontend tools survive disconnect, can be recovered from run state
 	assert.equal(resumed.event.delta, "resumed");
 });
 
+test("scoped tool results clear the original pending action while the model continues after a lost answer receipt", { timeout: 15_000 }, async t => {
+	const home = mkdtempSync(join(tmpdir(), "rein-mobile-scoped-tool-")), workspace = join(home, "work"); mkdirSync(workspace);
+	const previous = Object.fromEntries(["REIN_HOME", "REIN_BASE_URL", "REIN_MODEL", "REIN_API"].map(key => [key, process.env[key]]));
+	const providerId = "navigation-provider-fixture";
+	let release!: () => void, continued!: () => void, requests = 0, droppedReceipts = 0;
+	const gate = new Promise<void>(resolve => { release = resolve; });
+	const secondRequest = new Promise<void>(resolve => { continued = resolve; });
+	const model = createServer(async (req, res) => {
+		let raw = ""; for await (const chunk of req) raw += chunk;
+		const input = JSON.parse(raw); requests++;
+		if (requests === 1) {
+			res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ choices: [{ message: { tool_calls: [{ id: providerId, type: "function", function: { name: "navigateTo", arguments: '{"dest":"settings"}' } }] }, finish_reason: "tool_calls" }] }));
+			return;
+		}
+		assert.ok(input.messages.some((message: any) => message.role === "tool" && message.tool_call_id === providerId && message.content === "settings opened"));
+		continued(); await gate;
+		res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ choices: [{ message: { content: "Navigation finished." }, finish_reason: "stop" }] }));
+	});
+	await new Promise<void>(resolve => model.listen(0, "127.0.0.1", resolve));
+	const baseUrl = `http://127.0.0.1:${(model.address() as { port: number }).port}/v1`;
+	process.env.REIN_HOME = home; process.env.REIN_BASE_URL = baseUrl; process.env.REIN_MODEL = "scoped-tool-fixture"; process.env.REIN_API = "chat-completions";
+	writeFileSync(join(home, "config.json"), JSON.stringify({ provider: "custom", model: "scoped-tool-fixture", baseUrl, toolsMode: "native", maxTurns: 4 }), { mode: 0o600 });
+	const originalFetch = globalThis.fetch;
+	let gateway: MobileGatewayHandle | undefined, events: ReturnType<typeof eventReader> | undefined;
+	try {
+		gateway = await startKlaudMobileGateway({ host: "127.0.0.1", port: 0, home, cwd: workspace, advertise: false });
+		const headers = { Authorization: `Bearer ${gateway.token}` };
+		const get = (path: string) => fetch(gateway!.url + path, { headers });
+		const post = (path: string, input: unknown) => fetch(gateway!.url + path, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(input) });
+		// Lose the bridge's successful receipt so POST cannot clear the pending
+		// map itself. The real scoped TOOL_CALL_RESULT must reconcile it instead.
+		t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+			const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+			if (target.endsWith(`/tools/${providerId}`) && !target.startsWith(gateway!.url)) {
+				const response = await originalFetch(input, init);
+				assert.equal(response.status, 200); await response.arrayBuffer(); droppedReceipts++;
+				throw new Error("Fixture lost the receipt after the backend accepted the answer.");
+			}
+			return originalFetch(input, init);
+		});
+		const started = await (await post("/v1/mobile/runs", { threadId: "scoped-tool-fixture", message: "Open settings", tools: [{ name: "navigateTo", description: "Navigate", parameters: { type: "object", properties: { dest: { type: "string" } } } }] })).json();
+		events = eventReader(await get(started.eventsUrl));
+		await events.next(item => item.event.name === "klaud.frontend_tool");
+		const pending = await (await get(started.statusUrl)).json();
+		assert.equal(pending.status, "waiting"); assert.deepEqual(pending.pending.map((item: any) => item.id), [providerId]);
+		assert.equal((await post(`/v1/mobile/runs/${started.runId}/tools/${providerId}`, { result: "settings opened" })).status, 500);
+		const result = await events.next(item => item.event.type === "TOOL_CALL_RESULT");
+		assert.equal(result.event.providerToolCallId, providerId);
+		assert.match(result.event.toolCallId, /^tool-[a-f0-9]{64}$/);
+		assert.notEqual(result.event.toolCallId, providerId);
+		await secondRequest;
+		const continuing = await (await get(started.statusUrl)).json();
+		assert.equal(droppedReceipts, 1); assert.equal(requests, 2);
+		assert.equal(continuing.status, "running"); assert.deepEqual(continuing.pending, []);
+		assert.equal(continuing.completedAt, undefined, "run completion must not be responsible for clearing the action");
+		release(); await waitForStatus({ get }, started.runId, "completed");
+	} finally {
+		release(); await events?.cancel(); await gateway?.close();
+		await new Promise<void>(resolve => { model.close(() => resolve()); model.closeAllConnections(); });
+		for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
 test("cancellation is independent of the event socket and rejects late pending answers", async t => {
 	const declaration: Tool = { name: "navigateTo", description: "Navigate", parameters: { type: "object" } };
 	const server = await fixture(t, { run: async function* (_message, tools) {

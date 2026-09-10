@@ -45,7 +45,7 @@ For the first upload, open the signed archive in Xcode Organizer:
 open apps/klaud-ios/.build/testflight/ReinKlaud.xcarchive
 ```
 
-Choose **Distribute App > TestFlight Internal Only**. If the app record doesn't exist, enter `rein-klaʊd`, SKU `rein-klaud-ios-001`, and English as the primary language. Confirm that the bundle identifier is `org.zermo.rein-klaud.ios`. Xcode can create the record and continue the upload with its connected account. The account needs permission to create apps. [Apple's TestFlight tutorial](https://developer.apple.com/tutorials/develop-in-swift/test-your-beta-app) describes this flow.
+Choose **Distribute App > TestFlight Internal Only**. If the app record doesn't exist, enter `klaʊdbot`, SKU `rein-klaud-ios-001`, and English as the primary language. Confirm that the bundle identifier is `org.zermo.rein-klaud.ios`. Xcode can create the record and continue the upload with its connected account. The account needs permission to create apps. [Apple's TestFlight tutorial](https://developer.apple.com/tutorials/develop-in-swift/test-your-beta-app) describes this flow.
 
 Internal-only builds cannot be used for external TestFlight testing or App Store release. For either of those later, upload a new build through **Distribute App > App Store Connect** instead.
 

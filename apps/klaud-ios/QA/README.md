@@ -46,3 +46,12 @@ and conversation restoration across new-thread selection and app relaunch.
 
 Live subscription entitlement requires the operator's official CLI login on a
 reachable host. Fixture tests do not claim to verify a paid provider account.
+
+
+## Klaudbot identity and onboarding
+
+The Klaudbot update passes 84 native fixture tests. New coverage checks old bot payloads without an avatar, stable avatar selection shared with desktop, completion of assisted setup separately per host, avatar persistence on bot creation and edits, and keeping runtime expressions attached to the running bot when another conversation is selected.
+
+An iPhone 17 Pro simulator completed welcome → host check → name and avatar → chat against an isolated synthetic gateway. The six native vector avatars fit the picker, the selected Medic appeared in the conversation heading, and the visible app name was Klaudbot. No real provider credentials or model task were used. `Klaudbot-iPhone-bot-avatar.png` records that synthetic result.
+
+This change has been built and tested locally; it has not been uploaded to TestFlight or used to rename the live App Store Connect record.

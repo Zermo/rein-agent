@@ -1,6 +1,12 @@
-# Design — Rein Cloud
+# Design — klaʊdbot
 
-This is the shared visual system for rein-klaʊd. App views use the same field-manual language as Rein's public installation guide and repository artwork.
+This is the shared visual system for **klaʊdbot**, the bot app powered by Rein.
+App views retain the vintage typography, palette, and sounds of Rein's public
+installation guide and repository artwork. The visible app name is `klaʊdbot`, using the original phonetic `ʊ` (U+028A).
+Keep this spelling lowercase in wordmarks so automatic uppercasing does not
+replace the phonetic glyph.
+Existing bundle identifiers and distribution filenames remain compatible with
+rein-klaud installations.
 
 ## Genre
 
@@ -9,7 +15,7 @@ Editorial, expressed as an industrial computer field manual. The interface is fu
 ## Macrostructure family
 
 - App views: Workbench. One persistent masthead, a narrow bot rail when enabled, and one working area for Bots, Chat, or Settings.
-- Setup views: Split Workbench. The existing field-guide card anchors the left side; the live connection form owns the right.
+- Setup views: Split Workbench. A bot portrait and numbered steps anchor the left side; the active setup form owns the right. The field-guide card belongs to the connection fallback, rather than the assisted setup.
 - Content pages: Long Document, using the same rules, labels, and typography.
 
 ## Theme
@@ -51,14 +57,22 @@ A named four-point scale lives in `tokens.css`. App styles use those names rathe
   A running daemon alone is not evidence that it is doing autonomy work.
 - Keep phase names readable beside the animation. Decorative frames are hidden
   from assistive technology; reduced motion shows a static phase symbol.
-- Rain is Rein Cloud's ambient motif: sparse square drops, a pixel cloud, and
+- Bot eyebrows reflect ready, working, thinking, replying, tool execution,
+  journaling, autonomy work, approval, and error states. They express reported
+  activity, not an inferred emotion. Ready and attention states remain still;
+  active portraits drift, tilt, and breathe continuously, with a slight lag in
+  the eyewear and independent brow movement. Use deterministic motion per bot,
+  blend between activities, and settle into stillness when work ends. Pause
+  motion while hidden or offscreen and keep static expressions with reduced
+  motion. Desktop vectors and the native iOS canvas share the same motion model.
+- Rain is klaʊdbot's ambient motif: sparse square drops, a pixel cloud, and
   the established rust/paper/amber palette. Keep it in frame or wallpaper areas,
   away from reading and input surfaces. Provide an off switch, pause while hidden,
   and use static rain with reduced motion. Ambient rain does not imply agent work.
 - The OS build is named **Dareecho**. Its intended brand meaning is a window, portal,
   or metaphorical glimpse into the unknown. Frame the rain around a readable,
   unobscured working surface.
-  Its rain theme shares Rein-klaud's
+  Its rain theme shares klaʊdbot's
   palette and field-guide artwork; keep the OS name on OS-facing surfaces.
 - **Dareecho Learn** is the OS-facing assessment pass behind `rein learn`. It is
   a dossier and evidence surface, not an activity signal or a permission to
@@ -91,21 +105,56 @@ a reason to add a component dependency.
 
 ## Navigation and control voice
 
-- Masthead: N6 newspaper masthead adapted to native desktop chrome. A full Rein lockup anchors the left; Bots, Chat, and Settings read as a numbered field index.
+- Masthead: N6 newspaper masthead adapted to native desktop chrome. The klaʊdbot name and Rein mark anchor the left; Bots, Chat, and Settings read as a numbered field index.
 - Primary actions: square rust controls with paper text and direct verbs.
 - Secondary actions: paper controls with an ink rule.
 - No footer is added to the desktop app.
 
 ## Per-view allowances
 
-- Setup may show the supplied field-guide card.
+- Assisted setup uses the selected bot portrait; the connection fallback may show the supplied field-guide card.
 - Chat may use hard rules, mono folios, and terminal-green tool blocks.
 - Bots and Settings share the same field rows and control geometry.
-- App views do not introduce new decorative illustration.
+- Bot identity portraits are functional illustrations. Other app views do not add unrelated decorative artwork.
+
+## Assisted setup
+
+- Detect an existing Rein home on first launch and offer migration or a fresh
+  setup before starting the local gateway.
+- Both choices create a separate `~/.klaudbot` home. Migration copies the
+  existing model configuration, saved credentials, supported CLI sign-in files,
+  operator documents, notes, and conversations. Keep the original Rein home
+  intact; a fresh setup does not inherit its model or credentials.
+- Guide the operator through model connection, working preferences, task
+  budgets, and the first bot. Let them keep imported preferences, skip a skill
+  suggestion, choose an existing conversation, and review the first message
+  before sending it.
+- Show server discovery and connection checks as explicit actions. Selecting
+  setup does not enable a login item or background autonomy service.
+- Use work-style questions, including everyday assistance, pacing, examples,
+  and communication preferences. Do not present the answers as a clinical or
+  personality assessment.
+
+## Bot portraits
+
+Use the six original floating-headwear portraits: Aviator, Rider, Builder,
+Slugger, Medic, and Explorer. Their silhouettes combine rust-orange hats or
+helmets with eyewear, a mask or scarf where appropriate, and two visible
+eyebrows. Leave the person invisible: no filled face, generic blob, or skin tone.
+The Medic includes a hanging stethoscope. The same geometry is used on desktop
+and iOS, with platform-appropriate rendering.
+
+Keep portraits recognizable at rail size and detailed in setup. Headwear stays
+orange when the operator changes the app's accent color; outlines and highlights
+adapt to the paper or night surface. A saved avatar overrides the stable bot-ID
+fallback, so older bots receive a consistent look without rewriting their
+conversations. The picker uses labelled, keyboard-accessible square controls
+with a visible selected state. Always pair activity expressions with readable
+status labels.
 
 ## What every view shares
 
-- The R/horse monogram and `rein-klaʊd` name.
+- The R/horse monogram and `klaʊdbot` name.
 - Cream, charcoal, rust, mustard, and terminal green.
 - Condensed display type, plain body type, and mono operational labels.
 - Square controls, hard rules, and numbered identity labels.

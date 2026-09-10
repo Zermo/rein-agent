@@ -11,6 +11,31 @@ export const OMARCHY_BASE = {
 } as const;
 
 export interface OSGate { id: string; status: "required" | "blocked"; detail: string }
+
+/** The full Rein system is three tiers: the agent, the GUI for it, and the OS that owns both. */
+export interface StackTier {
+	tier: "agent" | "gui" | "os";
+	name: string;
+	/** How this tier runs on this platform. */
+	runs: string;
+	status: "included" | "app" | "gate";
+}
+
+export function dareechoStack(profile: { os: string; arch: string }, options: { chromeos?: boolean } = {}): StackTier[] {
+	const agent: StackTier = { tier: "agent", name: "rein-agent", runs: "CLI agent, always-running gateway (rein serve), bots, tmux harness", status: "included" };
+	const gui: StackTier = profile.os === "darwin"
+		? { tier: "gui", name: "rein-klaʊd", runs: "published macOS app connects to rein serve (bot mode)", status: "app" }
+		: { tier: "gui", name: "rein-klaʊd", runs: "app source ships in the kit; a validated runtime for this platform is a gate", status: "gate" };
+	const os: StackTier = options.chromeos
+		? { tier: "os", name: "Dareecho", runs: "userland kit with OS identity; the verified ChromeOS root stays ChromeOS", status: "included" }
+		: profile.os === "linux" && profile.arch === "x64"
+			? { tier: "os", name: "Dareecho", runs: "clean-install kit: pinned Omarchy base + full userland + OS identity", status: "included" }
+		: profile.os === "darwin"
+			? { tier: "os", name: "Dareecho", runs: "native macOS host path; the Dareecho OS kit targets x86-64 Linux", status: "gate" }
+			: { tier: "os", name: "Dareecho", runs: "no OS kit for this platform yet", status: "gate" };
+	return [agent, gui, os];
+}
+
 export interface ReinOSPlan {
 	schemaVersion: 1;
 	mode: "host" | "image";
@@ -18,6 +43,7 @@ export interface ReinOSPlan {
 	status: "candidate" | "unsupported";
 	adapter: string;
 	runtimes: string[];
+	stack: StackTier[];
 	facts: string[];
 	gates: OSGate[];
 	next: string[];
@@ -37,7 +63,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 	const apple = profile.os === "darwin" && profile.arch === "arm64";
 	const plan: ReinOSPlan = {
 		schemaVersion: 1, mode, platform, status: recognized ? "candidate" : "unsupported",
-		adapter: "unsupported", runtimes: [], facts: [], gates: [], next: [], sources: [],
+		adapter: "unsupported", runtimes: [], stack: dareechoStack(profile, { chromeos }), facts: [], gates: [], next: [], sources: [],
 	};
 	if (mode === "host") {
 		plan.adapter = !recognized ? "unsupported" : profile.os === "darwin" ? "macos-native" : profile.os === "win32" ? "windows-with-wsl2" : "linux-native";
@@ -47,6 +73,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 			plan.runtimes.push("vLLM (verify GPU, driver, and runtime compatibility)");
 		}
 		plan.facts.push("Host mode keeps the installed OS. Runtime names are candidates, not installed or benchmarked capabilities.");
+		plan.facts.push("Platform components ship in the same bundle: the Rainmeter-rebuilt terminal skin engine (rein os skin) and the Argent-rebuilt device toolkit (rein argent). Both are offline; device targets beyond the terminal provider are parity gates.");
 		if (apple) {
 			plan.facts.push("Apple Silicon uses native macOS and its shared memory pool; an Omarchy Linux replacement is a separate hardware port.");
 			plan.sources.push("https://github.com/ml-explore/mlx-lm", OMARCHY_BASE.macSupport);
@@ -78,7 +105,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 		plan.status = candidate ? "candidate" : "unsupported";
 		plan.adapter = "omarchy-x86_64-vm-overlay";
 		plan.runtimes = ["llama.cpp", "existing OpenAI-compatible server", "vLLM after GPU validation"];
-		plan.facts.push("The preparation command exports a Dareecho overlay for an installed Omarchy VM. It does not build a bootable ISO or certify this machine for installation.");
+		plan.facts.push("Dareecho is a clean-install OS for an empty machine: the pinned Omarchy base performs the full clean install, and the Dareecho kit adds the userland and OS identity. The kit does not build a bootable ISO or certify this machine for installation.");
 		plan.facts.push(`The reviewed Omarchy base is ${OMARCHY_BASE.tag} (${OMARCHY_BASE.commit}). Its supported installation starts with the upstream ISO.`);
 		if (!candidate) {
 			plan.facts.push(apple ? "Omarchy does not directly support M-series Macs. Native macOS is the current path; a Linux port depends on model-specific Asahi support." : "This preparation path targets x86-64 PCs and VMs. No image target is defined for this OS and architecture.");
@@ -88,7 +115,7 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 		plan.gates.push(
 			{ id: "hardware", status: "required", detail: "Verify the target's firmware boot mode, graphics, storage, network, input devices, and upstream hardware support. CPU architecture alone is insufficient." },
 			{ id: "media", status: "required", detail: "Acquire and verify the upstream installation ISO separately. The source commit pins reviewed code, not an ISO checksum." },
-			{ id: "vm", status: "required", detail: "Install Omarchy in a disposable x86-64 VM using its wizard and only that VM's virtual disk, then apply and test the Dareecho overlay." },
+			{ id: "vm", status: "required", detail: "Install the Omarchy base in a disposable x86-64 VM (its wizard, only that VM's empty virtual disk), then complete the Dareecho install with the kit and verify the machine identifies as Dareecho." },
 			{ id: "migration", status: "required", detail: "Before any physical-machine installation, review backups, recovery, exact target disk, encryption, and owner approval in a separate installer." },
 		);
 		plan.sources.push(OMARCHY_BASE.installation, OMARCHY_BASE.macSupport, OMARCHY_BASE.unattended);
@@ -103,6 +130,7 @@ export function formatReinOSPlan(plan: ReinOSPlan): string {
 		`Dareecho ${plan.mode}: ${plan.status} (${plan.platform.os}/${plan.platform.arch})`,
 		`Adapter: ${plan.adapter}`,
 		...(plan.runtimes.length ? [`Runtime candidates: ${plan.runtimes.join(", ")}`] : []),
+		...(plan.stack.length ? ["", "Stack:", ...plan.stack.map(tier => `  [${tier.tier.padEnd(5)}] ${tier.name}  ${tier.status} — ${tier.runs}`)] : []),
 		...plan.facts.map(fact => `- ${fact}`),
 		...plan.gates.map(gate => `[${gate.status}] ${gate.id}: ${gate.detail}`),
 		...plan.next.map(step => `Next: ${step}`),

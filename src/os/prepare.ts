@@ -4,9 +4,13 @@ import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/pr
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OMARCHY_BASE } from "./plan.ts";
+import { ARGENT_BASE } from "../argent/inventory.ts";
+import { RAINMETER_BASE } from "./rainmeter.ts";
 
 export const OS_THEME_FILES = ["src/os/assets/rain/theme.json", "src/os/assets/rain/wallpaper.svg"] as const;
-const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES];
+export const OS_SKIN_FILES = ["src/os/assets/skins/dareecho.ini"] as const;
+export const OS_APP_FILES = ["apps/klaud/main.mjs"] as const;
+const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES, ...OS_SKIN_FILES, ...OS_APP_FILES];
 const VENDOR = ["meat", "mattpocock", "ponytail", "unlazy", "obscura", "fold", "pi-posthorse"];
 export type OSTarget = "omarchy" | "chromeos";
 export interface OSKitManifest {
@@ -16,6 +20,10 @@ export interface OSKitManifest {
 	target: "linux-x64" | "chromeos";
 	reinVersion: string;
 	omarchy?: typeof OMARCHY_BASE;
+	/** Pinned upstream for the built-in device toolkit (rein argent). */
+	argent: typeof ARGENT_BASE;
+	/** Pinned upstream for the terminal skin engine (rein os skin). */
+	rainmeter: typeof RAINMETER_BASE;
 	files: { path: string; sha256: string; bytes: number }[];
 }
 
@@ -51,9 +59,9 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 	const pkg = JSON.parse((await regularFile(join(root, "package.json"))).toString("utf8"));
 	if (typeof pkg.version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?$/.test(pkg.version)) throw new Error("The Rein package version is invalid.");
 	const payload = new Map<string, Buffer>();
-	for (const directory of ["src", "src/os", "src/os/assets", "src/os/assets/rain"]) {
+	for (const directory of ["src", "src/os", "src/os/assets", "src/os/assets/rain", "src/os/assets/skins", "apps", "apps/klaud"]) {
 		const stat = await lstat(join(root, directory));
-		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("OS theme assets must be in ordinary payload directories without symlinks.");
+		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("OS theme assets and the klaudbot app must be in ordinary payload directories without symlinks.");
 	}
 	for (const path of REQUIRED) payload.set(path, await regularFile(join(root, path)));
 	const visit = async (relative: string) => {
@@ -70,6 +78,7 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 		try { await lstat(join(root, "vendor", name)); } catch (error: any) { if (error.code === "ENOENT") continue; throw error; }
 		await visit(`vendor/${name}`);
 	}
+	await visit("apps/klaud");
 	// Package metadata only; local scripts, configuration, account data and sessions never enter a kit.
 	payload.set("package.json", Buffer.from(JSON.stringify({ name: "rein-agent", version: pkg.version, type: "module", engines: { node: ">=18" } }, null, 2) + "\n"));
 	const manifest: OSKitManifest = {
@@ -79,6 +88,8 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 		target: target === "omarchy" ? "linux-x64" : "chromeos",
 		reinVersion: pkg.version,
 		...(target === "omarchy" ? { omarchy: OMARCHY_BASE } : {}),
+		argent: ARGENT_BASE,
+		rainmeter: RAINMETER_BASE,
 		files: [...payload].sort(([a], [b]) => a.localeCompare(b)).map(([path, data]) => ({ path, sha256: sha(data), bytes: data.length })),
 	};
 	// Exclusive creation preserves an existing output even if it appears during staging.
@@ -132,7 +143,7 @@ export function validateTarget(platform, arch, version) {
 }
 async function verifyPayload() {
   const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
-  if (manifest.schemaVersion !== 1 || manifest.kind !== 'omarchy-post-install-overlay' || manifest.bootable !== false || !Array.isArray(manifest.files)) fail('Invalid kit manifest.');
+  if (manifest.schemaVersion !== 1 || manifest.kind !== 'omarchy-post-install-overlay' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent || !manifest.rainmeter) fail('Invalid kit manifest.');
   const seen = new Set();
   const result = [];
   const payloadRoot = await lstat(join(kit, 'payload'));
@@ -151,24 +162,28 @@ async function verifyPayload() {
     if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
     result.push([entry.path, data]);
   }
-  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini', 'apps/klaud/main.mjs']) if (!seen.has(name)) fail('Required payload missing: ' + name);
   return result;
 }
 export async function main(args) {
   if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-overlay.mjs --verify | --check | --install');
-  if (args[0] === '--help') { console.log('Dareecho overlay. Verify checks the exported files; check validates the target; install creates a new user-local terminal installation. No model downloads, setup, or services are started.'); return; }
+  if (args[0] === '--help') { console.log('Dareecho clean install. Verify checks the exported files; check validates the base; install creates a new user-local Dareecho installation with its OS identity. No model downloads, setup, or services are started.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = homedir();
   if (process.getuid?.() === 0) fail('Run this as the target desktop user, without sudo.');
   await checkInstallParents(userHome);
   const versionPath = join(userHome, '.local/share/omarchy/version');
-  validateTarget(process.platform, process.arch, await readFile(versionPath, 'utf8').catch(() => ''));
+  const baseVersion = (await readFile(versionPath, 'utf8').catch(() => '')).trim();
+  validateTarget(process.platform, process.arch, baseVersion);
   const destination = join(userHome, '.local/share/rein-os');
   const launcher = join(userHome, '.local/bin/rein');
+  const identity = join(userHome, '.local/bin/dareecho');
   await absent(destination);
   await absent(launcher);
+  await absent(identity);
   if (args[0] === '--check') { console.log('REIN_OS_TARGET_READY'); return; }
+  const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
   await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
   await mkdir(dirname(launcher), { recursive: true, mode: 0o700 });
   await mkdir(destination, { mode: 0o700 });
@@ -180,7 +195,10 @@ export async function main(args) {
   const entry = join(destination, 'dist/rein.js');
   const wrapper = '#!/usr/bin/env node\n' + 'import("node:child_process").then(({spawn})=>{\n' + 'const child=spawn(process.execPath,[' + JSON.stringify(entry) + ',...process.argv.slice(2)],{stdio:"inherit"});\n' + 'child.on("error",e=>{console.error(e.message);process.exitCode=1});\nchild.on("exit",(code,signal)=>{if(signal)process.kill(process.pid,signal);else process.exitCode=code??1});\n});\n';
   await writeFile(launcher, wrapper, { flag: 'wx', mode: 0o700 });
-  console.log('REIN_OS_OVERLAY_INSTALLED\nRun ~/.local/bin/rein --version, then ~/.local/bin/rein setup. Configuration and sessions were preserved.');
+  await writeFile(join(destination, 'dareecho-release'), JSON.stringify({ name: 'Dareecho', version: manifest.reinVersion, base: { name: 'Omarchy', installed: baseVersion }, pins: { omarchy: manifest.omarchy, argent: manifest.argent, rainmeter: manifest.rainmeter } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  const dareechoScript = '#!/usr/bin/env node\n' + 'import("node:fs/promises").then(({readFile})=>{readFile((process.env.HOME||"") + "/.local/share/rein-os/dareecho-release", "utf8").then(text=>{const release=JSON.parse(text);if(process.argv[2]==="--json"){console.log(JSON.stringify(release,null,2));}else{console.log(release.name+" "+release.version+" (base: "+release.base.name+" "+release.base.installed+")");}}).catch(error=>{console.error("Dareecho installation not found: "+error.message);process.exitCode=1;});});\n';
+  await writeFile(identity, dareechoScript, { flag: 'wx', mode: 0o700 });
+  console.log('REIN_OS_OVERLAY_INSTALLED\nThe machine now identifies as Dareecho. Run ~/.local/bin/dareecho for the OS identity, then ~/.local/bin/rein --version and ~/.local/bin/rein setup. Configuration and sessions were preserved.');
 }
 const invoked = process.argv[1] && await realpath(process.argv[1]).catch(() => '');
 if (invoked === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
@@ -231,7 +249,7 @@ export async function chromeosUserHome(home = homedir(), allowStaging = false) {
 }
 async function verifyPayload() {
   const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
-  if (manifest.schemaVersion !== 1 || manifest.kind !== 'chromeos-user-overlay' || manifest.target !== 'chromeos' || manifest.bootable !== false || !Array.isArray(manifest.files)) fail('Invalid ChromeOS kit manifest.');
+  if (manifest.schemaVersion !== 1 || manifest.kind !== 'chromeos-user-overlay' || manifest.target !== 'chromeos' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent || !manifest.rainmeter) fail('Invalid ChromeOS kit manifest.');
   const seen = new Set();
   const result = [];
   const payloadRoot = await lstat(join(kit, 'payload'));
@@ -250,23 +268,27 @@ async function verifyPayload() {
     if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
     result.push([entry.path, data]);
   }
-  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini', 'apps/klaud/main.mjs']) if (!seen.has(name)) fail('Required payload missing: ' + name);
   return result;
 }
 export async function main(args) {
   if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-chromeos.mjs --verify | --check | --install');
-  if (args[0] === '--help') { console.log('Dareecho ChromeOS userland overlay. Verify checks the exported files; check validates the ChromeOS user; install creates a new user-local terminal installation. The verified root and A/B partitions are not touched.'); return; }
+  if (args[0] === '--help') { console.log('Dareecho ChromeOS userland kit. Verify checks the exported files; check validates the ChromeOS user; install creates a new user-local Dareecho installation with its OS identity. The verified root and A/B partitions are not touched.'); return; }
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = await chromeosUserHome(homedir(), Boolean(process.env.REIN_OS_OSRELEASE));
   // REIN_OS_OSRELEASE exists so this kit can be tested on non-ChromeOS staging hosts.
   const osRelease = await readFile(process.env.REIN_OS_OSRELEASE || '/etc/os-release', 'utf8').catch(() => '');
   validateTarget(process.platform, osRelease);
+  const baseVersion = (osRelease.match(/^(?:CROS_RELEASE|CHROME_RELEASE)=(.+)$/m) || [])[1]?.trim() || 'chromeos';
   const destination = join(userHome, '.local/share/rein-os');
   const launcher = join(userHome, '.local/bin/rein');
+  const identity = join(userHome, '.local/bin/dareecho');
   await absent(destination);
   await absent(launcher);
+  await absent(identity);
   if (args[0] === '--check') { console.log('REIN_OS_TARGET_READY'); return; }
+  const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
   await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
   await mkdir(dirname(launcher), { recursive: true, mode: 0o700 });
   await mkdir(destination, { mode: 0o700 });
@@ -278,7 +300,10 @@ export async function main(args) {
   const entry = join(destination, 'dist/rein.js');
   const wrapper = '#!/usr/bin/env node\n' + 'import("node:child_process").then(({spawn})=>{\n' + 'const child=spawn(process.execPath,[' + JSON.stringify(entry) + ',...process.argv.slice(2)],{stdio:"inherit"});\n' + 'child.on("error",e=>{console.error(e.message);process.exitCode=1});\nchild.on("exit",(code,signal)=>{if(signal)process.kill(process.pid,signal);else process.exitCode=code??1});\n});\n';
   await writeFile(launcher, wrapper, { flag: 'wx', mode: 0o700 });
-  console.log('REIN_OS_CHROMEOS_INSTALLED\nRun ~/.local/bin/rein --version, then ~/.local/bin/rein setup. Your ChromeOS user data, verified root, and A/B partitions are untouched.');
+  await writeFile(join(destination, 'dareecho-release'), JSON.stringify({ name: 'Dareecho', version: manifest.reinVersion, base: { name: 'ChromeOS', installed: baseVersion }, pins: { argent: manifest.argent, rainmeter: manifest.rainmeter } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  const dareechoScript = '#!/usr/bin/env node\n' + 'import("node:fs/promises").then(({readFile})=>{readFile((process.env.HOME||"") + "/.local/share/rein-os/dareecho-release", "utf8").then(text=>{const release=JSON.parse(text);if(process.argv[2]==="--json"){console.log(JSON.stringify(release,null,2));}else{console.log(release.name+" "+release.version+" (base: "+release.base.name+" "+release.base.installed+")");}}).catch(error=>{console.error("Dareecho installation not found: "+error.message);process.exitCode=1;});});\n';
+  await writeFile(identity, dareechoScript, { flag: 'wx', mode: 0o700 });
+  console.log('REIN_OS_CHROMEOS_INSTALLED\nThe user now identifies as Dareecho. Run ~/.local/bin/dareecho for the OS identity, then ~/.local/bin/rein --version and ~/.local/bin/rein setup. Your ChromeOS user data, verified root, and A/B partitions are untouched.');
 }
 const invoked = process.argv[1] && await realpath(process.argv[1]).catch(() => '');
 if (invoked === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
@@ -338,6 +363,32 @@ The installer confirms the machine identifies as Chrome OS, then creates the two
 
 The verified payload includes \`src/os/assets/rain/theme.json\` and \`wallpaper.svg\`, with the field guide's cream, rust, amber and forest-green palette. After installation these files live under \`~/.local/share/rein-os/src/os/assets/rain/\`. This installer never selects a wallpaper or changes Chrome settings.
 
+## Dareecho skin engine and Argent toolkit
+
+The payload also ships the terminal skin engine (Rainmeter rebuild) and the Argent device toolkit (pin recorded in \`manifest.json\`):
+
+\`\`\`sh
+~/.local/bin/rein os skin render ~/.local/share/rein-os/src/os/assets/skins/dareecho.ini
+~/.local/bin/rein os rainmeter
+~/.local/bin/rein argent status
+~/.local/bin/rein argent flow run <flow.json>
+~/.local/bin/rein argent diff baseline.png actual.png
+\`\`\`
+
+Skins render in the current terminal only; the terminal device provider drives a persistent tmux pane. Neither starts a service, and device targets (iOS, Android, TV, desktop) remain parity gates until driven end to end on real hardware.
+
+## The full Rein system
+
+Dareecho is the full Rein takeover — three tiers on one machine:
+
+| Tier | Component | What it is | Here |
+| --- | --- | --- | --- |
+| agent | rein-agent | CLI agent, always-running gateway (\`rein serve\`), bots, tmux harness | included in this kit |
+| gui | rein-klaʊd | the GUI for the gateway, with bot mode | app source at \`~/.local/share/rein-os/apps/klaud\`; running it inside ChromeOS needs a validated runtime — a gate |
+| os | Dareecho | userland OS identity (the verified root stays ChromeOS) | \`~/.local/bin/dareecho\`, \`dareecho-release\` |
+
+The agent tier runs in the \`arc\` shell exactly as on the VM: \`~/.local/bin/rein serve --port 4317\` for the loopback gateway with bots. The GUI is the parity gate on this target.
+
 ## Acceptance gates before treating ChromeOS as a supported target
 
 - Boot twice after enabling developer mode; confirm shell, network, storage and display.
@@ -349,9 +400,16 @@ The verified payload includes \`src/os/assets/rain/theme.json\` and \`wallpaper.
 ChromeOS ships verified boot (dm-verity) and A/B partitions. A deeper replacement of the rootfs itself is a separate image-level project (coreboot/firmware and \`chromeos-image\` territory) and is not what this kit does. No BIOS or kernel exploit can substitute for those requirements.
 `;
 
-const KIT_README = `# Dareecho VM overlay kit
+const KIT_README = `# Dareecho clean install kit
 
-This kit installs the bundled terminal harness into an already installed Omarchy 4.0.2 VM. It is a development payload, not a bootable image or an OS installer. The native Rein klaud desktop package is not included in this first overlay.
+Dareecho is a replacement OS for an empty machine. The pinned base system (Omarchy 4.0.2) performs the full clean install onto the empty disk — partitioning, kernel, userspace, desktop — and this kit adds Dareecho's userland: the Rein harness payload, the rain theme, the Rainmeter-rebuilt skin engine, and the Argent device toolkit. After the installer runs, the machine identifies as Dareecho:
+
+\`\`\`sh
+~/.local/bin/dareecho
+Dareecho 0.14.2 (base: Omarchy 4.0.2)
+\`\`\`
+
+\`~/.local/share/rein-os/dareecho-release\` records the version, the detected base, and every pinned upstream (Omarchy, Argent, Rainmeter). The kit itself is not a bootable image; the base ISO is the installation media. A fully Dareecho-built image — own base system, kernel, and bootable media — remains a build gate; this kit is the clean-install path for an empty machine today. The native Rein klaud desktop package is not included in this first release.
 
 Dareecho is the OS build's display name. The CLI remains \`rein os\`; existing installation paths and manifest fields remain stable for compatibility.
 
@@ -380,18 +438,19 @@ node fetch-upstream.mjs ./omarchy-source
 
 That command downloads the exact Omarchy source revision and checks the result. It does not run upstream scripts or build an ISO. A source checkout alone is not bootable installation media.
 
-## Apply the Dareecho overlay in the VM
+## Complete the Dareecho install in the VM
 
 Run without sudo:
 
 \`\`\`sh
 node install-overlay.mjs --check
 node install-overlay.mjs --install
+~/.local/bin/dareecho
 ~/.local/bin/rein --version
 ~/.local/bin/rein setup
 \`\`\`
 
-The installer creates ~/.local/share/rein-os and ~/.local/bin/rein, refusing to overwrite either. Existing ~/.rein configuration, accounts and sessions remain intact. Add ~/.local/bin to PATH if your shell does not already include it. Setup remains interactive; no background inference, cloud account, system service, model, or network listener is enabled by the overlay.
+The installer creates ~/.local/share/rein-os, ~/.local/bin/rein and ~/.local/bin/dareecho, refusing to overwrite any of them. It also writes ~/.local/share/rein-os/dareecho-release with the OS identity: the Dareecho version, the detected Omarchy base, and the Omarchy/Argent/Rainmeter pins. Existing ~/.rein configuration, accounts and sessions remain intact. Add ~/.local/bin to PATH if your shell does not already include it. Setup remains interactive; no background inference, cloud account, system service, model, or network listener is enabled by the install.
 
 ## Rain theme preview
 
@@ -403,6 +462,54 @@ The installer creates ~/.local/share/rein-os and ~/.local/bin/rein, refusing to 
 Animation runs only in the current interactive terminal, at eight frames per second. Press q or Ctrl-C to restore the screen and input mode. REIN_REDUCED_MOTION=1 keeps even an animated request static; NO_COLOR disables ANSI palette colors. The default preview and --static are plain text and work in pipes.
 
 The verified payload includes src/os/assets/rain/theme.json and wallpaper.svg, with the field guide's cream, rust, amber and forest-green palette. The wallpaper is a static 1920-by-1080 SVG. After installation these files live under ~/.local/share/rein-os/src/os/assets/rain/. They provide a theme basis for later desktop integration; this installer never selects a wallpaper, changes terminal preferences, writes Omarchy theme settings, or installs an animated desktop background.
+
+## Dareecho skin engine (Rainmeter rebuild)
+
+The payload ships the terminal skin engine rebuilt from Rainmeter's skin model (pinned GPL-2.0 source is the reviewed reference, not copied code) and a sample skin, installed at ~/.local/share/rein-os/src/os/assets/skins/dareecho.ini:
+
+\`\`\`sh
+~/.local/bin/rein os skin render ~/.local/share/rein-os/src/os/assets/skins/dareecho.ini
+~/.local/bin/rein os skin render ~/.local/share/rein-os/src/os/assets/skins/dareecho.ini --frames 16
+~/.local/bin/rein os skin install <skin-directory>
+~/.local/bin/rein os skin list
+~/.local/bin/rein os rainmeter
+\`\`\`
+
+Render is static by default and pipe-safe; --frames animates on the alternate screen (q or Ctrl-C restores it). Skins are INI: [Measure*] sections compute values, [Meter*] sections render them, [Variables] and styles are shared. The installer never starts a service for this; skins run when you render them.
+
+## Argent device toolkit
+
+The same bundle carries the Argent device toolkit (pinned Apache-2.0 upstream, recorded in manifest.json): provider contract, record & replay flows, and pure-TS PNG capture and diffing.
+
+\`\`\`sh
+~/.local/bin/rein argent status
+~/.local/bin/rein argent rebuild
+~/.local/bin/rein argent flow validate <flow.json>
+~/.local/bin/rein argent flow run <flow.json>
+~/.local/bin/rein argent screenshot --out shot.png
+~/.local/bin/rein argent diff baseline.png actual.png
+\`\`\`
+
+The terminal provider drives a persistent Rein tmux pane (type, key, screenshot, capture-text). iOS, Android, TV and desktop targets are parity gates: the contract and flows are device-agnostic, and a target counts as supported only once a real device has been driven end to end.
+
+## The full Rein system
+
+Dareecho is the full Rein takeover — three tiers on one machine:
+
+| Tier | Component | What it is | Here |
+| --- | --- | --- | --- |
+| agent | rein-agent | CLI agent, always-running gateway (\`rein serve\`), bots, tmux harness | included in this kit |
+| gui | rein-klaʊd | the GUI for the gateway, with bot mode | app source at \`~/.local/share/rein-os/apps/klaud\`; an Electron runtime for Linux is a gate. On macOS the published app connects to \`rein serve\` |
+| os | Dareecho | clean install with OS identity | \`~/.local/bin/dareecho\`, \`dareecho-release\` |
+
+Run the stack in the VM (the gateway is the always-running part; nothing here is a background service until you start it):
+
+\`\`\`sh
+~/.local/bin/rein serve --port 4317     # loopback AG-UI gateway: agent + bots
+~/.local/bin/rein serve --mobile --host <private-ip> --port 4318   # opt-in device gateway
+\`\`\`
+
+The gateway API is HTTP on loopback: \`/health\`, \`/state\`, \`/bots\` (list and create bot identities), \`/bots/<id>/messages\`, \`/run\`. Bots are named persistent agent identities with their own stored conversations — that is the bot mode the GUI displays. The macOS app (apps/klaud, published separately) renders the same gateway; the app source in this kit is the reviewed reference for that GUI, and driving it on Linux needs a validated Electron runtime before it counts.
 
 ## Acceptance gates before making a reusable image
 

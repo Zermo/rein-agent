@@ -1,5 +1,5 @@
 /** Private, atomically updated state for the explicitly enabled autonomy service. */
-import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -36,13 +36,27 @@ function regularFile(path: string, lock = false): void {
 	const stat = lstatSync(path);
 	if (!stat.isFile() || stat.isSymbolicLink() || !lock && stat.nlink !== 1 || stat.size > (lock ? 1024 : 4_000_000)) throw new Error("Autonomy state must be a bounded regular file without links.");
 }
-export function readState(): AutonomyState {
-	if (existsSync(autonomyDirectory()) && lstatSync(autonomyDirectory()).isSymbolicLink()) throw new Error("Autonomy state directory cannot be a symbolic link.");
-	const path = join(autonomyDirectory(), "state.json");
-	if (!existsSync(path)) return initialState();
-	regularFile(path);
-	const state = JSON.parse(readFileSync(path, "utf8"));
-	return validateState(state);
+export function readState(home = autonomyHome()): AutonomyState {
+	const directory = join(resolve(home), "autonomy"), path = join(directory, "state.json");
+	let fd: number | undefined;
+	try {
+		const directoryStat = lstatSync(directory);
+		if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("Autonomy state directory must be an ordinary directory, not a symbolic link.");
+		regularFile(path);
+		fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+		const stat = fstatSync(fd);
+		if (!stat.isFile() || stat.nlink !== 1 || stat.size > 4_000_000) throw new Error("Autonomy state must be a bounded regular file without links.");
+		// Read a bounded descriptor, so replacement with a link or FIFO cannot
+		// redirect or block an observer, and concurrent growth stays bounded.
+		const bytes = Buffer.alloc(stat.size + 1);
+		let size = 0, count: number;
+		while (size < bytes.length && (count = readSync(fd, bytes, size, bytes.length - size, null)) > 0) size += count;
+		if (size > stat.size) throw new Error("Autonomy state changed while reading.");
+		return validateState(JSON.parse(bytes.subarray(0, size).toString("utf8")));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return initialState();
+		throw error;
+	} finally { if (fd !== undefined) closeSync(fd); }
 }
 function validateState(state: any): AutonomyState {
 	if (state?.planner !== undefined && !["rules", "main"].includes(state.planner)) throw new Error("Invalid autonomy planner. Select rules or main.");

@@ -24,6 +24,7 @@ struct ReinBot: Codable, Identifiable, Equatable, Hashable, Sendable {
     let id: String
     let name: String
     let sessionId: String
+    var avatar: String? = nil
 }
 
 struct ReinApproval: Codable, Identifiable, Equatable, Sendable {

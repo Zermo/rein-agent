@@ -194,6 +194,7 @@ test("close drains real shell cancellation and all session writes before resolvi
 	let marker = "";
 	const f = await fixture(t, () => call("bash", { command: `printf started > '${marker}'; sleep 30` }));
 	marker = join(f.workspace, "started");
+	assert.equal((await f.post("/settings", { bashApproval: "ask" })).status, 200);
 	const bot = await (await f.post("/bots", { name: "Shutdown" })).json();
 	const stream = await readerFor(await f.post("/run", { botId: bot.id, threadId: bot.sessionId, message: "Start fixture" }));
 	const approval = (await stream.until(event => event.name === "klaud.approval")).value;
@@ -205,6 +206,114 @@ test("close drains real shell cancellation and all session writes before resolvi
 	const transcript = loadSession(bot.sessionId).messages;
 	assert.ok(transcript.some(message => message.role === "toolResult"), "tool cleanup and persistence must finish before close resolves");
 	assert.equal(transcript.at(-1)?.role, "toolResult");
+});
+
+test("Bash auto-approval skips popups, persists, and can be changed back to ask", { timeout: 15000 }, async t => {
+	const f = await fixture(t, (_body, count) => count % 2 === 1 ? call("bash", { command: "printf 'approved fixture'" }, `shell-${count}`) : answer());
+	const bot = await (await f.post("/bots", { name: "Shell policy" })).json();
+	assert.equal((await (await f.get("/settings")).json()).bashApproval, "auto");
+	const automatic = events(await (await f.post("/run", { threadId: bot.sessionId, botId: bot.id, message: "Run fixture" })).text());
+	assert.equal(automatic.some(event => event.name === "klaud.approval"), false);
+	assert.ok(automatic.some(event => event.type === "TOOL_CALL_RESULT" && event.content === "approved fixture"));
+	assert.equal((await f.post("/settings", { bashApproval: "ask" })).status, 200);
+	await f.restart();
+	assert.equal((await (await f.get("/settings")).json()).bashApproval, "ask");
+	const stream = await readerFor(await f.post("/run", { threadId: bot.sessionId, botId: bot.id, message: "Review fixture" }));
+	const approval = (await stream.until(event => event.name === "klaud.approval")).value;
+	assert.equal(approval.tool, "bash");
+	assert.equal((await f.post(`/runs/${approval.runId}/approvals/${approval.id}`, { allow: false })).status, 200);
+	await stream.finish();
+	assert.equal((await f.post("/settings", { bashApproval: "auto" })).status, 200);
+	assert.equal((await f.post("/settings", { bashApproval: "invalid" })).status, 400);
+	assert.equal((await f.post("/settings", { secret: "fixture-secret" })).status, 400);
+	assert.equal((await (await f.get("/settings")).json()).bashApproval, "auto");
+	assert.equal((await fetch(f.server.url + "/settings")).status, 401);
+	assert.equal((await fetch(f.server.url + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bashApproval: "ask" }) })).status, 401);
+	assert.equal(statSync(join(f.home, "klaud/run-settings.json")).mode & 0o777, 0o600);
+});
+
+test("saved desktop reasoning effort controls the next model request without changing task budgets", { timeout: 15000 }, async t => {
+	const f = await fixture(t), configFile = join(f.home, "config.json");
+	const config = { ...JSON.parse(readFileSync(configFile, "utf8")), maxTurns: 120, maxIterations: 17, maxTokens: 2048 };
+	writeFileSync(configFile, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+	const configBytes = readFileSync(configFile);
+	const initial = await (await f.get("/settings")).json();
+	assert.equal(initial.reasoningEffort, "default"); assert.equal(initial.reasoningControl.mode, "server-dependent");
+	assert.ok(initial.reasoningControl.supported.includes("high")); assert.equal(f.requests.length, 0, "reading settings must not contact a model server");
+	const bot = await (await f.post("/bots", { name: "Reasoning control" })).json();
+	for (const [effort, expected] of [["high", "high"], ["off", "none"], ["default", undefined]] as const) {
+		const saved = await f.post("/settings", { reasoningEffort: effort }); assert.equal(saved.status, 200);
+		assert.equal((await saved.json()).reasoningEffort, effort);
+		if (effort === "high") { await f.restart(); assert.equal((await (await f.get("/settings")).json()).reasoningEffort, "high"); }
+		const output = events(await (await f.post("/run", { botId: bot.id, threadId: bot.sessionId, message: `Exercise ${effort} with a synthetic model.` })).text());
+		assert.equal(output.some(event => event.type === "RUN_ERROR"), false);
+		assert.equal(output.filter(event => event.type === "RUN_FINISHED").length, 1);
+		const request = f.requests.at(-1);
+		assert.equal(request.reasoning_effort, expected);
+		if (effort === "default") assert.equal(Object.hasOwn(request, "reasoning_effort"), false, "provider default must remove the previous explicit wire override");
+		assert.deepEqual(readFileSync(configFile), configBytes, "desktop controls must preserve provider configuration and turn/iteration/token budgets");
+	}
+	assert.equal(f.requests.length, 3);
+});
+
+test("settings reject unsupported subscription CLI effort atomically without saving or launching a model", async t => {
+	const f = await fixture(t), configFile = join(f.home, "config.json"), settingsFile = join(f.home, "klaud", "run-settings.json");
+	assert.equal((await f.post("/settings", { bashApproval: "ask", reasoningEffort: "default" })).status, 200);
+	const originalSettings = readFileSync(settingsFile), base = JSON.parse(readFileSync(configFile, "utf8"));
+	delete process.env.REIN_BASE_URL; delete process.env.REIN_MODEL;
+	for (const provider of ["codex", "copilot", "grok"]) {
+		writeFileSync(configFile, JSON.stringify({ ...base, provider, baseUrl: `cli://${provider}`, model: "default", maxTurns: 120, maxIterations: 17 }));
+		const configBytes = readFileSync(configFile), status = await (await f.get("/settings")).json();
+		assert.equal(status.reasoningControl.mode, "unsupported"); assert.deepEqual(status.reasoningControl.supported, ["default"]);
+		const rejected = await f.post("/settings", { reasoningEffort: "high", bashApproval: "auto" });
+		assert.equal(rejected.status, 400); assert.match((await rejected.json()).error, /subscription CLI manages its own reasoning/);
+		assert.deepEqual(readFileSync(settingsFile), originalSettings, "an invalid effort cannot partially change the Bash approval preference");
+		assert.deepEqual(readFileSync(configFile), configBytes); assert.equal((await (await f.get("/settings")).json()).bashApproval, "ask");
+	}
+	assert.equal(f.requests.length, 0);
+});
+
+test("first-run settings work before model setup without discovery or writing provider config", async t => {
+	const f = await fixture(t), configFile = join(f.home, "config.json"), settingsFile = join(f.home, "klaud", "run-settings.json");
+	rmSync(configFile); delete process.env.REIN_BASE_URL; delete process.env.REIN_MODEL; delete process.env.REIN_API;
+	await f.restart();
+	const originalFetch = globalThis.fetch, unexpectedRequests: string[] = [];
+	globalThis.fetch = ((input, init) => {
+		const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+		if (!target.startsWith(f.server.url + "/")) { unexpectedRequests.push(target); return Promise.reject(new Error("First-run settings cannot discover or contact a model endpoint.")); }
+		return originalFetch(input, init);
+	}) as typeof fetch;
+	t.after(() => { globalThis.fetch = originalFetch; });
+	const response = await f.get("/settings"); assert.equal(response.status, 200);
+	const settings = await response.json();
+	assert.equal(settings.bashApproval, "auto"); assert.equal(settings.reasoningEffort, "default");
+	assert.equal(settings.reasoningControl.mode, "unsupported"); assert.deepEqual(settings.reasoningControl.supported, ["default"]);
+	assert.match(settings.reasoningControl.description, /Connect a model/);
+	assert.equal(existsSync(settingsFile), false, "reading defaults must not write a settings file");
+	const saved = await f.post("/settings", { bashApproval: "ask" }); assert.equal(saved.status, 200); assert.equal((await saved.json()).bashApproval, "ask");
+	const settingsBytes = readFileSync(settingsFile), rejected = await f.post("/settings", { reasoningEffort: "high" });
+	assert.equal(rejected.status, 400); assert.match((await rejected.json()).error, /Connect a model/);
+	assert.deepEqual(readFileSync(settingsFile), settingsBytes); assert.equal((await (await f.get("/settings")).json()).bashApproval, "ask");
+	assert.equal(existsSync(configFile), false, "desktop preferences cannot invent provider configuration");
+	assert.equal(f.requests.length, 0); assert.deepEqual(unexpectedRequests, []);
+});
+
+test("activity requires authentication and observing a fresh install creates no state", async t => {
+	const f = await fixture(t), configFile = join(f.home, "config.json");
+	rmSync(configFile); delete process.env.REIN_BASE_URL; delete process.env.REIN_MODEL; delete process.env.REIN_API;
+	await f.restart();
+	const inventory = (directory: string, prefix = ""): string[] => readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+		const relative = prefix + entry.name;
+		return [relative, ...(entry.isDirectory() ? inventory(join(directory, entry.name), relative + "/") : [])];
+	}).sort();
+	const before = inventory(f.home);
+	assert.equal((await fetch(f.server.url + "/activity")).status, 401);
+	for (let attempt = 0; attempt < 2; attempt++) {
+		const response = await f.get("/activity"); assert.equal(response.status, 200);
+		const activity = await response.json(); assert.equal(typeof activity, "object"); assert.ok(activity !== null);
+	}
+	assert.deepEqual(inventory(f.home), before, "observing activity cannot bootstrap helper, model or autonomy state");
+	assert.equal(existsSync(configFile), false); assert.equal(f.requests.length, 0);
 });
 
 test("large histories page without exceeding the app response cap or altering saved content", async t => {

@@ -84,3 +84,15 @@ test("Finder launch finds normal CLI installs while preserving configured PATH p
   assert.equal(environment.PATH, "/custom/bin:/usr/bin:/custom/bin:.:");
   assert.equal(localRuntimeEnvironment({ packaged: false, environment, home: "/home/operator/.rein" }).PATH, environment.PATH);
 });
+
+test("an assisted development launch uses its new home workspace without writing into the checkout", t => {
+  const options = fixture(t), sourceRoot = join(options.root, "checkout"), appDirectory = join(sourceRoot, "apps/klaud");
+  mkdirSync(join(sourceRoot, "dist"), { recursive: true });
+  writeFileSync(join(sourceRoot, "dist/rein.js"), "// bundle fixture\n");
+  const reinHome = join(options.userHome, ".klaudbot");
+  const runtime = prepareLocalRuntime({ ...options, packaged: false, isolated: true, appDirectory, reinHome });
+  assert.equal(runtime.entry, join(sourceRoot, "dist/rein.js"));
+  assert.equal(runtime.cwd, join(reinHome, "workspace"));
+  assert.ok(existsSync(runtime.cwd));
+  assert.ok(!existsSync(join(sourceRoot, "workspace")));
+});
