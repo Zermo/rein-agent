@@ -9,6 +9,8 @@
  *   rein gates <file> [--mode m] unlazy: lint / status / approve / reverify a ledger
  *   rein models                 list what rein can see (local servers, presets)
  *   rein hardware [--json]      profile this machine + what it can run (stolen from Magnitude)
+ *   rein learn [--json]         read-only learn pass: boot chain + surface, writes a dossier
+ *   rein export browse|presets  keep personal files before an OS replacement (copies, never deletes)
  *   rein doctor [--fix]         auto-detect + self-heal the whole stack (Magnitude doctor, extended)
  *   rein heartbeat              self-sustaining loop: self-heal → HEARTBEAT.md tasks → self-advance
  *   rein setup [--yes|--status] interactive onboarding: pick model, test, save config
@@ -88,6 +90,13 @@ Usage:
   rein hardware [--json]        model fit and serving recipes for this machine
     --context <tokens>          plan the recipe's context memory
     --focus everyday|coding|ops|research|creative   choose task-oriented recommendations
+  rein learn [--json]           read-only learn pass on this machine (macOS/Windows/Linux, any arch)
+                                writes a new dossier directory under ~/.rein/redteam/
+  rein learn ios [--udid U]     learn an attached iOS device via libimobiledevice
+    --output <new-directory>    write the dossier to a new directory of your choice
+  rein export browse            Finder-style TUI: choose personal files, export before an OS replace
+  rein export presets [--to D]  copy standard personal data groups (Documents, Mail, keys, …)
+  rein export <paths…> --to D   copy chosen files/folders to a new directory; never deletes sources
   rein doctor [--fix] [--json]  auto-detect the whole stack; --fix self-repairs (pull/bundle/pull-model/chmod)
   rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
                                 (--improve [goal] adds one self-improvement iteration; idle if no tasks)
@@ -432,6 +441,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		const focus = stringFlag(flags, "focus") ?? readOperatorProfile().profile?.operator_profile.focus;
 		if (focus !== undefined && !["everyday", "coding", "ops", "research", "creative"].includes(focus)) throw new Error("--focus must be everyday, coding, ops, research, or creative.");
 		return printHardwareReport({ json: flags.json === true, contextTokens: numberFlag(flags, "context", 1), focus: focus as "everyday" | "coding" | "ops" | "research" | "creative" | undefined });
+	}
+
+	if (_[0] === "learn") {
+		const { runLearnCommand } = await import("./learn/command.ts");
+		process.exitCode = await runLearnCommand(_.slice(1), flags);
+		return;
+	}
+
+	if (_[0] === "export") {
+		const { runExportCommand } = await import("./export/command.ts");
+		process.exitCode = await runExportCommand(_.slice(1), flags, { tty: process.stdin.isTTY === true });
+		return;
 	}
 
 	if (_[0] === "doctor") {

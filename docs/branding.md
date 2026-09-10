@@ -3,7 +3,9 @@
 The artwork matches the installation field guide's cream paper, rust mark,
 charcoal type, mustard grid, and retro computer illustration. The R contains
 a horse-profile cutout. The small SVG mark is also embedded in the guide header
-and favicon.
+and favicon. Dareecho and rein-klaʊd use the same system: Dareecho frames its
+rain around a readable terminal, while the apps use the field-manual controls
+and hard rules for real chat and approval state.
 
 | Asset | Format | Use |
 | --- | --- | --- |
@@ -37,3 +39,20 @@ artwork's aspect ratio. The final prompts are recorded in
 Palette: cream `#f5eddc`, charcoal `#252a25`, rust `#b54229`, mustard `#ebbc5c`,
 and green `#284d3d`. Keep the mark clear of nearby text and preserve the horse
 counter. At small sizes, use the simple mark rather than a full card.
+
+## Product previews
+
+These are checked-in product assets and QA captures, not concept art. They are
+the canonical repository previews for the OS kit and the rein-klaʊd interfaces;
+the linked source files retain their original resolution.
+
+| Surface | Preview | What it establishes |
+| --- | --- | --- |
+| Dareecho rain plate | [![Dareecho rain wallpaper](../src/os/assets/rain/wallpaper.svg)](../src/os/assets/rain/wallpaper.svg) | The OS kit shares the cream, rust, amber, green, and ink palette; rain stays in the frame rather than masquerading as task activity. |
+| rein-klaʊd desktop, light | [![rein-klaud light welcome screen](../.hallmark/qa-welcome-light.jpg)](../.hallmark/qa-welcome-light.jpg) | The desktop keeps the field-guide card, hard rules, square controls, and R-horse mark. |
+| rein-klaʊd desktop, night | [![rein-klaud night chat screen](../.hallmark/qa-chat-night.jpg)](../.hallmark/qa-chat-night.jpg) | Night mode reverses the reading contrast while preserving rust actions and terminal-green operational output. |
+| rein-klaʊd iPhone | [![rein-klaud iPhone live run](../apps/klaud-ios/QA/iPhone-17-Pro-Max-live-run.jpg)](../apps/klaud-ios/QA/iPhone-17-Pro-Max-live-run.jpg) | The mobile client carries the same hierarchy into a compact, resumable gateway surface. |
+
+Do not use the QA captures as generic stock imagery or crop out the status and
+approval context. Regenerate a capture after a material UI change, then update
+this page and the relevant app QA notes together.

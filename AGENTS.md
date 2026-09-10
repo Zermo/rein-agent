@@ -41,6 +41,11 @@ Keep changes small and preserve compatibility with self-hosted model APIs.
 - `codex/rein-os`: Dareecho OS overlays, platform planning, and managed model-hosting
   development. Keep these commands, assets, tests, and generated bundles off the
   reskin branch. Build each branch's bundle from its own source tree.
+- `dev/dareecho-learn`: Dareecho Learn dossiers and copy-only export flows. Keep
+  `rein learn` read-only, retain the refusal-to-overwrite behavior, and do not
+  introduce CyberStrike code, offensive tools, or a runtime dependency into the
+  Rein bundle. The public documentation must describe CyberStrike as credited
+  research and a separately bounded future integration.
 
 ## Public examples and private installations
 

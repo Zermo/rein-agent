@@ -8,6 +8,43 @@ Dareecho is the OS build's display name. The stable CLI is `rein os`, developmen
 
 See [model and OS validation](model-os-validation.md) for completed checks and untested target behavior.
 
+## Dareecho Learn: inspect before replacing
+
+Run the read-only learn pass before choosing an OS path. `rein learn` is the
+Rein command for Dareecho Learn: it records what this machine can actually
+report about its boot chain, security posture, persistence surface, and the
+evidence behind each probe. It does not install an OS, change firmware, alter
+accounts, or start a service.
+
+```sh
+rein learn
+rein learn --json
+rein learn ios --udid your_device_udid
+```
+
+Each host or iOS run writes a fresh dossier under `~/.rein/redteam/` by default:
+`dossier.md` for review, `dossier.json` for tooling, and an `evidence/` directory.
+If a dossier directory exists, the command chooses the next free name. Read the [Dareecho export
+guide](wiki/Dareecho-export.md) for the complete pre-replacement sequence,
+including the iOS prerequisites and copy-only file export commands.
+
+The dossier pass is Rein's implemented red-team *assessment* boundary. It uses
+platform probes and records unavailable facts as notes. CyberStrike informed the
+research and is credited in the [red-team plan](dareecho-redteam-plan.md), but
+its offensive tooling is not imported, invoked, or bundled by Rein.
+
+Before any destructive replacement, copy personal files to a destination you
+control:
+
+```sh
+rein export presets --to /path/to/backup
+# or choose files interactively:
+rein export browse
+```
+
+Export only copies. It never moves or deletes source files, and it refuses a
+destination inside a selected source tree.
+
 ```sh
 rein os plan --mode host
 rein os plan --mode image --json
@@ -105,6 +142,6 @@ Flow files follow the upstream v1 schema: steps with `action` (tap, swipe, type,
 3. Exercise the optional headless helper's resource ceiling, stop/restart behavior and approval handling.
 4. Test update/recovery on a VM copy before producing a reusable image. Keep a template free of accounts, transcripts and machine identifiers and defer personal onboarding to its owner.
 5. Add a versioned desktop integration and reproducible image build. Omarchy's [cidata flow](https://github.com/omacom/omarchy/blob/v4.0.2/manual/51-unattended-installs.md) is documented for later automation; this kit does not fabricate its disk configuration or treat it as a post-install extension hook.
-6. Validate exact physical hardware, backups, recovery, encryption and disk selection in a dedicated installer before offering an OS replacement. The ordinary Rein app installer stays separate from disk installation.
+6. Validate exact physical hardware, backups, recovery, encryption and disk selection in a dedicated installer before offering an OS replacement. Run Dareecho Learn and make a verified external export part of that installer flow. The ordinary Rein app installer stays separate from disk installation.
 
 Hardware discovery can choose known drivers and model recipes. It cannot generate unsupported firmware, unlock a platform through exploitation, or certify a machine from its CPU architecture alone.

@@ -16,6 +16,11 @@ state. Eight short 48 kHz PCM cues reproduce the desktop cue frequencies and
 timing without a runtime dependency. Sounds are on by default and the switch is
 stored only on the device.
 
+The checked-in [branding previews](../../docs/branding.md#product-previews)
+include the iPhone live-run capture alongside the desktop and Dareecho assets.
+Use them as the visual reference for changes; static rain and activity color
+must never imply a host run is active.
+
 An exact first-line `[RESULT]`, `[OPINION]`, `[CHOICE]`, `[CHANGE]`, or `[EDIT]`
 marker becomes part of the visible reply label and is removed from the message
 body. Near matches remain ordinary text. Completion rows show only the model

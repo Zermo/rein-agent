@@ -82,3 +82,18 @@ an existing desktop theme. No wallpaper or Omarchy theme was activated.
 
 No operating system, user model connection, installed helper or user service
 was changed by this validation pass.
+
+## Dareecho Learn and export boundary
+
+The integrated `rein learn` and `rein export` paths have their own focused
+fixtures for host and iOS dossiers, ChromeOS detection, copy-only export,
+preset selection, and the interactive export browser. They are deliberately
+separate from the OS-overlay verification above: a dossier is a read-only
+assessment and an export copies user-selected data; neither one authorizes an
+OS replacement.
+
+The public [Dareecho export wiki page](wiki/Dareecho-export.md) is the
+operator-facing runbook. The [red-team plan](dareecho-redteam-plan.md) records
+the engine boundary and the remaining CyberStrike integration work. Do not
+interpret either document as evidence that a bootable Dareecho image, firmware
+writer, or bundled offensive toolkit exists.

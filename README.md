@@ -276,6 +276,11 @@ rein tmux start               start a persistent bash shell
 rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
 rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
 rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
+rein learn [--json]           read-only pass: boot chain + security surface; writes a new dossier
+rein learn ios [--udid U]     learn an attached iOS device via libimobiledevice
+rein export browse            Finder-style TUI: choose personal files, export before an OS replace
+rein export presets [--to D]  copy standard personal data groups (Documents, Mail, keys, …)
+rein export <paths…> --to D   copy chosen files/folders to a directory; sources are never touched
 rein setup                    work preferences, task limits, model, follow-ups, first task
 rein setup --connection-only  change only the model connection
 rein setup profile            offline work-style wizard; review and choose a pack
@@ -434,7 +439,11 @@ Rein now has an explicit [managed model workflow](docs/managed-models.md) for pi
 GGUF downloads, integrity checks, headless serving, and scoped background services.
 Start with `rein model help`. Existing server discovery remains `rein models`.
 The [Dareecho development kit](docs/rein-os.md) prepares a verified terminal overlay
-for an Omarchy VM, with separate platform and installation checks.
+for an Omarchy VM or a ChromeOS userland, with separate platform and installation
+checks. Before considering either path, run `rein learn`: Dareecho Learn writes a
+fresh, read-only machine dossier. Use `rein export` to copy personal files to a
+backup destination before any eventual OS replacement. The
+[Dareecho export wiki page](docs/wiki/Dareecho-export.md) is the operator runbook.
 
 Rein connects to an OpenAI-compatible Chat Completions server on this computer,
 on another machine in your LAN, or through a mesh VPN such as NetBird or Tailscale.
@@ -812,6 +821,44 @@ That ordering is the point: *perception (doctor) → action (tasks) →
 egeneration (improve) → memory (log)*. An agent that can check itself,
 fix itself, do its periodic work, and improve itself from its own lessons
 is the baseline for fully self-sustaining agents.
+
+### Dareecho — learning the machine, keeping the files
+
+Dareecho is the OS-replacement path on top of Rein. **Dareecho Learn** is its
+implemented, read-only assessment pass, exposed through `rein learn`. It learns
+the machine first; the export commands keep the files that are yours before
+anything is replaced. Replacing an OS obviously removes the current image and
+its settings — these are the data-loss prevention steps.
+
+```sh
+rein learn [--json]           read-only pass on this machine: boot chain of trust,
+                              security posture, per-probe evidence. Writes a new
+                              dossier under ~/.rein/redteam/ (refuses to
+                              overwrite). macOS, Windows, Linux, ChromeOS, any
+                              architecture.
+
+rein learn ios [--udid U]     an attached iPhone or iPad via libimobiledevice
+                              (brew install libimobiledevice).
+
+rein export browse            Finder-style TUI: navigate, select files and folders,
+                              export to a new directory. [e] exports, [q] quits.
+
+rein export presets [--to D]  the standard personal data groups: Documents, Desktop,
+                              Downloads, Pictures, Movies, Music — plus Mail,
+                              keychains, browser profiles, and SSH/GPG keys where
+                              they exist. On ChromeOS the same groups, re-homed to
+                              the chronos user directory.
+
+rein export <paths…> --to D   exactly the paths you name.
+```
+
+Export copies. Sources are never moved or deleted; an existing target receives
+newer copies of the same files. The dossier writer is stricter: it refuses an
+existing directory and steps to the next free name instead. Read the
+[Dareecho development guide](docs/rein-os.md) for the VM and ChromeOS overlay
+boundaries, and [Dareecho export](docs/wiki/Dareecho-export.md) for the
+operator-facing sequence. The dossier pass records a red-team assessment; it
+does not bundle or invoke CyberStrike's offensive tooling.
 
 ### Proactive work from task history
 
