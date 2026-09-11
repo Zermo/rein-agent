@@ -4,7 +4,7 @@
 // surface started it can also stop it and report its status.
 // Keep this module Electron-free so the test suite and the Rein CLI run it
 // under plain Node.
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, closeSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
@@ -128,6 +128,59 @@ function databaseUrlConfigured(projectDir, env) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Start lock: serializes concurrent starts (app + CLI) so only one spawns.
+// ---------------------------------------------------------------------------
+
+function startLockFile(paths) {
+  return join(paths.stateDir, "start.lock");
+}
+
+// Acquire the start lock with O_EXCL. A lock whose holder pid is gone is
+// stale (the holder crashed before releasing) and is taken over.
+export function tryAcquireStartLock(paths) {
+  mkdirSync(paths.stateDir, { recursive: true });
+  const lockFile = startLockFile(paths);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const descriptor = openSync(lockFile, "wx");
+      try { writeFileSync(descriptor, `${process.pid}\n`); } finally { closeSync(descriptor); }
+      return true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const holder = readPidFile(lockFile);
+      if (holder !== undefined && isPidAlive(holder)) return false;
+      rmSync(lockFile, { force: true });
+    }
+  }
+  return false;
+}
+
+export function releaseStartLock(paths) {
+  rmSync(startLockFile(paths), { force: true });
+}
+
+// Run fn while holding the start lock. A concurrent start holds it; wait for
+// it to finish (its server becomes reachable, then fn attaches) or time out.
+export async function withStartLock(paths, timeoutMs, fn) {
+  // The holder keeps the lock for its own readiness wait (timeoutMs) plus, on
+  // failure, a graceful stop. Allow a fixed window beyond that — capped so a
+  // small timeout (tests) does not pay a large fixed wait — before giving up.
+  const grace = Math.min(10_000, Math.max(1_000, timeoutMs));
+  const deadline = Date.now() + timeoutMs + grace;
+  for (;;) {
+    if (tryAcquireStartLock(paths)) {
+      try {
+        return await fn();
+      } finally {
+        releaseStartLock(paths);
+      }
+    }
+    await sleep(500);
+    if (Date.now() > deadline) throw new Error("Timed out waiting for another Mastra Factory start to finish.");
+  }
+}
+
 export async function startServer({
   env = process.env, userHome = "", port, timeoutMs = 120_000, attachIfRunning = false, mode = "production", log = () => {},
 } = {}) {
@@ -135,62 +188,67 @@ export async function startServer({
   const paths = statePaths({ env, userHome });
   const resolvedPort = port ?? serverPort({ env });
   const url = serverUrlFor(resolvedPort);
-  const current = await serverStatus({ env, userHome, port: resolvedPort });
-  if (current.state !== "stopped") {
-    if (attachIfRunning) {
-      log(`Using the Mastra Factory server already at ${url}${current.pid ? ` (pid ${current.pid})` : ""}.`);
-      return { pid: current.pid, url, state: current.state };
+  // The status check, spawn, pid publication, and readiness wait are one
+  // critical section. The start lock keeps two supervisors (app + CLI) from
+  // both reading "stopped" and both spawning; a waiter attaches to the winner.
+  return withStartLock(paths, timeoutMs, async () => {
+    const current = await serverStatus({ env, userHome, port: resolvedPort });
+    if (current.state !== "stopped") {
+      if (attachIfRunning) {
+        log(`Using the Mastra Factory server already at ${url}${current.pid ? ` (pid ${current.pid})` : ""}.`);
+        return { pid: current.pid, url, state: current.state };
+      }
+      if (current.state === "running") throw new Error(`A Mastra Factory server is already running (pid ${current.pid}). Stop it first: rein os factory stop`);
+      throw new Error(`A server is already answering on ${url} but this supervisor does not own it. Stop it where it was started.`);
     }
-    if (current.state === "running") throw new Error(`A Mastra Factory server is already running (pid ${current.pid}). Stop it first: rein os factory stop`);
-    throw new Error(`A server is already answering on ${url} but this supervisor does not own it. Stop it where it was started.`);
-  }
-  if (!existsSync(join(paths.projectDir, "package.json"))) throw new Error("The Mastra Factory project is not set up. Run: rein os factory setup");
-  if (!existsSync(join(paths.projectDir, "node_modules"))) throw new Error("The Mastra Factory dependencies are not installed. Run: rein os factory setup");
-  if (mode === "production" && !databaseUrlConfigured(paths.projectDir, env)) {
-    throw new Error("The production profile requires DATABASE_URL (Postgres). Set it in the project .env or the environment — or run the single-machine profile: rein os factory dev");
-  }
-  if (hasBuildScript(paths.projectDir) && !existsSync(join(paths.projectDir, ".mastra", "output")) && mode === "production") {
-    // `mastra start` runs the built server; build it once when it is missing.
-    await buildProject(paths.projectDir, { log });
-  }
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const script = mode === "dev" ? "dev" : "start";
-  // Detached: the server becomes its own process group, so the pid file is a
-  // group id and stopServer can end npm, the shell, and the server together.
-  const child = spawn(npm, ["run", script], {
-    cwd: paths.projectDir,
-    env: { ...env, PORT: String(resolvedPort), NODE_ENV: mode === "dev" ? "development" : "production" },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-    windowsHide: true,
+    if (!existsSync(join(paths.projectDir, "package.json"))) throw new Error("The Mastra Factory project is not set up. Run: rein os factory setup");
+    if (!existsSync(join(paths.projectDir, "node_modules"))) throw new Error("The Mastra Factory dependencies are not installed. Run: rein os factory setup");
+    if (mode === "production" && !databaseUrlConfigured(paths.projectDir, env)) {
+      throw new Error("The production profile requires DATABASE_URL (Postgres). Set it in the project .env or the environment — or run the single-machine profile: rein os factory dev");
+    }
+    if (hasBuildScript(paths.projectDir) && !existsSync(join(paths.projectDir, ".mastra", "output")) && mode === "production") {
+      // `mastra start` runs the built server; build it once when it is missing.
+      await buildProject(paths.projectDir, { log });
+    }
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    const script = mode === "dev" ? "dev" : "start";
+    // Detached: the server becomes its own process group, so the pid file is a
+    // group id and stopServer can end npm, the shell, and the server together.
+    const child = spawn(npm, ["run", script], {
+      cwd: paths.projectDir,
+      env: { ...env, PORT: String(resolvedPort), NODE_ENV: mode === "dev" ? "development" : "production" },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+      windowsHide: true,
+    });
+    const sink = chunk => appendFileSync(paths.logFile, chunk);
+    child.stdout.on("data", sink);
+    child.stderr.on("data", sink);
+    // The pipes would otherwise pin the caller's event loop: a CLI that starts
+    // the server and exits must not wait on them. The app keeps the child.
+    child.stdout.unref();
+    child.stderr.unref();
+    child.once("error", error => log(`Server spawn error: ${error.message}`));
+    child.unref();
+    const pid = child.pid;
+    if (!pid) throw new Error("The Mastra Factory server did not spawn.");
+    writePidFile(paths.pidFile, pid);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!isPidAlive(pid)) {
+        clearPidFile(paths.pidFile);
+        throw new Error(`The Mastra Factory server exited before it was ready.\n${logTail(paths.logFile) || "No server output was captured."}`);
+      }
+      const code = await probeUrl(url, 1500);
+      if (code !== undefined && code >= 200 && code < 400) {
+        log(`Mastra Factory is running at ${url} (pid ${pid}).`);
+        return { pid, url, state: "running" };
+      }
+      await sleep(500);
+    }
+    await stopServer({ env, userHome });
+    throw new Error(`The Mastra Factory server did not become ready within ${Math.round(timeoutMs / 1000)}s.\n${logTail(paths.logFile) || "No server output was captured."}`);
   });
-  const sink = chunk => appendFileSync(paths.logFile, chunk);
-  child.stdout.on("data", sink);
-  child.stderr.on("data", sink);
-  // The pipes would otherwise pin the caller's event loop: a CLI that starts
-  // the server and exits must not wait on them. The app keeps the child.
-  child.stdout.unref();
-  child.stderr.unref();
-  child.once("error", error => log(`Server spawn error: ${error.message}`));
-  child.unref();
-  const pid = child.pid;
-  if (!pid) throw new Error("The Mastra Factory server did not spawn.");
-  writePidFile(paths.pidFile, pid);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!isPidAlive(pid)) {
-      clearPidFile(paths.pidFile);
-      throw new Error(`The Mastra Factory server exited before it was ready.\n${logTail(paths.logFile) || "No server output was captured."}`);
-    }
-    const code = await probeUrl(url, 1500);
-    if (code !== undefined && code >= 200 && code < 400) {
-      log(`Mastra Factory is running at ${url} (pid ${pid}).`);
-      return { pid, url, state: "running" };
-    }
-    await sleep(500);
-  }
-  await stopServer({ env, userHome });
-  throw new Error(`The Mastra Factory server did not become ready within ${Math.round(timeoutMs / 1000)}s.\n${logTail(paths.logFile) || "No server output was captured."}`);
 }
 
 export async function stopServer({ env = process.env, userHome = "", graceMs = 5000, log = () => {} } = {}) {

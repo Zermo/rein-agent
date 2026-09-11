@@ -6749,7 +6749,7 @@ var init_install = __esm({
 });
 
 // apps/factory/supervisor.mjs
-import { appendFileSync, existsSync as existsSync3, lstatSync as lstatSync4, mkdirSync as mkdirSync7, readFileSync as readFileSync5, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
+import { appendFileSync, existsSync as existsSync3, lstatSync as lstatSync4, mkdirSync as mkdirSync7, openSync as openSync3, readFileSync as readFileSync5, rmSync as rmSync2, writeFileSync as writeFileSync6, closeSync as closeSync3 } from "node:fs";
 import { spawn as spawn6 } from "node:child_process";
 import { join as join14 } from "node:path";
 function stateDirFor({ env = process.env, userHome = "" } = {}) {
@@ -6847,6 +6847,49 @@ function databaseUrlConfigured(projectDir, env) {
     return false;
   }
 }
+function startLockFile(paths2) {
+  return join14(paths2.stateDir, "start.lock");
+}
+function tryAcquireStartLock(paths2) {
+  mkdirSync7(paths2.stateDir, { recursive: true });
+  const lockFile = startLockFile(paths2);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const descriptor = openSync3(lockFile, "wx");
+      try {
+        writeFileSync6(descriptor, `${process.pid}
+`);
+      } finally {
+        closeSync3(descriptor);
+      }
+      return true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const holder = readPidFile(lockFile);
+      if (holder !== void 0 && isPidAlive(holder)) return false;
+      rmSync2(lockFile, { force: true });
+    }
+  }
+  return false;
+}
+function releaseStartLock(paths2) {
+  rmSync2(startLockFile(paths2), { force: true });
+}
+async function withStartLock(paths2, timeoutMs, fn) {
+  const grace = Math.min(1e4, Math.max(1e3, timeoutMs));
+  const deadline = Date.now() + timeoutMs + grace;
+  for (; ; ) {
+    if (tryAcquireStartLock(paths2)) {
+      try {
+        return await fn();
+      } finally {
+        releaseStartLock(paths2);
+      }
+    }
+    await sleep(500);
+    if (Date.now() > deadline) throw new Error("Timed out waiting for another Mastra Factory start to finish.");
+  }
+}
 async function startServer({
   env = process.env,
   userHome = "",
@@ -6861,59 +6904,61 @@ async function startServer({
   const paths2 = statePaths({ env, userHome });
   const resolvedPort = port ?? serverPort({ env });
   const url = serverUrlFor(resolvedPort);
-  const current = await serverStatus({ env, userHome, port: resolvedPort });
-  if (current.state !== "stopped") {
-    if (attachIfRunning) {
-      log(`Using the Mastra Factory server already at ${url}${current.pid ? ` (pid ${current.pid})` : ""}.`);
-      return { pid: current.pid, url, state: current.state };
+  return withStartLock(paths2, timeoutMs, async () => {
+    const current = await serverStatus({ env, userHome, port: resolvedPort });
+    if (current.state !== "stopped") {
+      if (attachIfRunning) {
+        log(`Using the Mastra Factory server already at ${url}${current.pid ? ` (pid ${current.pid})` : ""}.`);
+        return { pid: current.pid, url, state: current.state };
+      }
+      if (current.state === "running") throw new Error(`A Mastra Factory server is already running (pid ${current.pid}). Stop it first: rein os factory stop`);
+      throw new Error(`A server is already answering on ${url} but this supervisor does not own it. Stop it where it was started.`);
     }
-    if (current.state === "running") throw new Error(`A Mastra Factory server is already running (pid ${current.pid}). Stop it first: rein os factory stop`);
-    throw new Error(`A server is already answering on ${url} but this supervisor does not own it. Stop it where it was started.`);
-  }
-  if (!existsSync3(join14(paths2.projectDir, "package.json"))) throw new Error("The Mastra Factory project is not set up. Run: rein os factory setup");
-  if (!existsSync3(join14(paths2.projectDir, "node_modules"))) throw new Error("The Mastra Factory dependencies are not installed. Run: rein os factory setup");
-  if (mode === "production" && !databaseUrlConfigured(paths2.projectDir, env)) {
-    throw new Error("The production profile requires DATABASE_URL (Postgres). Set it in the project .env or the environment \u2014 or run the single-machine profile: rein os factory dev");
-  }
-  if (hasBuildScript(paths2.projectDir) && !existsSync3(join14(paths2.projectDir, ".mastra", "output")) && mode === "production") {
-    await buildProject(paths2.projectDir, { log });
-  }
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const script = mode === "dev" ? "dev" : "start";
-  const child = spawn6(npm, ["run", script], {
-    cwd: paths2.projectDir,
-    env: { ...env, PORT: String(resolvedPort), NODE_ENV: mode === "dev" ? "development" : "production" },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-    windowsHide: true
+    if (!existsSync3(join14(paths2.projectDir, "package.json"))) throw new Error("The Mastra Factory project is not set up. Run: rein os factory setup");
+    if (!existsSync3(join14(paths2.projectDir, "node_modules"))) throw new Error("The Mastra Factory dependencies are not installed. Run: rein os factory setup");
+    if (mode === "production" && !databaseUrlConfigured(paths2.projectDir, env)) {
+      throw new Error("The production profile requires DATABASE_URL (Postgres). Set it in the project .env or the environment \u2014 or run the single-machine profile: rein os factory dev");
+    }
+    if (hasBuildScript(paths2.projectDir) && !existsSync3(join14(paths2.projectDir, ".mastra", "output")) && mode === "production") {
+      await buildProject(paths2.projectDir, { log });
+    }
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    const script = mode === "dev" ? "dev" : "start";
+    const child = spawn6(npm, ["run", script], {
+      cwd: paths2.projectDir,
+      env: { ...env, PORT: String(resolvedPort), NODE_ENV: mode === "dev" ? "development" : "production" },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+      windowsHide: true
+    });
+    const sink = (chunk2) => appendFileSync(paths2.logFile, chunk2);
+    child.stdout.on("data", sink);
+    child.stderr.on("data", sink);
+    child.stdout.unref();
+    child.stderr.unref();
+    child.once("error", (error) => log(`Server spawn error: ${error.message}`));
+    child.unref();
+    const pid = child.pid;
+    if (!pid) throw new Error("The Mastra Factory server did not spawn.");
+    writePidFile(paths2.pidFile, pid);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!isPidAlive(pid)) {
+        clearPidFile(paths2.pidFile);
+        throw new Error(`The Mastra Factory server exited before it was ready.
+${logTail(paths2.logFile) || "No server output was captured."}`);
+      }
+      const code = await probeUrl(url, 1500);
+      if (code !== void 0 && code >= 200 && code < 400) {
+        log(`Mastra Factory is running at ${url} (pid ${pid}).`);
+        return { pid, url, state: "running" };
+      }
+      await sleep(500);
+    }
+    await stopServer({ env, userHome });
+    throw new Error(`The Mastra Factory server did not become ready within ${Math.round(timeoutMs / 1e3)}s.
+${logTail(paths2.logFile) || "No server output was captured."}`);
   });
-  const sink = (chunk2) => appendFileSync(paths2.logFile, chunk2);
-  child.stdout.on("data", sink);
-  child.stderr.on("data", sink);
-  child.stdout.unref();
-  child.stderr.unref();
-  child.once("error", (error) => log(`Server spawn error: ${error.message}`));
-  child.unref();
-  const pid = child.pid;
-  if (!pid) throw new Error("The Mastra Factory server did not spawn.");
-  writePidFile(paths2.pidFile, pid);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!isPidAlive(pid)) {
-      clearPidFile(paths2.pidFile);
-      throw new Error(`The Mastra Factory server exited before it was ready.
-${logTail(paths2.logFile) || "No server output was captured."}`);
-    }
-    const code = await probeUrl(url, 1500);
-    if (code !== void 0 && code >= 200 && code < 400) {
-      log(`Mastra Factory is running at ${url} (pid ${pid}).`);
-      return { pid, url, state: "running" };
-    }
-    await sleep(500);
-  }
-  await stopServer({ env, userHome });
-  throw new Error(`The Mastra Factory server did not become ready within ${Math.round(timeoutMs / 1e3)}s.
-${logTail(paths2.logFile) || "No server output was captured."}`);
 }
 async function stopServer({ env = process.env, userHome = "", graceMs = 5e3, log = () => {
 } } = {}) {
@@ -9252,7 +9297,7 @@ var init_compat = __esm({
 });
 
 // src/harness/klaud/shell.ts
-import { closeSync as closeSync3, constants as constants8, lstatSync as lstatSync7, mkdirSync as mkdirSync11, openSync as openSync3, readFileSync as readFileSync9, renameSync as renameSync4, unlinkSync as unlinkSync4, writeFileSync as writeFileSync10 } from "node:fs";
+import { closeSync as closeSync4, constants as constants8, lstatSync as lstatSync7, mkdirSync as mkdirSync11, openSync as openSync4, readFileSync as readFileSync9, renameSync as renameSync4, unlinkSync as unlinkSync4, writeFileSync as writeFileSync10 } from "node:fs";
 import { randomUUID as randomUUID7 } from "node:crypto";
 import { homedir as homedir14 } from "node:os";
 import { dirname as dirname8, join as join24, resolve as resolve15 } from "node:path";
@@ -9290,7 +9335,7 @@ function loadKlaudShell(home) {
   checkStorage(file2);
   let fd;
   try {
-    fd = openSync3(file2, constants8.O_RDONLY | constants8.O_NOFOLLOW);
+    fd = openSync4(file2, constants8.O_RDONLY | constants8.O_NOFOLLOW);
   } catch (error) {
     if (error.code === "ENOENT") return cloneShell(DEFAULT_KLAUD_SHELL);
     throw error;
@@ -9300,7 +9345,7 @@ function loadKlaudShell(home) {
     validateShell(shell);
     return shell;
   } finally {
-    closeSync3(fd);
+    closeSync4(fd);
   }
 }
 function saveKlaudShell(shell, home) {
@@ -9311,13 +9356,13 @@ function saveKlaudShell(shell, home) {
   mkdirSync11(dirname8(file2), { recursive: true, mode: 448 });
   checkStorage(file2);
   const temp = `${file2}.${randomUUID7()}.tmp`;
-  const fd = openSync3(temp, "wx", 384);
+  const fd = openSync4(temp, "wx", 384);
   let staged = true;
   try {
     try {
       writeFileSync10(fd, content);
     } finally {
-      closeSync3(fd);
+      closeSync4(fd);
     }
     checkStorage(file2);
     renameSync4(temp, file2);
@@ -11052,7 +11097,7 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
 });
 
 // src/harness/tools/context.ts
-import { constants as constants10, closeSync as closeSync4, existsSync as existsSync11, fstatSync as fstatSync2, lstatSync as lstatSync9, mkdirSync as mkdirSync14, openSync as openSync4, readSync, readdirSync as readdirSync4, readFileSync as readFileSync15, realpathSync as realpathSync3, writeFileSync as writeFileSync14, renameSync as renameSync5, unlinkSync as unlinkSync5 } from "node:fs";
+import { constants as constants10, closeSync as closeSync5, existsSync as existsSync11, fstatSync as fstatSync2, lstatSync as lstatSync9, mkdirSync as mkdirSync14, openSync as openSync5, readSync, readdirSync as readdirSync4, readFileSync as readFileSync15, realpathSync as realpathSync3, writeFileSync as writeFileSync14, renameSync as renameSync5, unlinkSync as unlinkSync5 } from "node:fs";
 import { dirname as dirname12, isAbsolute as isAbsolute7, join as join31, relative as relative3, resolve as resolve20, sep as sep2 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { randomUUID as randomUUID10 } from "node:crypto";
@@ -11149,7 +11194,7 @@ function contextTools(state, cwd) {
             }
           }
         } else {
-          const fd = openSync4(path2, constants10.O_RDWR | constants10.O_APPEND | constants10.O_CREAT | (constants10.O_NOFOLLOW ?? 0), 384);
+          const fd = openSync5(path2, constants10.O_RDWR | constants10.O_APPEND | constants10.O_CREAT | (constants10.O_NOFOLLOW ?? 0), 384);
           try {
             const stat5 = fstatSync2(fd);
             if (!stat5.isFile() || stat5.nlink > 1) throw new Error("Notes require regular files without hard links.");
@@ -11157,7 +11202,7 @@ function contextTools(state, cwd) {
             if (stat5.size) readSync(fd, last, 0, 1, stat5.size - 1);
             writeFileSync14(fd, `${stat5.size && last[0] !== 10 ? "\n" : ""}${args.content.replace(/\n?$/, "\n")}`);
           } finally {
-            closeSync4(fd);
+            closeSync5(fd);
           }
         }
         return { content: `${op === "write" ? "Wrote" : "Appended to"} .pi/notes/${relative3(root2, path2)}` };
@@ -11438,7 +11483,7 @@ var init_skills = __esm({
 });
 
 // src/harness/autonomy/state.ts
-import { closeSync as closeSync5, constants as constants11, fstatSync as fstatSync3, linkSync, lstatSync as lstatSync10, mkdirSync as mkdirSync15, openSync as openSync5, readFileSync as readFileSync17, readSync as readSync2, realpathSync as realpathSync5, renameSync as renameSync6, statSync as statSync6, unlinkSync as unlinkSync6, writeFileSync as writeFileSync15 } from "node:fs";
+import { closeSync as closeSync6, constants as constants11, fstatSync as fstatSync3, linkSync, lstatSync as lstatSync10, mkdirSync as mkdirSync15, openSync as openSync6, readFileSync as readFileSync17, readSync as readSync2, realpathSync as realpathSync5, renameSync as renameSync6, statSync as statSync6, unlinkSync as unlinkSync6, writeFileSync as writeFileSync15 } from "node:fs";
 import { homedir as homedir19 } from "node:os";
 import { join as join32, resolve as resolve22 } from "node:path";
 import { createHash as createHash10, randomUUID as randomUUID11 } from "node:crypto";
@@ -11459,7 +11504,7 @@ function readState(home = autonomyHome()) {
     const directoryStat = lstatSync10(directory3);
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("Autonomy state directory must be an ordinary directory, not a symbolic link.");
     regularFile3(path2);
-    fd = openSync5(path2, constants11.O_RDONLY | (constants11.O_NOFOLLOW ?? 0) | (constants11.O_NONBLOCK ?? 0));
+    fd = openSync6(path2, constants11.O_RDONLY | (constants11.O_NOFOLLOW ?? 0) | (constants11.O_NONBLOCK ?? 0));
     const stat5 = fstatSync3(fd);
     if (!stat5.isFile() || stat5.nlink !== 1 || stat5.size > 4e6) throw new Error("Autonomy state must be a bounded regular file without links.");
     const bytes = Buffer.alloc(stat5.size + 1);
@@ -11471,7 +11516,7 @@ function readState(home = autonomyHome()) {
     if (error.code === "ENOENT") return initialState();
     throw error;
   } finally {
-    if (fd !== void 0) closeSync5(fd);
+    if (fd !== void 0) closeSync6(fd);
   }
 }
 function validateState(state) {
@@ -12272,7 +12317,7 @@ __export(store_exports, {
   newActivityId: () => newActivityId,
   readActivity: () => readActivity
 });
-import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync16, renameSync as renameSync7, openSync as openSync6, readFileSync as readFileSync18, closeSync as closeSync6, fstatSync as fstatSync4, constants as constants13, existsSync as existsSync15, unlinkSync as unlinkSync7 } from "node:fs";
+import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync16, renameSync as renameSync7, openSync as openSync7, readFileSync as readFileSync18, closeSync as closeSync7, fstatSync as fstatSync4, constants as constants13, existsSync as existsSync15, unlinkSync as unlinkSync7 } from "node:fs";
 import { randomUUID as randomUUID12 } from "node:crypto";
 import { homedir as homedir20 } from "node:os";
 import { join as join34, resolve as resolve25 } from "node:path";
@@ -12283,7 +12328,7 @@ function activityFile(id) {
 function readActivity(id) {
   let fd;
   try {
-    fd = openSync6(activityFile(id), constants13.O_RDONLY | (constants13.O_NOFOLLOW ?? 0) | (constants13.O_NONBLOCK ?? 0));
+    fd = openSync7(activityFile(id), constants13.O_RDONLY | (constants13.O_NOFOLLOW ?? 0) | (constants13.O_NONBLOCK ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
@@ -12295,7 +12340,7 @@ function readActivity(id) {
     if (state.id !== id || !Array.isArray(state.nodes) || state.nodes.length > 256) throw new Error("Invalid activity data.");
     return state;
   } finally {
-    closeSync6(fd);
+    closeSync7(fd);
   }
 }
 var newActivityId, visible2, ActivityJournal;
@@ -12730,7 +12775,7 @@ var init_runner = __esm({
 
 // src/harness/klaud/bots.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
-import { closeSync as closeSync7, constants as constants14, fstatSync as fstatSync5, fsyncSync, lstatSync as lstatSync12, mkdirSync as mkdirSync17, openSync as openSync7, readFileSync as readFileSync19, renameSync as renameSync8, unlinkSync as unlinkSync9, writeFileSync as writeFileSync17 } from "node:fs";
+import { closeSync as closeSync8, constants as constants14, fstatSync as fstatSync5, fsyncSync, lstatSync as lstatSync12, mkdirSync as mkdirSync17, openSync as openSync8, readFileSync as readFileSync19, renameSync as renameSync8, unlinkSync as unlinkSync9, writeFileSync as writeFileSync17 } from "node:fs";
 import { homedir as homedir21 } from "node:os";
 import { join as join35, resolve as resolve26 } from "node:path";
 function validateBotAvatar(value) {
@@ -12784,7 +12829,7 @@ function listBots(home) {
   checkStorage2(root2);
   let fd;
   try {
-    fd = openSync7(join35(root2, "klaud", "bots.json"), constants14.O_RDONLY | constants14.O_NOFOLLOW);
+    fd = openSync8(join35(root2, "klaud", "bots.json"), constants14.O_RDONLY | constants14.O_NOFOLLOW);
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -12794,7 +12839,7 @@ function listBots(home) {
     validateRegistry(registry);
     return registry.bots;
   } finally {
-    closeSync7(fd);
+    closeSync8(fd);
   }
 }
 function removeOwned(home, file2, owned2) {
@@ -12813,7 +12858,7 @@ function lockRegistry(home) {
     checkPath2(file2, false);
     let fd;
     try {
-      fd = openSync7(file2, constants14.O_WRONLY | constants14.O_CREAT | constants14.O_EXCL | constants14.O_NOFOLLOW, 384);
+      fd = openSync8(file2, constants14.O_WRONLY | constants14.O_CREAT | constants14.O_EXCL | constants14.O_NOFOLLOW, 384);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
       Atomics.wait(pause2, 0, 0, 10);
@@ -12821,7 +12866,7 @@ function lockRegistry(home) {
     }
     const owned2 = fstatSync5(fd);
     return () => {
-      closeSync7(fd);
+      closeSync8(fd);
       removeOwned(home, file2, owned2);
     };
   }
@@ -12830,7 +12875,7 @@ function lockRegistry(home) {
 function saveRegistry(home, bots) {
   const file2 = join35(home, "klaud", "bots.json");
   const temp = `${file2}.${randomUUID13()}.tmp`;
-  const fd = openSync7(temp, "wx", 384);
+  const fd = openSync8(temp, "wx", 384);
   const owned2 = fstatSync5(fd);
   let staged = true;
   try {
@@ -12838,7 +12883,7 @@ function saveRegistry(home, bots) {
       writeFileSync17(fd, JSON.stringify({ version: 1, bots }, null, 2) + "\n");
       fsyncSync(fd);
     } finally {
-      closeSync7(fd);
+      closeSync8(fd);
     }
     checkStorage2(home);
     renameSync8(temp, file2);
@@ -12917,7 +12962,7 @@ var init_bots = __esm({
 });
 
 // src/harness/klaud/settings.ts
-import { closeSync as closeSync8, constants as constants15, fstatSync as fstatSync6, lstatSync as lstatSync13, mkdirSync as mkdirSync18, openSync as openSync8, readFileSync as readFileSync20, renameSync as renameSync9, unlinkSync as unlinkSync10, writeFileSync as writeFileSync18 } from "node:fs";
+import { closeSync as closeSync9, constants as constants15, fstatSync as fstatSync6, lstatSync as lstatSync13, mkdirSync as mkdirSync18, openSync as openSync9, readFileSync as readFileSync20, renameSync as renameSync9, unlinkSync as unlinkSync10, writeFileSync as writeFileSync18 } from "node:fs";
 import { randomUUID as randomUUID14 } from "node:crypto";
 import { join as join36, resolve as resolve27 } from "node:path";
 function validateRunSettingsPatch(value) {
@@ -12948,7 +12993,7 @@ function loadKlaudRunSettings(home) {
   try {
     const named = lstatSync13(file2);
     if (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1) throw new Error("Run settings require an ordinary file without symbolic or hard links.");
-    fd = openSync8(file2, constants15.O_RDONLY | (constants15.O_NOFOLLOW ?? 0) | (constants15.O_NONBLOCK ?? 0));
+    fd = openSync9(file2, constants15.O_RDONLY | (constants15.O_NOFOLLOW ?? 0) | (constants15.O_NONBLOCK ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return { ...DEFAULT_KLAUD_RUN_SETTINGS };
     throw error;
@@ -12965,7 +13010,7 @@ function loadKlaudRunSettings(home) {
     validateRunSettingsPatch(settings);
     return { ...DEFAULT_KLAUD_RUN_SETTINGS, ...settings };
   } finally {
-    closeSync8(fd);
+    closeSync9(fd);
   }
 }
 function saveKlaudRunSettings(patch, home) {
@@ -12994,7 +13039,7 @@ var init_settings = __esm({
 });
 
 // src/harness/klaud/activity.ts
-import { closeSync as closeSync9, constants as constants16, fstatSync as fstatSync7, lstatSync as lstatSync14, openSync as openSync9, readSync as readSync3 } from "node:fs";
+import { closeSync as closeSync10, constants as constants16, fstatSync as fstatSync7, lstatSync as lstatSync14, openSync as openSync10, readSync as readSync3 } from "node:fs";
 import { join as join37, resolve as resolve28 } from "node:path";
 function owned(stat5) {
   if (typeof process.getuid === "function" && (stat5.uid !== process.getuid() || (stat5.mode & 18) !== 0)) throw new Error("Untrusted autonomy metadata.");
@@ -13015,7 +13060,7 @@ function sameFile(left, right) {
 function lockOwner(path2) {
   const before = lstatSync14(path2);
   file(before, 1024);
-  const fd = openSync9(path2, constants16.O_RDONLY | (constants16.O_NOFOLLOW ?? 0) | (constants16.O_NONBLOCK ?? 0));
+  const fd = openSync10(path2, constants16.O_RDONLY | (constants16.O_NOFOLLOW ?? 0) | (constants16.O_NONBLOCK ?? 0));
   try {
     const stat5 = fstatSync7(fd);
     file(stat5, 1024);
@@ -13028,7 +13073,7 @@ function lockOwner(path2) {
     if (!owner || !Number.isSafeInteger(owner.pid) || owner.pid < 1 || owner.pid > 2147483647 || typeof owner.token !== "string" || !owner.token.length || owner.token.length > 128) throw new Error("Invalid autonomy lock owner.");
     return { pid: owner.pid, stat: stat5 };
   } finally {
-    closeSync9(fd);
+    closeSync10(fd);
   }
 }
 function klaudActivity(home) {
@@ -13534,7 +13579,7 @@ __export(serve_exports, {
 });
 import { createServer as createServer3 } from "node:http";
 import { createHash as createHash11, randomBytes as randomBytes4, randomUUID as randomUUID16, timingSafeEqual } from "node:crypto";
-import { closeSync as closeSync10, constants as constants17, existsSync as existsSync16, fstatSync as fstatSync8, lstatSync as lstatSync15, mkdirSync as mkdirSync19, openSync as openSync10, readFileSync as readFileSync21, renameSync as renameSync10, unlinkSync as unlinkSync11, writeFileSync as writeFileSync19 } from "node:fs";
+import { closeSync as closeSync11, constants as constants17, existsSync as existsSync16, fstatSync as fstatSync8, lstatSync as lstatSync15, mkdirSync as mkdirSync19, openSync as openSync11, readFileSync as readFileSync21, renameSync as renameSync10, unlinkSync as unlinkSync11, writeFileSync as writeFileSync19 } from "node:fs";
 import { homedir as homedir24 } from "node:os";
 import { dirname as dirname15, join as join40, resolve as resolve31 } from "node:path";
 function json(res, status2, value) {
@@ -13554,7 +13599,7 @@ function privateRead(file2) {
   checkStorage3(file2);
   let fd;
   try {
-    fd = openSync10(file2, constants17.O_RDONLY | constants17.O_NOFOLLOW);
+    fd = openSync11(file2, constants17.O_RDONLY | constants17.O_NOFOLLOW);
   } catch (error) {
     if (error.code === "ENOENT") return;
     throw error;
@@ -13563,7 +13608,7 @@ function privateRead(file2) {
     if (fstatSync8(fd).size > MAX_BODY) throw new Error("rein-kla\u028Ad state file is too large.");
     return readFileSync21(fd, "utf8");
   } finally {
-    closeSync10(fd);
+    closeSync11(fd);
   }
 }
 function privateWrite(file2, content) {
@@ -14251,7 +14296,7 @@ __export(mobile_exports, {
   validateMobileTrustedOrigin: () => validateMobileTrustedOrigin
 });
 import { createHash as createHash12, randomBytes as randomBytes5, randomUUID as randomUUID17, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { closeSync as closeSync11, constants as constants18, existsSync as existsSync17, fstatSync as fstatSync9, lstatSync as lstatSync16, mkdirSync as mkdirSync20, openSync as openSync11, readFileSync as readFileSync22, renameSync as renameSync11, unlinkSync as unlinkSync12, writeFileSync as writeFileSync20 } from "node:fs";
+import { closeSync as closeSync12, constants as constants18, existsSync as existsSync17, fstatSync as fstatSync9, lstatSync as lstatSync16, mkdirSync as mkdirSync20, openSync as openSync12, readFileSync as readFileSync22, renameSync as renameSync11, unlinkSync as unlinkSync12, writeFileSync as writeFileSync20 } from "node:fs";
 import { createServer as createServer4 } from "node:http";
 import { BlockList, isIP as isIP2 } from "node:net";
 import { homedir as homedir25 } from "node:os";
@@ -14313,7 +14358,7 @@ function readCredential(file2) {
   checkCredentialPath(file2);
   let fd;
   try {
-    fd = openSync11(file2, constants18.O_RDONLY | constants18.O_NOFOLLOW);
+    fd = openSync12(file2, constants18.O_RDONLY | constants18.O_NOFOLLOW);
   } catch (error) {
     if (error.code === "ENOENT") return;
     throw error;
@@ -14324,7 +14369,7 @@ function readCredential(file2) {
     if ((stat5.mode & 63) !== 0) throw new Error("Mobile gateway credential file must not be accessible by group or other users.");
     return readFileSync22(fd, "utf8").trim();
   } finally {
-    closeSync11(fd);
+    closeSync12(fd);
   }
 }
 function writeCredential(file2, token2) {
@@ -15471,7 +15516,7 @@ var init_budget_setup = __esm({
 // src/harness/autonomy/history.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { createHash as createHash14 } from "node:crypto";
-import { closeSync as closeSync12, constants as constants21, fstatSync as fstatSync10, lstatSync as lstatSync18, openSync as openSync12, readSync as readSync4, readdirSync as readdirSync5, realpathSync as realpathSync6 } from "node:fs";
+import { closeSync as closeSync13, constants as constants21, fstatSync as fstatSync10, lstatSync as lstatSync18, openSync as openSync13, readSync as readSync4, readdirSync as readdirSync5, realpathSync as realpathSync6 } from "node:fs";
 import { join as join45 } from "node:path";
 function redact(value) {
   return value.replace(/-----BEGIN [^-]*(?:PRIVATE KEY|OPENSSH)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/g, "[credential omitted]").split("\n").map((line) => {
@@ -15505,7 +15550,7 @@ function readBoundedSession(path2, allowed) {
   try {
     const before = lstatSync18(path2);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) return void 0;
-    fd = openSync12(path2, constants21.O_RDONLY | (constants21.O_NOFOLLOW ?? 0));
+    fd = openSync13(path2, constants21.O_RDONLY | (constants21.O_NOFOLLOW ?? 0));
     const stat5 = fstatSync10(fd);
     if (!stat5.isFile() || stat5.nlink !== 1 || stat5.ino !== before.ino || stat5.dev !== before.dev) return void 0;
     const metadata = Buffer.alloc(Math.min(stat5.size, 8192));
@@ -15528,7 +15573,7 @@ function readBoundedSession(path2, allowed) {
   } catch {
     return void 0;
   } finally {
-    if (fd !== void 0) closeSync12(fd);
+    if (fd !== void 0) closeSync13(fd);
   }
 }
 function git2(cwd, args) {
@@ -15701,7 +15746,7 @@ var init_rules = __esm({
 // src/harness/autonomy/service.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
 import { createHash as createHash15, randomUUID as randomUUID19 } from "node:crypto";
-import { closeSync as closeSync13, constants as constants22, fstatSync as fstatSync11, lstatSync as lstatSync19, mkdirSync as mkdirSync22, openSync as openSync13, readFileSync as readFileSync24, renameSync as renameSync13, unlinkSync as unlinkSync14, writeFileSync as writeFileSync22 } from "node:fs";
+import { closeSync as closeSync14, constants as constants22, fstatSync as fstatSync11, lstatSync as lstatSync19, mkdirSync as mkdirSync22, openSync as openSync14, readFileSync as readFileSync24, renameSync as renameSync13, unlinkSync as unlinkSync14, writeFileSync as writeFileSync22 } from "node:fs";
 import { homedir as homedir28 } from "node:os";
 import { basename as basename2, dirname as dirname19, isAbsolute as isAbsolute9, join as join46, relative as relative5, resolve as resolve35 } from "node:path";
 function absolute2(value, name) {
@@ -15806,7 +15851,7 @@ function ownedContent2(path2, options) {
   try {
     const stat5 = lstatSync19(path2);
     if (!stat5.isFile() || stat5.isSymbolicLink()) throw new Error(`Refusing to modify a service path that is not a regular file: ${path2}`);
-    fd = openSync13(path2, constants22.O_RDONLY | (constants22.O_NOFOLLOW ?? 0));
+    fd = openSync14(path2, constants22.O_RDONLY | (constants22.O_NOFOLLOW ?? 0));
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw error;
@@ -15821,7 +15866,7 @@ function ownedContent2(path2, options) {
     if (boundary < 0 || text !== signedContent2(body2, cfg.scope, cfg.platform === "darwin")) throw new Error(`Refusing to overwrite or delete a modified or unrelated service file: ${path2}`);
     return text;
   } finally {
-    closeSync13(fd);
+    closeSync14(fd);
   }
 }
 function prepareDirectory2(path2, userHome) {

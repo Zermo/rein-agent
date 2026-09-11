@@ -121,10 +121,11 @@ else {
       if (!state.installed) await installDependencies(projectDir, { log });
       if (!existsSync(join(projectDir, ".mastra", "output"))) await buildProject(projectDir, { log });
       await startSupervised();
+      return true;
     })().catch(error => {
       dialog.showMessageBox({ type: "error", title: "Mastra Factory", message: "Mastra Factory could not start.", detail: safeError(error), buttons: ["OK"], noLink: true });
       app.quit();
-      return;
+      return false;
     });
     if (!setup) return;
 

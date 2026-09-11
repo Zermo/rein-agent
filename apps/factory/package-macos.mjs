@@ -120,7 +120,7 @@ try {
   run("/usr/bin/ditto", [electronApp, app]);
   rmSync(join(resources, "default_app.asar"), { force: true });
   rmSync(join(resources, "electron.icns"), { force: true });
-  for (const file of ["main.mjs", "provision.mjs", "lifecycle.mjs", "icon.png", "NOTICE", "README.md"]) copy(join(directory, file), join(appCode, file));
+  for (const file of ["main.mjs", "provision.mjs", "supervisor.mjs", "lifecycle.mjs", "icon.png", "NOTICE", "README.md"]) copy(join(directory, file), join(appCode, file));
   writeFileSync(join(appCode, "package.json"), JSON.stringify({ name: "mastra-factory", productName: metadata.productName, version: metadata.version, type: "module", main: "main.mjs", license: metadata.license }, null, 2) + "\n");
   for (const file of templateFiles) copy(join(templateRoot, file), join(resources, "factory-template", file));
   copy(join(root, "LICENSE"), join(resources, "LICENSE.dareecho"));
