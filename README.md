@@ -2,8 +2,9 @@
 
 [![Rein repository card](docs/assets/rein-repo-card.jpg)](https://zermo.github.io/rein-agent/)
 
-A minimal, local-first agent harness. Three layers, zero runtime dependencies,
-any OpenAI-compatible model — local by default, any provider by choice.
+A terminal-first, local-first agent harness. One message model, one event
+protocol, zero runtime dependencies — any OpenAI-compatible server, local by
+default, any provider by choice.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -16,23 +17,54 @@ any OpenAI-compatible model — local by default, any provider by choice.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Built by studying two codebases:
+Three surfaces share the same loop:
+
+| Surface | What it is | Entry point |
+| --- | --- | --- |
+| **rein** (terminal) | The harness: REPL, one-shot, loops, gates, autonomy, web, meat review | `rein` |
+| **rein-klaud** (desktop) | Native Mac app over Rein's loopback AG-UI server: named bots, saved chat, approvals; pairs with an iOS companion | `rein klaud` |
+| **Dareecho** (machine) | Learn the machine before replacing its OS, keep your files, and run a software factory on it | `rein learn` · `rein os` · Mastra Factory app |
+
+The current release is **v0.15.0**. Open the
+[retro installation field guide](https://zermo.github.io/rein-agent/) for a
+visual walkthrough with copyable commands, and the
+[public wiki](https://github.com/Zermo/rein-agent/wiki) for setup, models, and
+deployment. For offline use, open `docs/install.html` from a local checkout.
+
+[![Retro Rein installation guide](docs/assets/rein-field-guide-card.jpg)](https://zermo.github.io/rein-agent/)
+
+[Repo cards and logo files](docs/branding.md) · [Publish the guide](docs/guide-deployment.md)
+
+## What Rein is
+
+An agent harness you run in the terminal you already use — Ghostty, Terminal,
+a NodeTerm terminal node, or any compatible shell. It speaks one message model
+(user / assistant[content blocks] / toolResult) and one streaming event
+protocol (`start → *_start → *_delta → *_end → done|error`) over every
+provider quirk: Ollama, LM Studio, llama.cpp, vLLM, any OpenAI-compatible
+server, or the official Codex/Copilot/Grok CLIs for subscription accounts.
+
+The guided setup asks how you work, suggests an optional workflow pack, sets
+task limits, connects a model, and offers follow-ups before your first task in
+the same terminal. It can help with everyday plans and small improvements as
+well as coding, services, research, and creative work.
+
+Built by studying three codebases:
 
 - **[pi](https://github.com/earendil-works/pi)** — the architecture. Its
-  `packages/ai` proves that the hard part of an agent harness is the
-  *translation layer* (one message model + one streaming event protocol over
-  every provider quirk), and its `packages/agent` proves the loop is just:
+  `packages/ai` proves the hard part of an agent harness is the
+  *translation layer*; its `packages/agent` proves the loop is just:
   stream → run tools (parallel) → repeat, with steering queues, hooks, and
   truncation safety. Rein implements these interfaces with zero runtime npm
   dependencies. Pinned native components ship under `vendor/`; esbuild bundles
-  the CLI to plain JS because Node won't type-strip `.ts` under `node_modules`.
+  the CLI to plain JS because Node won't type-strip `.ts` under
+  `node_modules`.
 - **[karpathy/autoresearch](https://github.com/karpathy/autoresearch)** — the
   *loop* that runs an agent forever against one metric, keeping what improves
   and discarding what doesn't. rein encodes that twice: `rein loop` (any
   project, any metric) and `rein improve` (the harness itself is the target).
-
-And **[karpathy/nanoGPT](https://github.com/karpathy/nanoGPT)** — the values:
-readable over clever, with explicit limits on context and tool output.
+- **[karpathy/nanoGPT](https://github.com/karpathy/nanoGPT)** — the values:
+  readable over clever, with explicit limits on context and tool output.
 
 ## Requirements
 
@@ -42,20 +74,13 @@ readable over clever, with explicit limits on context and tool output.
 - Any OpenAI-compatible server. Local ones are probed automatically in
   priority order: **Ollama** → **LM Studio** → **llama.cpp** → **vLLM**.
 - tmux and bash for persistent shells and `--visual` on macOS/Linux/WSL.
-  Ordinary chat and foreground bash work without tmux. Meat ships prebuilt WASM;
-  users do not need Go. Native Windows tmux is not supported.
+  Ordinary chat and foreground bash work without tmux. Meat ships prebuilt
+  WASM; users do not need Go. Native Windows tmux is not supported.
+- The **Mastra Factory** app and its server need Node ≥ 22.19 — they run as a
+  separate service alongside the harness, not inside it, so the terminal CLI
+  keeps its Node 18 floor.
 
 ## Install
-
-For a visual walkthrough with copyable commands, open the
-[retro installation field guide](https://zermo.github.io/rein-agent/). It covers
-your current terminal, your own model server over SSH, local models, and supported cloud connections. The
-[public wiki](https://github.com/Zermo/rein-agent/wiki) has setup and deployment
-instructions. For offline use, open `docs/install.html` from a local checkout.
-
-[![Retro Rein installation guide](docs/assets/rein-field-guide-card.jpg)](https://zermo.github.io/rein-agent/)
-
-[Repo cards and logo files](docs/branding.md) · [Publish the guide](docs/guide-deployment.md)
 
 Install on macOS, Linux, or WSL and start the guided setup:
 
@@ -63,11 +88,10 @@ Install on macOS, Linux, or WSL and start the guided setup:
 curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash
 ```
 
-Rein runs in the terminal you already use: Ghostty, Terminal, a NodeTerm terminal
-node, or another compatible shell. On macOS the installer also installs the
-native klaʊdbot app and opens it after successful guided setup. On Linux and
-WSL it starts interactive Rein in the current terminal. Neither path requires
-NodeTerm or a browser activity page.
+On macOS the installer also installs the native klaʊdbot app and opens it
+after successful guided setup. On Linux and WSL it starts interactive Rein in
+the current terminal. Neither path requires NodeTerm or a browser activity
+page.
 
 To install only the Mac app from the latest published release, with its own
 runtime and no global Node installation:
@@ -85,13 +109,13 @@ review a suggested workflow pack, then connect a model. You can change answers
 before saving, choose another pack, or skip skills. The final step offers
 optional follow-ups for a folder you choose and a first task to try.
 
-Flags after `bash -s --`: `--skip-setup` skips onboarding, model checks, and launch;
-`--yes` runs unattended connection setup without inventing a profile;
-`--no-launch` finishes setup without starting interactive Rein.
-`--no-app` skips the native Mac app; `--app-only` installs just that app.
-`--terminal-only` keeps setup and chat in the current terminal. NodeTerm is optional:
-use `--nodeterm` only when you want its separate native macOS app installed and
-registered. Open it explicitly with `rein desktop open`.
+Flags after `bash -s --`: `--skip-setup` skips onboarding, model checks, and
+launch; `--yes` runs unattended connection setup without inventing a profile;
+`--no-launch` finishes setup without starting interactive Rein. `--no-app`
+skips the native Mac app; `--app-only` installs just that app.
+`--terminal-only` keeps setup and chat in the current terminal. NodeTerm is
+optional: use `--nodeterm` only when you want its separate native macOS app
+installed and registered. Open it explicitly with `rein desktop open`.
 
 ```sh
 rein                            # start in this terminal and directory
@@ -101,24 +125,18 @@ rein desktop install --no-launch # install/register optional NodeTerm
 rein desktop status
 ```
 
-The optional NodeTerm installer downloads a verified upstream release on a local
-macOS desktop. See [terminal and desktop integration](docs/nodeterm-desktop.md)
-for supported platforms and native-app limits.
+The [klaʊdbot desktop](docs/klaud.md) adds named bots, saved chat, live shell
+preferences, and approval dialogs over Rein's loopback AG-UI server. The Mac
+app includes the CLI and its runtime. From a development checkout, run
+`npm --prefix apps/klaud ci` once, then `rein klaud`. The terminal CLI still
+has zero runtime dependencies.
 
-The [klaʊdbot desktop](docs/klaud.md) adds named bots, saved chat,
-live shell preferences, and approval dialogs over Rein's loopback AG-UI server.
-The Mac app includes the CLI and its runtime. From a development checkout,
-run `npm --prefix apps/klaud ci` once, then `rein klaud`.
-The terminal CLI still has zero runtime dependencies. Ponytail workflows are
-bundled as skill text; `rein train recipe.yaml` can use a separate optional
-Automodel environment. See the desktop guide for setup and limits.
-
-The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, vLLM),
-accepts remote hosts, and offers cloud API keys or supported subscription logins.
-It tests API connections and saves `~/.rein/config.json` (or `$REIN_HOME/config.json`).
-Run `rein setup` again for the full walkthrough. Use
-`rein setup --connection-only` to change only the model connection,
-or `rein setup --status` to check it.
+The wizard detects local AI servers (Ollama, LM Studio, llama.cpp, VLLM),
+accepts remote hosts, and offers cloud API keys or supported subscription
+logins. It tests API connections and saves `~/.rein/config.json` (or
+`$REIN_HOME/config.json`). Run `rein setup` again for the full walkthrough.
+Use `rein setup --connection-only` to change only the model connection, or
+`rein setup --status` to check it.
 
 Or install manually:
 
@@ -129,11 +147,11 @@ rein setup
 
 The CLI ships prebuilt (`dist/rein.js`, committed), so the install needs no
 build step and no devDependencies. To rebuild the bundle after changing
-source: `npm install && npm run bundle` (esbuild, dev-only).
-The compatibility commands `rein-agent` and `rein` point to the same CLI.
+source: `npm install && npm run bundle` (esbuild, dev-only). The
+compatibility commands `rein-agent` and `rein` point to the same CLI.
 
-Developing from source: `npm ci --include=dev && npm test` (offline smoke and regression suites).
-For a repository-based workspace in ChatGPT, follow the
+Developing from source: `npm ci --include=dev && npm test` (offline smoke and
+regression suites). For a repository-based workspace in ChatGPT, follow the
 [Codex cloud development setup](docs/cloud-development.md).
 
 To update an installed copy on macOS, Linux, or WSL:
@@ -143,30 +161,23 @@ rein update
 ```
 
 This downloads the latest installer with curl, then runs it with Bash and
-`--skip-setup`. It installs the current prebuilt bundle from `main`, preserving
-your configuration, credentials, notes, and sessions under `$REIN_HOME`
-(default `~/.rein`). It skips onboarding and model connection checks, so your
-model server can be offline. Restart running Rein sessions after the update.
-Local changes in the installer checkout are preserved; commit or move them
-before updating.
-
-For an older Rein build that does not have the command yet, use:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh | bash -s -- --skip-setup
-```
+`--skip-setup`. It installs the current prebuilt bundle from `main`,
+preserving your configuration, credentials, notes, and sessions under
+`$REIN_HOME` (default `~/.rein`). Restart running Rein sessions after the
+update. Local changes in the installer checkout are preserved; commit or move
+them before updating.
 
 Native Windows users can rerun the manual npm installation command above.
 
 ```sh
 # local, with the Ollama app or server already running:
 ollama pull qwen2.5-coder:7b
-rein-agent
+rein
 
 # any provider:
-rein-agent --provider deepseek --model deepseek-chat
-rein-agent --provider openai --model gpt-4o
-REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein-agent -p "hello"
+rein --provider deepseek --model deepseek-chat
+rein --provider openai --model gpt-4o
+REIN_BASE_URL=http://localhost:11434/v1 REIN_MODEL=qwen2.5-coder:7b rein -p "hello"
 ```
 
 ### Tell Rein how you work
@@ -175,10 +186,10 @@ The operator-profile wizard asks six practical questions: how to explain an
 answer, what you want help with, how much initiative to take, useful pacing,
 what makes unfamiliar information clearer, and how to check understanding.
 Options include everyday organization and making one small thing easier, as
-well as coding, services, research, and creative work. Preferences such as small
-steps, examples, checkpoints, or recaps are editable choices, not diagnoses or
-measurements of attention or ability. The supported conversation surface is the
-terminal.
+well as coding, services, research, and creative work. Preferences such as
+small steps, examples, checkpoints, or recaps are editable choices, not
+diagnoses or measurements of attention or ability. The supported conversation
+surface is the terminal.
 
 | Pack | Suggested for | Bundled workflows |
 | --- | --- | --- |
@@ -188,18 +199,12 @@ terminal.
 | `study` | Research and learning | `grounded-research`, `learning-plan` |
 | `studio` | Creative work | `creative-brief`, `visual-review` |
 
-Your task focus determines the suggested pack; communication preferences do not
-push an unrelated task into an ops pack. Choose any pack or none. Except for the
-existing pinned `tdd` workflow, these are original Rein instructions. They do
-not install another agent, application, or connector.
-
 Setup saves `SOUL.md` for agent voice, `USER.md` for your work preferences,
-`AGENTS.md` for the operating brief, and `profile.yaml` for the machine-readable
-`operator_profile`, support preferences, and enabled pack. They live in your
-private `~/.rein`, or `$REIN_HOME`. Existing version 1 profiles are validated and
-adapted in memory; their files remain unchanged until you explicitly save a new
-preview. Old chat/voice preferences remain reference information, not connected
-channels. Explicit saves preserve unmanaged Markdown and back up changed files.
+`AGENTS.md` for the operating brief, and `profile.yaml` for the
+machine-readable `operator_profile`, support preferences, and enabled pack.
+They live in your private `~/.rein`, or `$REIN_HOME`. Existing version 1
+profiles are validated and adapted in memory; their files remain unchanged
+until you explicitly save a new preview.
 
 ```sh
 rein profile                   # view your saved preferences and pack
@@ -209,25 +214,12 @@ rein profile pack everyday     # choose everyday workflows
 rein profile pack none         # disable profile-pack skills
 ```
 
-With the plan preference, Rein explains the plan and why it fits, then continues
-already authorized work. New scope and required approval gates still need
-approval. If you decline a proposal, it offers another useful option rather
-than carrying out the rejected plan. The profile does not change `--ask`, host
-permissions, or background task approvals.
-
-Proactive suggestions are a separate optional setup choice. Default history
-checks use deterministic rules without model calls. A small local helper can
-be installed explicitly; approved tasks use the main model with their own
-budgets. See [background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
-and the [operator-profile walkthrough](https://github.com/Zermo/rein-agent/wiki/Operator-profile).
-
 ### Give tasks enough room to finish
 
-Guided setup now runs through work preferences, task limits, model connection,
-optional follow-ups, and a first task. The default limits are 300 model turns
-per prompt and 25 iterations for `rein loop` or `rein improve`. One turn is one
-model call, including retries. One iteration is a loop round that can use
-several turns. Ordinary chat uses only the turn limit.
+The default limits are 300 model turns per prompt and 25 iterations for
+`rein loop` or `rein improve`. One turn is one model call, including retries.
+One iteration is a loop round that can use several turns. Ordinary chat uses
+only the turn limit.
 
 ```sh
 rein setup budgets                  # offline wizard; review, change, or skip
@@ -237,228 +229,172 @@ rein setup budgets --yes --max-turns 750 --max-iterations 40
 rein --max-turns 1000                # override for this launch
 ```
 
-The wizard offers standard 300/25, extended 1000/100, short 100/10, or exact
-limits. Existing settings appear as the keep-current choice. Saved top-level
-`maxTurns` and `maxIterations` values live in `~/.rein/config.json`, or your
-custom `$REIN_HOME`. Launch flags take priority over saved values. Valid ranges
-are 1 to 10,000 turns and 1 to 1,000 iterations. Longer runs can use more model
-resources or cloud allowance; they do not increase the context window or the
-per-response output limit.
-
 At the turn limit, Rein marks the task `PAUSED` and preserves completed tool
 results. Review the progress, then reply `continue` for another turn budget.
 One-shot `-p` mode saves a resumable session even without `--save`, prints the
 resume command, and exits with code 3. This pause does not mean the task is
-finished. Foreground chat has no fixed overall time cutoff. Background autonomy
-retains its separate execution budgets.
-
-Posthorse can roll a long task into fresh context windows while keeping notes
-and exact history available. The agent still needs to verify live state and
-test its work. More turns cannot guarantee correctness. See
-[task limits](https://github.com/Zermo/rein-agent/wiki/Task-limits) for presets,
-resuming work, and the distinction between turns, context, and output tokens.
+finished. See [task limits](https://github.com/Zermo/rein-agent/wiki/Task-limits)
+for presets, resuming work, and the distinction between turns, context, and
+output tokens.
 
 ## Usage
 
 ```
-rein-agent                    interactive REPL (sessions persist, steering mid-run)
-rein-agent -p "query"         one-shot; --json for the raw event stream
-rein-agent loop               autonomous experiment loop (TASK.md + METRIC.md)
-rein-agent improve [goal]     self-improvement loop on this repo
-rein-agent gates [file] --mode m  unlazy gates: lint | status | approve | reverify
-rein-agent models             what rein can see: local servers + provider presets
-rein skills [name]            bundled workflows and enabled profile-pack skills
+rein                        interactive REPL (sessions persist, steering mid-run)
+rein -p "query"             one-shot; --json for the raw event stream
+rein loop                   autonomous experiment loop (TASK.md + METRIC.md)
+rein improve [goal]         self-improvement loop on this repo
+rein gates [file] --mode m  unlazy gates: lint | status | approve | reverify
+rein models                 what rein can see: local servers + provider presets
+rein skills [name]          bundled workflows and enabled profile-pack skills
 rein debug <folder> [--json]  offline exported-session diagnostics (counts only)
-rein update                   download and install the latest published build
-rein --visual                 explicitly split chat and live activity in tmux
-rein meat --working-tree      review tracked changes with the embedded Meat engine
-rein tmux start               start a persistent bash shell
-rein-agent hardware [--json]  profile this machine + what it can run (tok/s estimates)
-rein doctor [--fix]           auto-detect the whole stack; --fix self-repairs it
-rein heartbeat [--init]       self-sustaining beat: self-heal → HEARTBEAT.md tasks → self-advance
-rein learn [--json]           read-only pass: boot chain + security surface; writes a new dossier
-rein learn ios [--udid U]     learn an attached iOS device via libimobiledevice
-rein export browse            Finder-style TUI: choose personal files, export before an OS replace
-rein export presets [--to D]  copy standard personal data groups (Documents, Mail, keys, …)
-rein export <paths…> --to D   copy chosen files/folders to a directory; sources are never touched
-rein setup                    work preferences, task limits, model, follow-ups, first task
+rein update                 download and install the latest published build
+rein --visual               explicitly split chat and live activity in tmux
+rein meat --working-tree    review tracked changes with the embedded Meat engine
+rein tmux start             start a persistent bash shell
+rein hardware [--json]      profile this machine + what it can run (tok/s estimates)
+rein model help             managed model workflow: pinned GGUF, serving, services
+rein doctor [--fix]         auto-detect the whole stack; --fix self-repairs it
+rein heartbeat [--init]     self-sustaining beat: self-heal → tasks → self-advance
+rein learn [--json]         Dareecho Learn: read-only boot chain + security dossier
+rein learn ios [--udid U]   learn an attached iOS device via libimobiledevice
+rein export browse          Finder-style TUI: choose personal files before an OS replace
+rein export presets [--to D]  copy standard personal data groups; sources are never touched
+rein os help                Dareecho OS: plan | prepare | rain | rainmeter | skin | factory
+rein os factory setup       install Mastra Factory once (template, key, .env, deps, build)
+rein os factory start       Mastra Factory, production profile (built server, DATABASE_URL)
+rein os factory dev         Mastra Factory, single-machine profile (dev server, libSQL)
+rein os factory stop        stop the server this supervisor started
+rein os factory status      server state, URL, pid, paths (--json)
+rein os factory open        start if needed, open the Factory UI in a browser
+rein setup                  work preferences, task limits, model, follow-ups, first task
 rein setup --connection-only  change only the model connection
-rein setup profile            offline work-style wizard; review and choose a pack
-rein setup budgets            offline task limits; also --status or --json
-rein profile                  view your profile (also: --json, setup, pack <name>)
-rein login codex|copilot       official browser/device account sign-in
-rein --version                print version
+rein setup profile          offline work-style wizard; review and choose a pack
+rein setup budgets          offline task limits; also --status or --json
+rein profile                view your profile (also: --json, setup, pack <name>)
+rein login codex|copilot|grok  official browser/device account sign-in
+rein klaud                  the native klaʊdbot desktop app
+rein autonomy init|scan|enable|disable  background supervisor from task history
+rein web install|search|fetch           Obscura-backed web search and page render
+rein --version              print version
 ```
 
-REPL commands: `/help /legend /new /model /tools /sessions /resume <id> /branch /context /new-context [handoff] /skills /skill <name> <task> /stop /quit`.
-While the agent is working, just type — it's injected as a steering message
-after the current tool batch (pi's steering, not pi's queue).
-`/stop` immediately cancels the current turn and its owned shell process group.
-Queued input is discarded; send a new request when ready to continue.
+REPL commands: `/help /legend /new /model /tools /sessions /resume <id>
+/branch /context /new-context [handoff] /skills /skill <name> <task>
+/stop /quit`. While the agent is working, just type — it's injected as a
+steering message after the current tool batch (pi's steering, not pi's queue).
+`/stop` immediately cancels the current turn and its owned shell process
+group. Queued input is discarded; send a new request when ready to continue.
 
-### Explicit Chat Completions connections
+## Mastra Factory — a software factory on this machine
+
+[Mastra Factory](https://github.com/mastra-ai/mastra) is the open-source
+agent-building machine from the Mastra team. Rein installs it **as
+itself** — same name, same UI, same icon — as a native app that sits
+alongside Dareecho: open the app and look at your machine's software factory
+running live. It is not rebranded; the [NOTICE](apps/factory/NOTICE) keeps
+Mastra's name, attribution, and Apache-2.0 terms where they belong.
+
+The app (`apps/factory`) and the terminal share one supervisor
+(`apps/factory/supervisor.mjs`). Whichever surface you use, the other sees
+the same server:
 
 ```sh
-rein setup --connection-only --api chat-completions --base-url http://model-host:1234
-# When the remote API listens only on its own loopback interface:
-rein setup --connection-only --api chat-completions --ssh model-host --base-url 127.0.0.1:1234
+rein os factory setup     # one-time install: template, key, .env, deps, build — never overwrites
+rein os factory start     # production profile: built server, requires DATABASE_URL (Postgres)
+rein os factory dev       # single-machine profile: dev server, libSQL storage, no database
+rein os factory stop      # SIGTERM→SIGKILL of the server process group
+rein os factory status [--json]
+rein os factory open      # start if needed, then open the UI in a browser
 ```
 
-The wizard records `"api": "chat-completions"` and shows the final POST endpoint.
-`REIN_API=chat-completions` and `--api chat-completions` make the same choice for
-an invocation. Existing HTTP configurations default to this protocol. Custom
-proxy prefixes stay intact; JSON/SSE replies, text-part arrays, refusals, and
-usage replies without `total_tokens` work through the same adapter used by setup.
-Official subscription CLIs keep their own transport and login; HTTP protocol
-flags are rejected when a CLI provider is selected. `model-host` must be your configured
-SSH alias; Rein does not create a public listener on the remote machine.
+Facts that matter:
 
-### Clear operator and agent replies
+- **Pure copy.** The generated project is a byte-identical copy of
+  [mastra-ai/softwarefactory-template](https://github.com/mastra-ai/softwarefactory-template)
+  (pinned in `vendor/mastra-factory/` with a
+  [provenance record](vendor/mastra-factory/PROVENANCE.md)), provisioned once
+  into `~/.local/share/rein-factory`. Setup never overwrites an existing
+  project.
+- **Separate service.** Factory needs Node ≥ 22.19 and carries its own
+  dependency tree, so it runs as a supervised service on port 4111 instead of
+  inside the Node-18 `dist/rein.js` bundle. State (pid, log, port) lives under
+  `~/.local/state/rein-factory`.
+- **Two profiles.** The built server always requires `DATABASE_URL`; the dev
+  profile runs the single-machine libSQL storage. The app chooses by
+  configuration: `DATABASE_URL` present → production, otherwise dev.
+- **No rebrand, no overwrite.** Factory's name and UI stay Mastra's; your
+  generated project and its `.env` are user state, created once and left
+  alone on updates.
 
-Interactive chat labels every operator turn and agent reply. Operator prompts
-are cyan. The `REIN` label keeps its name and cycles its accent and quarter-circle
-marker with each numbered reply. Tools have separate named labels. While you
-type steering, the display pauses under an operator prompt; agent execution
-continues, and its output resumes under the same reply identity after Enter.
-`NO_COLOR` removes ANSI color while preserving the labels and spacing.
+The integration study, license reading (including the dormant Kepler EE code
+in `@mastra/core`), and the wrap design are in
+[docs/mastra-factory-integration.md](docs/mastra-factory-integration.md).
+Model wiring is done in Factory's own Settings › Models; the Dareecho model
+host plugs in there as a custom OpenAI-compatible provider.
 
-`MESSAGE` labels ordinary assistant text. A reply that begins with an explicit
-`[RESULT]`, `[OPINION]`, `[CHOICE]`, `[CHANGE]`, or `[EDIT]` heading keeps that
-agent-declared purpose in its label. These labels do not measure confidence or
-verify the claim. Known tool contracts get READ, WRITE, EDIT, EXEC, or other
-action labels; matching call numbers connect each request with its tool result.
-COMPLETE, HANDOFF, ERROR, CANCELED, and LIMIT show how a reply ended.
+## Dareecho — learning the machine, keeping the files, building on it
 
-THINKING shows a status without exposing hidden reasoning. When the provider
-reports reasoning-token usage, Rein shows that count at the end of the reply.
-This adapter does not report reasoning effort, and token count or elapsed time
-does not measure thinking strength. Use `/legend` for the full label key.
-
-### Terminal activity and persistent bash
+Dareecho is the machine-facing tier on top of Rein. **Dareecho Learn** is the
+implemented, read-only assessment pass, exposed through `rein learn`. The
+export commands keep the files that are yours before anything is replaced.
+`rein os` carries the OS development surface:
 
 ```sh
-rein --visual
-rein tmux start 'export PROJECT_MODE=dev'
-rein tmux list
-rein tmux send <session-id> 'printf "%s\n" "$PROJECT_MODE"'
-rein tmux capture <session-id>
-rein tmux attach <session-id>
-rein tmux interrupt <session-id>
-rein tmux stop <session-id>
+rein learn [--json]           read-only pass: boot chain of trust, security posture,
+                              per-probe evidence. Writes a new dossier under
+                              ~/.rein/redteam/ (refuses to overwrite).
+
+rein learn ios [--udid U]     an attached iPhone or iPad via libimobiledevice.
+
+rein export browse            Finder-style TUI: navigate, select, export. [e] exports, [q] quits.
+
+rein export presets [--to D]  the standard personal data groups: Documents, Desktop,
+                              Downloads, Pictures, Movies, Music — plus Mail,
+                              keychains, browser profiles, SSH/GPG keys where present.
+
+rein export <paths…> --to D   exactly the paths you name.
+
+rein os plan [--json]         assess this machine and show installation gates (read-only)
+rein os prepare --output D    stage a pinned Omarchy VM overlay kit, or the ChromeOS
+                              userland kit (--target omarchy|chromeos)
+rein os rain [--animate]      preview the rain motif in this terminal (static by default)
+rein os rainmeter [--json]    Rainmeter rebuild report: pin, mapping, gates
+rein os skin render|install|list   render, stage, and list Rainmeter-model skins
+rein os factory …             the Mastra Factory surface above
 ```
 
-The `bash` tool accepts `mode: "tmux"` and an optional existing `session` ID.
-The separate `tmux` tool exposes start/list/capture/send/interrupt/stop. Environment,
-working directory and interactive programs persist across turns. Rein uses its
-own server and scopes sessions by workspace. `/stop` cancels foreground work;
-intentionally persistent tmux sessions remain until explicitly stopped.
-
-Interactive Rein keeps activity in the current terminal. Messages, thinking
-status, tool calls, and results have distinct labels. Use `/activity` for the
-session's numbered timeline and `/activity 3` to inspect a step's details.
-`/legend` explains the labels. This works without tmux, NodeTerm, or a browser.
-NodeTerm and browser canvases are explicit options; there is no automatic
-browser fallback.
-
-`--visual` opens chat beside a terminal activity tree. Press **Ctrl-b Right** to
-focus the activity pane. Arrow keys select terminal steps, **f** follows,
-and **q** closes the activity pane. Thinking appears as a status; only visible
-assistant text and actual tool activity are recorded.
-
-Detach with **Ctrl-b d**. The launcher prints an activity ID and a resume command;
-use `rein tmux list --view`, `rein tmux attach <id> --view`, or
-`rein tmux stop <id> --view` to manage visual sessions. Their server is separate
-from the model's tool shells. Closing a view does not implicitly stop persistent
-tool shells. `rein watch <activity-id>` reopens its activity tree;
-`rein canvas <activity-id>` serves the optional canvas and prints its local URL;
-add `--browser` only to open it in a browser. Ctrl-C stops that server.
-
-Activity snapshots live in `$REIN_HOME/activity`, mode 0600, and retain up to 256
-recent steps within 3 MB. Long details are abbreviated. They contain local tool
-inputs/results, so treat them like session files. The canvas listens only on
-127.0.0.1 and requires its printed capability URL. No transcript is uploaded.
-The activity log is separate from Posthorse and is never added to model context.
-
-### Embedded Meat diff review
-
-```sh
-rein meat                     # latest commit
-rein meat main HEAD           # commit range
-rein meat --staged            # staged changes
-rein meat --working-tree      # tracked changes against HEAD
-rein meat --working-tree --json
-```
-
-Single-commit review compares merges to their first parent; root commits are
-reviewed against an empty tree. Commit ranges compare their two endpoints.
-
-Rein embeds [Bold Software's Meat](https://github.com/boldsoftware/meat) at a
-pinned revision. Its actual Go algorithm runs as WASM in an isolated Node worker;
-Rein supplies the configured HTTP or official CLI model connection and scoped
-source reads. The agent's `meat` tool uses that session's model overrides and
-streams review progress into the activity view.
-
-Meat validates the model's remove/replace/fold plan against the original diff and
-produces a reading diff and summary. It does not modify files. Limits are 4 MB
-of input, 32 model requests, and five minutes per review; Ctrl-C or `/stop`
-cancels the request. Source reads exclude hidden/private paths, links and files
-over 200 KB. The host's grep tool advertises bounded literal search, not regex.
-Untracked files are outside `--working-tree`. Model usage is additional to the
-main conversation and is reported with the result; a review is not a guarantee
-that a change is correct. See [the pinned runtime and build details](vendor/meat/UPSTREAM.md).
-
-### Native Fold components and Matt Pocock workflows
-
-Rein integrates [Fold](https://github.com/humanlayer/fold)'s repeated-tool-batch
-detector and UTF-8 output truncation, with a native skill loader based on its
-stable roster design. This is a component integration, not the full Fold CLI.
-Three identical consecutive tool batches stop the run with an incomplete-work
-notice. Set `repeatToolLimit` to 0 to disable, or an integer from 2 to 50 to tune it.
-Shell output keeps up to 500 lines / 20 KB, including single-line output.
-
-[Matt Pocock's skills](https://github.com/mattpocock/skills) ship as native
-workflows: `diagnosing-bugs`, `tdd`, and `code-review`. The model loads them
-through `skill`; users can invoke `/skill diagnosing-bugs <task>` in the REPL.
-`rein skills tdd tests.md` reads a bundled reference without starting inference.
-Bodies load on demand without changing the system prefix. Scripts stay inert
-unless separately executed within the user's request. Skills do not themselves
-provide sub-agent tools.
-
-`rein debug /path/to/export` reads JSONL sessions offline. It reports counts of
-empty responses, provider errors, nested recovery, path mistakes, large outputs,
-and repeated tool batches. `--json` includes counters per session in sorted
-file order; output never includes transcript text, filenames, or credentials.
-The analyzer reads at most 200 files, 32 MB per file, 256 MB total, and skips
-records above 8 MB. See the [September export diagnosis](docs/debug-2026-09-05.md)
-for findings, fixes, and limitations. Both upstreams are pinned under `vendor/`;
-`npm run check:natives` verifies their source and license hashes.
+Export copies. Sources are never moved or deleted; an existing target
+receives newer copies of the same files. The dossier writer is stricter: it
+refuses an existing directory and steps to the next free name instead. The
+dossier records a red-team assessment; it does not bundle or invoke
+CyberStrike's offensive tooling. `rein os` is development tooling: `plan` is
+read-only, `prepare` writes only to the chosen new kit directory, and nothing
+in this tier partitions disks, installs an operating system, or starts a
+background service. Read the [Dareecho development guide](docs/rein-os.md)
+for the VM and ChromeOS overlay boundaries, and
+[Dareecho export](https://github.com/Zermo/rein-agent/wiki/Dareecho-export)
+for the operator-facing sequence.
 
 ### Host models on your own hardware
 
-Rein now has an explicit [managed model workflow](docs/managed-models.md) for pinned
-GGUF downloads, integrity checks, headless serving, and scoped background services.
-Start with `rein model help`. Existing server discovery remains `rein models`.
-The [Dareecho development kit](docs/rein-os.md) prepares a verified terminal overlay
-for an Omarchy VM or a ChromeOS userland, with separate platform and installation
-checks. Before considering either path, run `rein learn`: Dareecho Learn writes a
-fresh, read-only machine dossier. Use `rein export` to copy personal files to a
-backup destination before any eventual OS replacement. The
-[Dareecho export wiki page](docs/wiki/Dareecho-export.md) is the operator runbook.
+Rein has an explicit [managed model workflow](docs/managed-models.md) for
+pinned GGUF downloads, integrity checks, headless serving, and scoped
+background services. Start with `rein model help`. Existing server discovery
+remains `rein models`.
 
-Rein connects to an OpenAI-compatible Chat Completions server on this computer,
-on another machine in your LAN, or through a mesh VPN such as NetBird or Tailscale.
-Choose a model that fits the serving machine's memory and supports tool use for
-coding tasks. The server handles inference; Rein runs in your project directory.
+Rein connects to an OpenAI-compatible Chat Completions server on this
+computer, on another machine in your LAN, or through a mesh VPN such as
+NetBird or Tailscale. Choose a model that fits the serving machine's memory
+and supports tool use for coding tasks. The server handles inference; Rein
+runs in your project directory.
 
 | Server | Start serving | Default local API base |
 | --- | --- | --- |
 | [LM Studio](https://lmstudio.ai/docs/developer/core/server) | Install the app, download and load a model, then start the server in the Developer tab | `http://localhost:1234/v1` |
-| [Ollama](https://docs.ollama.com/quickstart) | Install Ollama, start the app or `ollama serve`, then download a model with `ollama pull MODEL_ID` | `http://localhost:11434/v1` |
+| [Ollama](https://docs.ollama.com/quickstart) | Install Ollama, start the app or `ollama serve`, then `ollama pull MODEL_ID` | `http://localhost:11434/v1` |
 | llama.cpp | Start its OpenAI-compatible `llama-server` with your model | `http://localhost:8080/v1` |
 | vLLM | Start its OpenAI-compatible server with your model | `http://localhost:8000/v1` |
-
-Use the actual URL shown by your server if its port or API prefix differs.
-`MODEL_ID` is a placeholder for a model you choose from the server's catalog.
 
 ```sh
 rein setup
@@ -467,86 +403,60 @@ rein setup --provider lmstudio --api chat-completions
 rein setup --provider ollama --api chat-completions
 ```
 
-Interactive setup checks localhost, saved endpoints, and known private LAN/mesh
-peers from the neighbor table, NetBird, and Tailscale. It probes the four common
-ports above plus ports from saved or explicit hints. The scan is bounded to 16
-peers, 80 endpoint candidates, 8 concurrent checks, and 10 seconds. It does not
-sweep subnets. Server labels come from API evidence, not a port number.
-
-The menu keeps reachable servers that need authentication or have no loaded
-models. Choose one to enter a key or load a model. Rein normalizes API paths,
-accepts pasted `/models` or `/chat/completions` URLs, and tests a chat response
-before saving. Credentials are scoped to an explicitly configured endpoint and
-SSH host; peer probes do not inherit them.
+Interactive setup checks localhost, saved endpoints, and known private
+LAN/mesh peers from the neighbor table, NetBird, and Tailscale. The scan is
+bounded to 16 peers, 80 endpoint candidates, 8 concurrent checks, and 10
+seconds. It does not sweep subnets. Server labels come from API evidence, not
+a port number.
 
 ```sh
 rein models --discover-network
-rein models --discover-network --json
-# Add an unusual listening port or a host absent from the peer table:
 rein models --discover-hosts model-host --discover-ports 9000
-# Keep interactive setup limited to localhost and configured endpoints:
 rein setup --connection-only --discover-network=false
 ```
 
-`rein models` and unattended setup stay local/configured by default. Add
-`--discover-network` to opt into known peers. Loopback-only remote APIs still
-need an explicit SSH route. Discovery cannot make an unreachable listener
-reachable. See the [discovery guide](https://github.com/Zermo/rein-agent/wiki/Server-discovery).
-
 ### Connect through a LAN, mesh VPN, or SSH
 
-For direct access, the model server must listen on an interface reachable from
-the computer running Rein. In LM Studio enable **Serve on Local Network**, or run
-`lms server start --port 1234 --bind 0.0.0.0`. Enable the server's authentication
-when sharing it. See [LM Studio network setup](https://lmstudio.ai/docs/developer/core/server/serve-on-network).
-For Ollama, configure `OLLAMA_HOST` and restart its app or service as described in
-the [Ollama network configuration](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network).
-Restrict access with your firewall or mesh access rules.
-
-Replace `model-host` below with your server's LAN or mesh hostname or IP, and use
-its listening port. Both devices need the appropriate network route and access.
-`0.0.0.0` is a listener setting, not the address to enter in Rein.
+For direct access, the model server must listen on an interface reachable
+from the computer running Rein. In LM Studio enable **Serve on Local
+Network**, or run `lms server start --port 1234 --bind 0.0.0.0`. For Ollama,
+configure `OLLAMA_HOST`. `0.0.0.0` is a listener setting, not the address to
+enter in Rein.
 
 ```sh
 rein setup --api chat-completions --base-url http://model-host:1234
-# Unattended setup chooses a discovered model; set REIN_API_KEY if required:
-rein setup --yes --api chat-completions --base-url http://model-host:1234
 ```
 
 A loopback-only API is reachable from its own machine. Use your existing SSH
 alias to reach it without changing the server listener:
 
 ```sh
-ssh model-host                    # verify your SSH configuration and host key
+ssh model-host
 ssh -o BatchMode=yes model-host true
 rein setup --ssh model-host --base-url 127.0.0.1:1234 --api chat-completions
 rein -p "hello"                   # reconnects through SSH automatically
 rein setup --status
 ```
 
-With `--ssh`, the target URL is interpreted from the remote machine. Without it,
-`127.0.0.1` means the computer running Rein. The tunnel uses an ephemeral local
-loopback port and closes after each request. SSH forwarding supports HTTP APIs
-and requires noninteractive SSH authentication. Direct HTTPS APIs use their
-reachable URL.
-
-The [self-hosted model walkthrough](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models)
-covers installation, remote access, connection checks, and troubleshooting.
+With `--ssh`, the target URL is interpreted from the remote machine. Without
+it, `127.0.0.1` means the computer running Rein. The tunnel uses an ephemeral
+local loopback port and closes after each request. See the
+[self-hosted model walkthrough](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models).
 
 ### API keys and subscription login
 
-For cloud APIs, setup opens the provider's key page when a key is needed, then
-queries the authenticated model list. Standard environment variables such as
-`OPENAI_API_KEY` or `GEMINI_API_KEY` work; `REIN_API_KEY` explicitly supplies a key
-for a custom endpoint. Environment keys are not saved. Entered keys are hidden,
-stored in a mode-600 config, and scoped to the saved API endpoint and SSH host.
-Switching endpoints cannot reuse that saved key automatically.
+For cloud APIs, setup opens the provider's key page when a key is needed,
+then queries the authenticated model list. Standard environment variables
+such as `OPENAI_API_KEY` or `GEMINI_API_KEY` work; `REIN_API_KEY` explicitly
+supplies a key for a custom endpoint. Environment keys are not saved. Entered
+keys are hidden, stored in a mode-600 config, and scoped to the saved API
+endpoint and SSH host.
 
 ```sh
 rein setup --provider openai
 rein setup --provider gemini
-rein setup --provider xai       # XAI_API_KEY or the hidden key prompt
-rein setup --provider openrouter --no-browser  # print the key-page link
+rein setup --provider xai
+rein setup --provider openrouter --no-browser
 ```
 
 Subscription connections use installed official CLIs:
@@ -557,36 +467,19 @@ Subscription connections use installed official CLIs:
 | GitHub Copilot | `npm install -g @github/copilot` | `rein setup --provider copilot` |
 | SuperGrok / X Premium+ | `npm install -g @xai-official/grok` | `rein setup --provider grok` |
 
-Setup opens device sign-in and lets the official CLI display the one-time code.
-`rein login codex`, `rein login copilot`, or `rein login grok` repeats login; `--device-auth=false`
-selects the CLI's browser callback flow. `--no-browser` prints the link without
-launching a browser. Login requires user interaction; `setup --yes` never starts it.
-ChatGPT device login may need enabling in your account or workspace security
-settings. Access and billing follow the selected provider and account. See the official
-[Codex authentication guide](https://learn.chatgpt.com/docs/auth) and
-[Copilot authentication guide](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli).
-
-Rein gives each CLI its own configuration under `$REIN_HOME/cli-auth` and leaves
-credential storage and refresh to that CLI. Copilot may use its shared OS keychain.
-Use `rein login`, rather than a bare CLI login, to select Rein's configuration.
-The default model follows the official CLI; pass `--model` for an available model.
-CLI responses use Rein's text tool protocol and retain Rein's tool approvals and
-Posthorse history. Each turn starts in a temporary directory with native tools
-disabled or sandboxed; unexpected native Codex or Grok tool events stop the turn.
-CLI output is returned when that CLI turn finishes, rather than token by token.
-These bridges require current CLIs with the isolation flags used by Rein.
+Setup opens device sign-in and lets the official CLI display the one-time
+code. `rein login codex`, `rein login copilot`, or `rein login grok` repeats
+login. Rein gives each CLI its own configuration under
+`$REIN_HOME/cli-auth` and leaves credential storage and refresh to that CLI.
+CLI responses use Rein's text tool protocol and retain Rein's tool approvals
+and Posthorse history. Each turn starts in a temporary directory with native
+tools disabled or sandboxed. These bridges require current CLIs with the
+isolation flags used by Rein.
 
 Gemini API uses its documented [OpenAI-compatible endpoint](https://ai.google.dev/gemini-api/docs/openai).
-The retired GitHub Models API is no longer offered; [GitHub's retirement notice](https://docs.github.com/en/github-models)
-applies to that API, while Copilot CLI is a separate connection.
-
-Grok subscriptions use the official Grok Build CLI and its device login. Basic X
-Premium is not advertised as eligible; the supported X tier is **Premium+**.
-For direct HTTP instead, `--provider xai` uses `https://api.x.ai/v1` and
-`XAI_API_KEY`. Setup prefers xAI's language-model catalog so image/video models
-are not suggested for agent chat. Check your account's current allowances in
-the official [Grok Build announcement](https://x.ai/news/grok-build-cli) and
-[CLI reference](https://docs.x.ai/build/cli/reference), or follow Rein's
+The retired GitHub Models API is no longer offered, while Copilot CLI is a
+separate connection. Grok subscriptions use the official Grok Build CLI; the
+supported X tier is **Premium+**. Follow Rein's
 [Grok guide](https://github.com/Zermo/rein-agent/wiki/Grok).
 
 ### Tool calls work for every model
@@ -613,32 +506,28 @@ Override with `--tools native|text|auto` (auto is the default).
 ### Fresh context with Posthorse
 
 Rein includes a native adaptation of [pi-posthorse](https://github.com/fitchmultz/pi-posthorse).
-The pinned upstream 0.4.1 source and MIT license are in `vendor/pi-posthorse`.
-Rein uses its own session and tool interfaces, so it needs neither the Pi fork
-nor additional runtime dependencies.
+The pinned upstream 0.4.1 source and MIT license are in
+`vendor/pi-posthorse`. Rein uses its own session and tool interfaces, so it
+needs neither the Pi fork nor additional runtime dependencies.
 
 The default toolset includes:
 
-- `get_context_remaining({})` reports estimated tokens until rollover and the hard limit.
-- `new_context({handoff?})` requests a fresh window after the entire tool batch succeeds.
-  A failed or cancelled sibling prevents the boundary from committing.
-- `notes({op, path?, content?, query?, offset?})` lists, reads, writes, appends,
-  or searches plaintext files in `.pi/notes`. Reads and searches are paged.
-- `history({op, query?, id?, all?, limit?, offset?})` searches and reads saved
-  messages across windows. Results include stable entry and window ids.
-  `all: true` includes sessions from the same repository and deduplicates forks.
+- `get_context_remaining({})` reports estimated tokens until rollover and the
+  hard limit.
+- `new_context({handoff?})` requests a fresh window after the entire tool
+  batch succeeds.
+- `notes({op, path?, content?, query?, offset?})` lists, reads, writes,
+  appends, or searches plaintext files in `.pi/notes`.
+- `history({op, query?, id?, all?, limit?, offset?})` searches and reads
+  saved messages across windows.
 
-A rollover removes earlier messages from model input while keeping the complete
-transcript. The new window gets an optional handoff. Automatic rollover uses a
-bounded record of user inputs, an older checkpoint, and the latest unconsumed
-tool batch, with history references for the full text. It makes no summarization
-request. The record is not proof of progress; the agent must restore notes and
-check live state before continuing. A single input that cannot fit a fresh window
-still needs a larger context setting or a smaller input.
+A rollover removes earlier messages from model input while keeping the
+complete transcript. The new window gets an optional handoff. Automatic
+rollover uses a bounded record of user inputs, an older checkpoint, and the
+latest unconsumed tool batch, with history references for the full text. It
+makes no summarization request.
 
-Automatic rollover and one best-effort checkpoint reminder are enabled with the
-default tools. Context overflow errors get at most one recovery retry for the same
-request, within `--max-turns`. Configuration in `~/.rein/config.json`:
+Configuration in `~/.rein/config.json`:
 
 ```json
 {
@@ -648,50 +537,29 @@ request, within `--max-turns`. Configuration in `~/.rein/config.json`:
 }
 ```
 
-Set `contextWindow` to the server's actual configured limit. Token counts are
-estimates refined by reported usage. The reserve must cover the output limit and
-leave room for the prompt, tools, and recovery state. CLI overrides are
-`--context-window <tokens>`, `--reserve-tokens <tokens>`, and `--no-auto-context`.
-Manual `/new-context [handoff]` and the `new_context` tool remain available when
-automatic rollover is disabled. `/context` prints the current budget.
+CLI overrides are `--context-window <tokens>`, `--reserve-tokens <tokens>`,
+and `--no-auto-context`. Manual `/new-context [handoff]` and the
+`new_context` tool remain available when automatic rollover is disabled.
+`/context` prints the current budget.
 
-Sessions persist incrementally in the REPL and with `-p --save`. A one-shot run
-that reaches its turn budget also saves a session automatically. Reopening a
+Sessions persist incrementally in the REPL and with `-p --save`. Reopening a
 non-empty session creates a fresh resume window: it retains the full archived
-transcript in `history`, then layers the current Git checkpoint, a squashed diff
-since that session's checkpoint, the newest peer-session handoff, and
-`.pi/notes/MEMORY.md` over the next model request. This makes a week-old branch
-safe to continue after another session changed the repository without replaying
-all of its old tool calls. The overlay is factual workspace evidence, not a
-generated summary; verify live state before an external action. Branch preserves
-window boundaries, and old Rein JSONL sessions remain readable. Print,
-loop, and improve runs without a saved session retain history only for the lifetime
-of their runner. Supplying a custom `RunnerOptions.tools` array replaces the
-entire toolset and disables automatic rollover by default; `--no-tools` remains
-pure chat.
+transcript in `history`, then layers the current Git checkpoint, a squashed
+diff since that session's checkpoint, the newest peer-session handoff, and
+`.pi/notes/MEMORY.md` over the next model request. Notes belong to the
+repository and are shared by linked worktrees. History reads send the
+selected stored text to the active model provider.
 
-Notes belong to the repository and are shared by linked worktrees. Normal
-worktrees use the main checkout. Repositories with a separate Git directory use
-`core.worktree` when configured, or the common Git directory otherwise. Outside
-Git, notes belong to the working directory. Rein ignores `.pi/notes/` in this repo;
-add that ignore rule to other projects if their working notes should stay local.
-Notes survive session changes and package removal. History reads send the selected
-stored text to the active model provider. Pi's JSONL sessions and image/custom
-message types are not supported by this adaptation.
-
-For llama.cpp and compatible local HTTP servers, Rein sends `cache_prompt: true`.
-llama.cpp can reuse an unchanged live prompt prefix; `/context` shows
-`lastPromptCacheTokens` when the server reports it. Provider KV cache is
-opportunistic: a stopped server, evicted slot, or a week-old archived request
-cannot restore its transformer state. The durable resume overlay provides the
-cross-session continuity in that case.
+For llama.cpp and compatible local HTTP servers, Rein sends
+`cache_prompt: true`; `/context` shows `lastPromptCacheTokens` when the
+server reports it.
 
 ### Web search and scraping with Obscura
 
 `web_search` reads DuckDuckGo's first HTML results page through the local
-[Obscura browser](https://github.com/h4ckf0r0day/obscura). It returns source URLs,
-titles, and snippets. `web_fetch` renders one page, executes its JavaScript, and
-returns the title, final URL, and markdown. Neither tool needs an API key.
+[Obscura browser](https://github.com/h4ckf0r0day/obscura). `web_fetch`
+renders one page, executes its JavaScript, and returns the title, final URL,
+and markdown. Neither tool needs an API key.
 
 ```sh
 rein web install
@@ -700,44 +568,23 @@ rein web search 'site:github.com obscura browser' --max-results 5
 rein web fetch https://example.com --max-chars 20000
 ```
 
-First web use installs the pinned Obscura 0.2.2 no-render build automatically.
-The download is about 39–48 MiB, verified against its release SHA-256 before
-extraction. It lives under `$REIN_HOME/native/obscura`, default `~/.rein/native/obscura`.
-macOS/Linux arm64 and x64 and Windows x64 have pinned builds. Go, Rust, Chromium,
-and runtime npm packages are unnecessary. Ordinary chat works without Obscura.
-
-An absolute `OBSCURA_BIN` or `obscura.bin` overrides the managed runtime.
-Otherwise Rein prefers its installed runtime, then an `obscura` executable on
-PATH. Optional configuration in `$REIN_HOME/config.json`:
-
-```json
-{"obscura": {"bin": "/absolute/path/to/obscura", "timeoutSeconds": 30, "allowPrivateNetwork": false}}
-```
+First web use installs the pinned Obscura 0.2.2 no-render build
+automatically, verified against its release SHA-256 before extraction. It
+lives under `$REIN_HOME/native/obscura`. Go, Rust, Chromium, and runtime npm
+packages are unnecessary. Ordinary chat works without Obscura.
 
 Each request uses temporary browser storage, with a bounded process lifetime
-and output. `/stop` cancels and drains the browser process. Set
-`OBSCURA_ALLOW_PRIVATE_NETWORK=1` or `obscura.allowPrivateNetwork=true` when you
-want pages on local or private networks. The default retains Obscura's network
-restriction. This setting applies to page subresources too.
-
-Search supports `query`, `max_results`, `include_domains`, and `exclude_domains`.
-Domain filters check the returned hostnames, including subdomains, and only
-filter the first page. Blocked/CAPTCHA pages and unrecognized markup produce
-errors. They are not reported as empty searches. Web results are evidence;
-the agent is instructed to cite their source URLs.
-
-Existing tool names and `web_fetch.max_chars` remain compatible. TinyFish keys
-and its old `tinyfish` config are ignored. Its minute freshness, news/research
-verticals, localization, and later-page filters are unsupported and return
-explicit errors. Legacy `purpose` text has no ranking or extraction effect.
-Obscura's single-page CLI does not expose an HTTP status code, so a rendered
-HTTP error page is returned as page content with its title and URL.
+and output. Search supports `query`, `max_results`, `include_domains`, and
+`exclude_domains`. Blocked/CAPTCHA pages and unrecognized markup produce
+errors, not empty searches. Web results are evidence; the agent is instructed
+to cite their source URLs.
 
 ### Completion gates (unlazy)
 
-[unlazy](https://github.com/Leonxlnx/unlazy) (MIT, vendored at `vendor/unlazy/`)
-is the anti-laziness discipline: write an acceptance ledger **before** the
-work, run oracles that can actually fail, reverify before reporting done.
+[unlazy](https://github.com/Leonxlnx/unlazy) (MIT, vendored at
+`vendor/unlazy/`) is the anti-laziness discipline: write an acceptance ledger
+**before** the work, run oracles that can actually fail, reverify before
+reporting done.
 
 ```
 rein gates GATES.md --mode lint        # oracles that cannot fail? caught now
@@ -748,15 +595,11 @@ rein gates GATES.md --mode reverify    # re-run everything; demote stale evidenc
 
 A gate passes only when its command exits 0 **and** `EXPECT:` matches the
 output; the ledger records shell, CWD, exit status, and a SHA-256 output
-fingerprint as `EVIDENCE:`. Untested claims are not evidence — a checked box
-without evidence counts as unmet. Approval is the trust boundary: a `CHECK:`
-line is never executed until its exact command+CWD+PATH oracle is approved
-(stored in `~/.unlazy/approved`, outside the repo by design).
-
-The agent sees all of this as one tool (`gates`) and a section of the system
-prompt: substantial work starts with `GATES.md` from
-`vendor/unlazy/templates/gates-leaf.md`. The repo's own `GATES.md` is the
-ledger for the current integration work — every box checked with evidence.
+fingerprint as `EVIDENCE:`. Untested claims are not evidence. Approval is the
+trust boundary: a `CHECK:` line is never executed until its exact
+command+CWD+PATH oracle is approved (stored in `~/.unlazy/approved`, outside
+the repo by design). The agent sees all of this as one tool (`gates`) and a
+section of the system prompt.
 
 ### Self-improvement
 
@@ -764,272 +607,108 @@ ledger for the current integration work — every box checked with evidence.
 rein improve "make tool errors more actionable"   # or: rein improve (uses LESSONS.md)
 ```
 
-The loop (autoresearch's keep/discard, pointed at rein's own source):
-
 1. read the goal or the `## harness` section of `LESSONS.md`
 2. one concrete weakness → smallest fix
 3. run `npm test`, including the smoke and regression suites
-4. pass → commit the change and lesson · fail → discard the experiment and commit its lesson
-5. repeat until `--max-iterations` (saved setting, default 25) or the agent says no-change
+4. pass → commit the change and lesson · fail → discard the experiment and
+   commit its lesson
+5. repeat until `--max-iterations` (saved setting, default 25) or the agent
+   says no-change
 
-Two things make it a *system* rather than a one-off: the system prompt tells
-every agent to append durable learnings to `LESSONS.md` (shared memory across
-sessions, loaded on next start), and `rein improve` reads exactly that file.
-The agent that bumps into a sharp edge writes it down; the improve loop cuts
-the edge.
+The system prompt tells every agent to append durable learnings to
+`LESSONS.md` (shared memory across sessions, loaded on next start), and
+`rein improve` reads exactly that file. The agent that bumps into a sharp
+edge writes it down; the improve loop cuts the edge.
 
 ### Self-sustaining — `rein doctor` + `rein heartbeat`
-
-Expected Node versions in the compatibility matrix are recorded as
-`{ kind: "compatibility", silent: true }` flags. They stay out of terminal
-warnings, repair prompts, and warning/failure totals. `rein doctor --json`
-retains the flags, and heartbeat writes them to `$REIN_HOME/heartbeat.log`
-(default `~/.rein/heartbeat.log`). Use `--silent=false` with doctor or heartbeat
-to display compatibility information; `--silent` is the default. Actual health
-warnings and failures remain visible. This controls Rein diagnostics; GitHub
-generates its own Actions runtime annotations.
-
-The baseline for agents that keep themselves alive and advancing. Two commands:
 
 ```sh
 rein doctor [--fix]    auto-detect: node → bin → repo → bundle → config →
                        server → model → hardware fit → perms → disk
-                       --fix repairs what it can (git pull, rebuild bundle,
-                       ollama pull, chmod) and re-checks. exit 1 if anything
+                       --fix repairs what it can and re-checks. exit 1 if anything
                        is still broken — scriptable in CI and cron.
 
 rein heartbeat         one beat, four phases, in order:
                        1. SELF-HEAL    rein doctor --fix
                        2. TASKS        each HEARTBEAT.md line → an agent run
-                       3. SELF-ADVANCE one `rein improve` iteration (goal from
-                                      `# improve: <goal>` in HEARTBEAT.md or --improve)
+                       3. SELF-ADVANCE one `rein improve` iteration
                        4. MEMORY       JSONL entry → ~/.rein/heartbeat.log
 ```
 
 `HEARTBEAT.md` (the openclaw/hermes pattern) is a file of periodic tasks —
-one per line, `#` lines are comments, empty = idle beat (self-heal only).
-Seed one with `rein heartbeat --init`. The beat repairs its own runtime
-before doing any work, so a stale checkout or stale bundle heals itself on
-the next tick instead of waiting for a human to notice:
+one per line, `#` lines are comments, empty = idle beat. Seed one with
+`rein heartbeat --init`. The beat repairs its own runtime before doing any
+work, so a stale checkout or stale bundle heals itself on the next tick:
 
 ```sh
 rein heartbeat --init          # write a template, edit it
 */30 * * * * rein heartbeat >> ~/.rein/heartbeat.cron.log 2>&1
 ```
 
-That ordering is the point: *perception (doctor) → action (tasks) →
-egeneration (improve) → memory (log)*. An agent that can check itself,
-fix itself, do its periodic work, and improve itself from its own lessons
-is the baseline for fully self-sustaining agents.
-
-### Dareecho — learning the machine, keeping the files
-
-Dareecho is the OS-replacement path on top of Rein. **Dareecho Learn** is its
-implemented, read-only assessment pass, exposed through `rein learn`. It learns
-the machine first; the export commands keep the files that are yours before
-anything is replaced. Replacing an OS obviously removes the current image and
-its settings — these are the data-loss prevention steps.
-
-```sh
-rein learn [--json]           read-only pass on this machine: boot chain of trust,
-                              security posture, per-probe evidence. Writes a new
-                              dossier under ~/.rein/redteam/ (refuses to
-                              overwrite). macOS, Windows, Linux, ChromeOS, any
-                              architecture.
-
-rein learn ios [--udid U]     an attached iPhone or iPad via libimobiledevice
-                              (brew install libimobiledevice).
-
-rein export browse            Finder-style TUI: navigate, select files and folders,
-                              export to a new directory. [e] exports, [q] quits.
-
-rein export presets [--to D]  the standard personal data groups: Documents, Desktop,
-                              Downloads, Pictures, Movies, Music — plus Mail,
-                              keychains, browser profiles, and SSH/GPG keys where
-                              they exist. On ChromeOS the same groups, re-homed to
-                              the chronos user directory.
-
-rein export <paths…> --to D   exactly the paths you name.
-```
-
-Export copies. Sources are never moved or deleted; an existing target receives
-newer copies of the same files. The dossier writer is stricter: it refuses an
-existing directory and steps to the next free name instead. Read the
-[Dareecho development guide](docs/rein-os.md) for the VM and ChromeOS overlay
-boundaries, and [Dareecho export](docs/wiki/Dareecho-export.md) for the
-operator-facing sequence. The dossier pass records a red-team assessment; it
-does not bundle or invoke CyberStrike's offensive tooling.
+*Perception (doctor) → action (tasks) → egeneration (improve) → memory
+(log)* — the baseline for self-sustaining agents.
 
 ### Proactive work from task history
 
-`rein autonomy` adds a background supervisor and a terminal dashboard. It uses
-the host's user service manager: launchd on macOS, or systemd on Linux. The
-onboarding wizard offers folder enrollment and a separate background-service
-choice. Installing the package alone does not start inference.
-
-Start in a workspace whose Rein history you want the supervisor to inspect:
+`rein autonomy` adds a background supervisor and a terminal dashboard. It
+uses the host's user service manager: launchd on macOS, or systemd on Linux.
 
 ```sh
-rein autonomy init
-rein autonomy scan
-rein autonomy tui
+rein autonomy init             # enroll this directory; supervisor stays paused
+rein autonomy scan             # deterministic rules over your Rein history
+rein autonomy tui              # terminal dashboard for proposals
+rein autonomy enable           # register Rein's own user service
+rein autonomy status | pause | resume | disable
+rein autonomy plan             # print the generated service definition
 ```
 
-The first command enrolls the directory and leaves the supervisor paused. The
-scan compares older and recent user/assistant excerpts with current Git status
-and change statistics. Deterministic rules identify explicit follow-up requests in user history and
-prepare bounded proposals. Scanning uses no inference by default. An optional
-local helper can keep or drop those candidates, but cannot invent tasks.
-Unchanged history makes no model calls.
-Prior approval decisions and completed run reports inform later suggestions.
+The scan compares older and recent user/assistant excerpts with current Git
+status and change statistics. Deterministic rules identify explicit follow-up
+requests and prepare bounded proposals. Scanning uses no inference by
+default. An optional local helper can keep or drop those candidates, but
+cannot invent tasks. The dashboard shows the exact task, workspace, cadence,
+reason, and cited history excerpts before approval.
 
-The dashboard shows the exact task, workspace, cadence, reason, and cited history
-excerpts before approval. Use arrows or j/k to select, `a` to review approval,
-`d` to dismiss, `r` to queue an enabled task, `p` to pause/resume, and `q` to exit.
-New pending proposals produce dashboard alerts. The regular REPL also reports
-new proposals between turns. Review and control them in the same chat terminal:
+The REPL reviews the same state in chat:
 
 ```text
 /autonomy
 /autonomy show <id>
-/autonomy approve <id>
+/autonomy approve <id>          # read-only checks; add --allow-writes for tools
 /autonomy dismiss <id>
 /autonomy pause
 /autonomy resume
 ```
 
-`show` displays the full proposal and evidence. `approve` enables read-only
-checks; add `--allow-writes` only to explicitly permit normal Rein tools,
-including shell commands and file writes, for that proposal. `dismiss` also
-disables an already enabled proposal. These controls do not start a nested
-terminal dashboard or immediately run a scan/task. The standalone
-`rein autonomy tui` dashboard remains optional.
-
-Start the background service after reviewing its scope:
-
-```sh
-rein autonomy enable
-rein autonomy status
-rein autonomy pause
-rein autonomy resume
-rein autonomy disable
-```
-
-`enable` enrolls the current directory and registers only Rein's own user service.
-`disable` pauses work, stops the service, and removes its registration, keeping
-reports and decisions. `rein autonomy plan` prints the generated service
-definition. Unsupported hosts can use `rein autonomy resume` followed by
-`rein autonomy daemon` in a terminal. User services depend on the login session;
-Linux persistence after logout requires a host already configured for it. The
-supervisor does not prevent system sleep or attach to other applications.
-
-The service uses saved Rein configuration and official CLI login profiles.
-Terminal exports such as `REIN_BASE_URL`, `REIN_MODEL`, or API keys may be absent
-from its environment. `enable` checks for those differences and stays paused
-until startup is confirmed. Save the intended settings with `rein setup`, or use
-`rein autonomy daemon` from the configured shell. API keys are never copied into
-service definitions. To save an API key through interactive setup, unset its
-shell variable for that command, then enter the key and choose to save it.
-For an SSH tunnel to a model server, the service also needs noninteractive SSH access;
-an agent available only through the terminal's `SSH_AUTH_SOCK` may be unavailable.
-
-Dashboard approvals enable read-only inspection with bounded `read`, `ls`, and
-literal `search` tools. These tools exclude links, hidden files, and common
-credential files. For a task that needs editing or command execution, review
-`rein autonomy show <id>` and explicitly run:
-
-```sh
-rein autonomy approve <id> --allow-writes
-```
-
-This grants the normal Rein tools, including shell commands and file writes,
-for that proposal. Those tools run with your account's permissions; the working
-directory is not an OS sandbox. Revocation and pause cancel active background
-work, and each tool call checks that its approval still applies.
-
-Routine proposals recur at their approved interval. Loop and project proposals
-receive one bounded run; continuing a larger project needs another explicit
-run. Runs save a normal Rein session and a report. Generated sessions and their
-forks cannot become fresh evidence of user intent.
-
-Defaults are one history check per hour, six operations per rolling 24 hours,
-eight model turns per approved run, and a 180-second cancellation deadline.
-A scan uses no model in rules-only mode, at most one bounded local helper call
-when enabled, or up to two calls in the explicitly selected main planner. Each
-scan counts as one operation. Limits
-can be set with `init --interval 60 --daily-budget 6 --turn-budget 8 --timeout 180`.
-Scans and runs share a lock and budget. With the rules planner, a missing or failed local helper falls back to
-rules-only checks, never to a cloud model. Scans wait until their next
-interval before retrying.
-
-Enrollment is explicit and limited to 32 directories. Use
-`rein autonomy init --workspace /absolute/path` for additional workspaces. The
-command `rein autonomy unenroll --workspace /absolute/path` removes a workspace
-and disables its tasks. The
-collector reads only Rein JSONL histories matching those directories, at most
-200 sessions with bounded older/recent excerpts. It omits tool bodies, thinking,
-and recognizable credentials. Chat histories from other apps are not imported.
-The default scan reads evidence locally without sending it to a model. If you
-enable the local helper, bounded candidates go to its loopback server. The
-explicit main planner sends selected history and preferences to your main model. Approved
-task runs send selected evidence and inspected file text to your main model.
-Learning here consists of persisted reports and review decisions, stored in
-`$REIN_HOME/autonomy/state.json`. State retains at most 100 proposals and 200 run
-reports; full run sessions remain in the normal Rein session archive.
-
-For more personalized follow-ups, explicitly select the main planner:
-
-```sh
-rein autonomy planner main
-rein autonomy scan
-rein autonomy planner rules             # return to deterministic candidates
-```
-
-The main planner uses validated operator preferences, changed history, and
-prior decisions/results to propose and review useful improvements or routines.
-It makes at most two tool-free calls per changed scan under the daily budget;
-unchanged evidence makes no calls. It skips the tiny helper and uses the main
-model's normal compute or account allowance. Suggestions stay pending for
-approval. Selecting this mode does not authorize their execution.
+Dashboard approvals enable read-only inspection with bounded `read`, `ls`,
+and literal `search` tools. `rein autonomy approve <id> --allow-writes`
+grants the normal Rein tools for that proposal. Defaults are one history
+check per hour, six operations per rolling 24 hours, eight model turns per
+approved run, and a 180-second cancellation deadline. For personalized
+follow-ups, explicitly select `rein autonomy planner main`; return to free
+deterministic checks with `rein autonomy planner rules`.
 
 ### Optional headless helper for background checks
 
-A waiting service does not need a model to stay awake. Rein uses its user service
-and timers for that job. The default coordinator makes no inference calls and
-uses no cloud allowance. The optional guardian is a headless worker that accepts
-bounded triage requests from the harness and returns candidate selections. It
-has no user chat, persona, tools, task approval, or execution authority.
+The default coordinator makes no inference calls and uses no cloud allowance.
+The optional guardian is a headless worker that accepts bounded triage
+requests from the harness and returns candidate selections. It has no user
+chat, persona, tools, task approval, or execution authority.
 
 ```sh
 rein autonomy guardian status
 rein autonomy guardian plan             # inspect this machine's fit and downloads
 rein autonomy guardian setup            # verify an already running Rein-owned helper
 rein autonomy guardian install          # start the worker and download its model
-rein autonomy guardian install --install-runtime  # also fetch a missing standalone runtime
-rein autonomy guardian disable          # stop the worker and disable the helper
+rein autonomy guardian install --install-runtime  # also fetch a missing runtime
+rein autonomy guardian disable
 ```
 
-The worker uses a dedicated loopback endpoint and private model storage. It can
-reuse an installed Ollama executable, but runs its own named Rein user service;
-it does not connect to your main model server or share that server's settings.
-With `--install-runtime`, Rein downloads a pinned official standalone archive
-into its private home. No desktop app is installed or opened. The older
-`--start-runtime` flag remains accepted; `guardian install` starts the owned
-worker as part of setup.
-
-The pinned [Qwen3 0.6B Q4_K_M model](https://ollama.com/library/qwen3:0.6b)
-is about 523 MB to download. The pinned [Ollama v0.33.3 runtime](https://github.com/ollama/ollama/releases/tag/v0.33.3)
-adds about 159 MB on macOS, 1.43 GB on Linux x64, or 1.55 GB on Linux arm64 when
-missing. `plan` shows download sizes, memory headroom, and extraction prerequisites. Unsupported
-hosts or missing extraction tools retain rules-only operation. These are fit
-estimates for this machine, not a remote server or a mobile-runtime promise.
-
-The worker sleeps between bounded requests and releases model residency after
-its short idle timeout. Local inference still generates tokens and uses memory,
-CPU/GPU time, and power. Disabling it stops the owned worker and filter but does
-not change an explicitly selected main planner. Personalized planning and
-approved work use the main model separately, with its normal resource and
-account limits. See [background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
+The worker uses a dedicated loopback endpoint and private model storage. The
+pinned [Qwen3 0.6B Q4_K_M model](https://ollama.com/library/qwen3:0.6b) is
+about 523 MB to download. `plan` shows download sizes, memory headroom, and
+extraction prerequisites. See
+[background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination)
 for setup and stop controls.
 
 ### Autonomous experiment loop
@@ -1041,21 +720,16 @@ your-project/
 rein loop --max-iterations 10
 ```
 
-Run from a clean Git repository root with an initial commit, including `TASK.md`
-and `METRIC.md`. The harness owns commits and discards; if the agent changes
-HEAD, the loop stops for review.
-
-Fixed budget per iteration, one metric, keep/discard with git, auto-stops
-after three no-change iterations, never otherwise stops until the budget or a
-Ctrl-C. This is autoresearch's `program.md` loop with the harness as the
-operator.
+Run from a clean Git repository root with an initial commit. Fixed budget per
+iteration, one metric, keep/discard with git, auto-stops after three
+no-change iterations. This is autoresearch's `program.md` loop with the
+harness as the operator.
 
 ### Local model fit — `rein hardware`
 
 Stolen concept from [Magnitude](https://github.com/magnitudedev/magnitude)
 (Apache-2.0): profile the machine, then tell you what you can actually run —
-with a per-domain memory model (system RAM vs VRAM, unified memory handled as
-one pool) and reserves before a model may claim memory (`max(pool/10, 2 GiB)`).
+with a per-domain memory model and reserves before a model may claim memory.
 
 ```sh
 rein hardware             # this machine, ranked models, prerequisites and recipes
@@ -1063,38 +737,104 @@ rein hardware --json      # the same evidence for another tool
 ```
 
 Recommendations consider the operator's work focus, memory headroom, context
-length, quantization, and accelerator placement. They do not call the smallest
-model with the highest estimated speed the best agent. The report shows engine
-prerequisites and serving/check commands for LM Studio, Ollama, llama.cpp, and
-vLLM where the model and hardware have a supported recipe. It never downloads
-a model or starts a service by itself.
+length, quantization, and accelerator placement. The report shows engine
+prerequisites and serving/check commands where a recipe exists. It never
+downloads a model or starts a service by itself. Fit and throughput are
+estimates, not measurements. See
+[Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and-serving).
 
-Fit and throughput are estimates, not measurements. GPU memory is assessed per
-device; unsupported split/offload behavior is not assumed. Unknown hardware or
-model architecture stays marked as unknown. The report explains its assumptions.
+### Terminal activity and persistent bash
 
-The installer shows a local fit summary and a **Help me host a model** option.
-Run `rein hardware` on the actual model host when using a remote server: the
-machine running Rein or its gateway cannot reveal a remote GPU's capacity.
-See [Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and-serving).
+```sh
+rein --visual
+rein tmux start 'export PROJECT_MODE=dev'
+rein tmux list
+rein tmux send <session-id> 'printf "%s\n" "$PROJECT_MODE"'
+rein tmux capture <session-id>
+rein tmux attach <session-id>
+rein tmux interrupt <session-id>
+rein tmux stop <session-id>
+```
+
+The `bash` tool accepts `mode: "tmux"` and an optional existing `session` ID.
+Environment, working directory, and interactive programs persist across
+turns. Rein uses its own server and scopes sessions by workspace.
+`/stop` cancels foreground work; intentionally persistent tmux sessions
+remain until explicitly stopped.
+
+Interactive Rein keeps activity in the current terminal. Messages, thinking
+status, tool calls, and results have distinct labels. Use `/activity` for the
+session's numbered timeline and `/activity 3` to inspect a step. `/legend`
+explains the labels. This works without tmux, NodeTerm, or a browser.
+
+`--visual` opens chat beside a terminal activity tree. Detach with
+**Ctrl-b d**; the launcher prints an activity ID and a resume command.
+Activity snapshots live in `$REIN_HOME/activity`, mode 0600. The canvas
+listens only on 127.0.0.1. No transcript is uploaded.
+
+### Clear operator and agent replies
+
+Interactive chat labels every operator turn and agent reply. Operator
+prompts are cyan. The `REIN` label keeps its name and cycles its accent with
+each numbered reply. Tools have separate named labels. `MESSAGE` labels
+ordinary assistant text; a reply that begins with an explicit `[RESULT]`,
+`[OPINION]`, `[CHOICE]`, `[CHANGE]`, or `[EDIT]` heading keeps that
+agent-declared purpose in its label. COMPLETE, HANDOFF, ERROR, CANCELED, and
+LIMIT show how a reply ended. THINKING shows a status without exposing hidden
+reasoning. `NO_COLOR` removes ANSI color while preserving the labels. Use
+`/legend` for the full label key.
+
+### Embedded Meat diff review
+
+```sh
+rein meat                     # latest commit
+rein meat main HEAD           # commit range
+rein meat --staged            # staged changes
+rein meat --working-tree      # tracked changes against HEAD
+```
+
+Rein embeds [Bold Software's Meat](https://github.com/boldsoftware/meat) at a
+pinned revision. Its Go algorithm runs as WASM in an isolated Node worker.
+Meat validates the model's remove/replace/fold plan against the original
+diff and produces a reading diff and summary. It does not modify files.
+Limits are 4 MB of input, 32 model requests, and five minutes per review.
+See the [pinned runtime and build details](vendor/meat/UPSTREAM.md).
+
+### Native Fold components and Matt Pocock workflows
+
+Rein integrates [Fold](https://github.com/humanlayer/fold)'s repeated-tool-batch
+detector and UTF-8 output truncation, with a native skill loader based on its
+stable roster design. Three identical consecutive tool batches stop the run
+with an incomplete-work notice. Set `repeatToolLimit` to 0 to disable, or an
+integer from 2 to 50 to tune it. Shell output keeps up to 500 lines / 20 KB.
+
+[Matt Pocock's skills](https://github.com/mattpocock/skills) ship as native
+workflows: `diagnosing-bugs`, `tdd`, and `code-review`. Invoke
+`/skill diagnosing-bugs <task>` in the REPL, or read a bundled reference
+without inference: `rein skills tdd tests.md`.
+
+`rein debug /path/to/export` reads JSONL sessions offline. It reports counts
+of empty responses, provider errors, nested recovery, path mistakes, large
+outputs, and repeated tool batches — never transcript text, filenames, or
+credentials. Both upstreams are pinned under `vendor/`;
+`npm run check:natives` verifies their source and license hashes.
 
 ## Architecture notes (what I took from pi, and where I cut)
 
 **Kept — it's load-bearing:**
 
-- The `ai` layer as a *translation* layer: one message model
-  (user / assistant[content blocks] / toolResult), one streaming event
-  protocol (`start → *_start → *_delta → *_end → done|error`) over an async
-  iterable with a final-result promise. Errors are *in* the stream, never
-  thrown at the caller. The OpenAI-compatible adapter handles: missing
-  `finish_reason`, missing usage (estimated), `stream_options` rejection,
-  reasoning/thinking deltas, tool-call argument chunking.
+- The `ai` layer as a *translation* layer: one message model, one streaming
+  event protocol over an async iterable with a final-result promise. Errors
+  are *in* the stream, never thrown at the caller. The OpenAI-compatible
+  adapter handles missing `finish_reason`, missing usage (estimated),
+  `stream_options` rejection, reasoning/thinking deltas, and tool-call
+  argument chunking.
 - The agent loop's control points: **steering** (inject after the current
   tool batch), **follow-up** (run when the agent would stop), parallel tool
-  execution with per-tool `sequential` override (bash), `before/afterToolCall`
-  hooks, `shouldStopAfterTurn`, **truncation safety** (a `length` stop means
-  tool args may be cut — those calls are failed with an explanatory result,
-  not executed with half-arguments).
+  execution with per-tool `sequential` override (bash),
+  `before/afterToolCall` hooks, `shouldStopAfterTurn`, **truncation safety**
+  (a `length` stop means tool args may be cut — those calls are failed with
+  an explanatory result, not executed with half-arguments).
 - Sessions as append-only JSONL with a header line; branching = copy +
   append. One file, greppable, resumable.
 - Short system prompt; minimal toolset: `read write edit bash grep find ls`.
@@ -1102,25 +842,28 @@ See [Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and
 **Cut — deliberate:**
 
 - No image/audio blocks or native provider-specific reasoning APIs.
-  OpenAI-compatible HTTP and official CLI adapters share the same message model.
 - No framework: no React TUI, no config DSL. A REPL is ~200 lines of
   readline; the print mode is ~80.
 - TypeBox → a 60-line hand-rolled schema validator for the subset we use.
-- Zero runtime package dependencies; subscription connections use separately installed CLIs.
+- Zero runtime package dependencies; subscription connections use
+  separately installed CLIs.
+- Mastra Factory runs as a separate supervised service, not inside the
+  bundle: its Node ≥ 22.19 floor and dependency tree stay out of the
+  Node 18-compatible `dist/rein.js`.
 
 **Added (requirements):**
 
-- The tool-capability compatibility layer (above) — pi assumes capable
-  models; rein assumes you might be running a 3B quantized GGUF on a laptop.
+- The tool-capability compatibility layer — pi assumes capable models; rein
+  assumes you might be running a 3B quantized GGUF on a laptop.
 - The human-voice section of the system prompt is *hardcoded*: first person,
   contractions, no "Great question!", no throat-clearing, have a point of
-  view, say exactly what failed. The way the agent talks is part of the
-  spec, not a prompt suggestion.
+  view, say exactly what failed.
 - `rein improve` + the `LESSONS.md` convention — the harness eats its own
   dogfood on a schedule.
 - Native Obscura `web_search`/`web_fetch`, with no hosted API key.
-- `gates` + vendored unlazy — completion discipline with runnable oracles,
-  wired in as both a tool and a `rein gates` CLI.
+- `gates` + vendored unlazy — completion discipline with runnable oracles.
+- The Dareecho tier: Learn dossiers, export runbooks, OS planning, and the
+  Mastra Factory wrap — all under the same approval and budget controls.
 
 ## Layout
 
@@ -1131,15 +874,15 @@ src/
 │   ├── event-stream.ts        async queue + iterator + final-result promise
 │   ├── sse.ts                 SSE line parser
 │   ├── openai-completions.ts  the adapter (native + text tool protocols)
-│   ├── cli-provider.ts        official Codex/Copilot CLI transports
+│   ├── cli-provider.ts        official Codex/Copilot/Grok CLI transports
 │   ├── endpoints.ts           URL inference + authenticated model discovery
 │   ├── ssh.ts                 request-scoped SSH forwarding for remote APIs
 │   ├── compat.ts              capability table + runtime fallback + learned modes
 │   └── models.ts              local-server discovery + provider presets + config
 ├── hardware/                  (stolen from Magnitude, Apache-2.0)
 │   ├── profile.ts             sysctl/vm_stat + /proc: cpu, ram, gpus, bandwidth
-│   ├── catalog.ts             curated local-model catalog (params, MoE active, quants)
-│   ├── fit.ts                 fits/tight/no + tok/s estimate, reserves, unified memory
+│   ├── catalog.ts             curated local-model catalog
+│   ├── fit.ts                 fits/tight/no + tok/s estimate, reserves
 │   └── report.ts              `rein hardware` renderer
 ├── agent/
 │   ├── agent-loop.ts          the loop (steering, parallel tools, hooks, safety)
@@ -1153,42 +896,62 @@ src/
 │   ├── loop.ts                experiment loop (TASK.md + METRIC.md)
 │   ├── nodeterm.ts            nodeterm surface: status hooks + phone approvals
 │   └── tools/                 read write edit bash grep find ls web(Obscura) gates(unlazy)
+├── os/
+│   ├── command.ts             `rein os` dispatch (plan | prepare | rain | rainmeter | skin | factory)
+│   ├── plan.ts                machine assessment + installation gates
+│   ├── prepare.ts             Omarchy / ChromeOS kit staging
+│   ├── rain.ts                the rain motif preview
+│   ├── rainmeter.ts           Rainmeter rebuild report
+│   ├── skin/                  Rainmeter-model skin engine, install, list
+│   └── factory.ts             `rein os factory` verbs over the shared supervisor
 └── util/                      ansi · json-salvage · schema · truncate
+apps/
+├── klaud/                     native Mac app (AG-UI server, bots, chat, iOS companion)
+└── factory/                   Mastra Factory native app + the shared supervisor
+│   ├── main.mjs               app shell; drives apps/factory/supervisor.mjs
+│   ├── supervisor.mjs         server lifecycle: start (production|dev) stop status open
+│   ├── provision.mjs          template copy, credential key, .env — refuse to overwrite
+│   ├── package-macos.mjs      signing, notarization, ZIP roundtrip
+│   └── test/                  11 tests
 vendor/
-└── unlazy/                    Leonxlnx/unlazy (MIT): SKILL.md + gate-check.mjs + templates + references
+├── unlazy/                    Leonxlnx/unlazy (MIT): gate ledger + oracles
+├── pi-posthorse/              pinned upstream 0.4.1 (MIT) + native adaptation
+├── meat/                      Bold Software Meat (pinned) — WASM diff review
+└── mastra-factory/            softwarefactory-template pure copy + PROVENANCE.md
 test/
 ├── mock-server.ts             deterministic OpenAI-compatible server (4 models)
-└── smoke.ts                   28 checks incl. 3 full-pipeline e2e scenarios
+├── smoke.ts                   full-pipeline e2e scenarios
+└── *.test.ts                  regression suites (896 passing)
 ```
 
 ## Testing
 
 CI tests the newest Node.js release using the `node` version alias, alongside
 the numbered versions in our compatibility range. Browser smoke tests cover
-Linux, macOS, and Windows on Node 18 and the newest release. The GitHub Actions
-helpers use their own Node 24 runtime, independently of the Node version tested.
+Linux, macOS, and Windows on Node 18 and the newest release.
 
 ```sh
-npm test          # offline smoke + node:test regression suites
-npm run bundle    # rebuild the committed Node 18 CLI
-npm run check:posthorse  # verify the pinned upstream source/license snapshot
-npm run check:natives    # Fold, Matt Pocock and Meat provenance
-npm run test:meat-upstream # Go 1.26.5: offline upstream algorithm tests
-npm run check:meat       # Go 1.26.5: reproduce and compare the shipped WASM
+npm test                    # offline smoke + node:test regression suites (root)
+npm test --prefix apps/factory   # the Mastra Factory app + supervisor suite
+npm run bundle              # rebuild the committed Node 18 CLI (byte-reproducible)
+npm run check:posthorse     # verify the pinned upstream source/license snapshot
+npm run check:natives       # Fold, Matt Pocock and Meat provenance
+npm run test:meat-upstream  # Go 1.26.5: offline upstream algorithm tests
+npm run check:meat          # Go 1.26.5: reproduce and compare the shipped WASM
 ```
 
-Covers: JSON salvage (7), edit semantics (6), capability table (5),
-hardware profile + fit assessment (5), the plain-JSON adapter path (issue #1),
-doctor + heartbeat parsing + an idle beat end-to-end, and three
-the mock server — native tools, text protocol, and broken-native → runtime
-fallback (the tool actually executes in each).
+Covers: JSON salvage, edit semantics, capability table, hardware profile +
+fit assessment, the plain-JSON adapter path, doctor + heartbeat parsing, the
+full Mastra Factory supervisor (profiles, lifecycle, stale pid, foreign
+port, setup idempotence, dispatch), and three e2e scenarios on the mock
+server — native tools, text protocol, and broken-native → runtime fallback
+(the tool actually executes in each).
 
 ## Running under nodeterm
 
-[nodeterm](https://nodeterm.dev) is a canvas that hosts **real tmux sessions** —
-each node is a live terminal that survives app restarts and machine reboots —
-and its **iOS companion pairs to the same tmux session** (watch an agent work,
-type into it, answer prompts; off-network it's E2E-encrypted over a relay).
+[nodeterm](https://nodeterm.dev) is a canvas that hosts **real tmux
+sessions** — each node is a live terminal that survives app restarts and
+machine reboots — and its **iOS companion pairs to the same tmux session**.
 rein plugs into it as a custom agent:
 
 ```
@@ -1197,46 +960,37 @@ Settings → Custom agents
   Launch command: rein --ask bash,write      (or just: rein)
 ```
 
-What you get:
-
 - **Persistence, twice** — tmux keeps the session alive across app restarts;
   rein's JSONL sessions (`/resume`, `/branch`) keep the conversation across
-  machine reboots. Cold-restore replays scrollback; `rein` comes back in the
-  same session.
-- **Status** — inside a nodeterm node rein detects the injected
-  `NODETERM_*` env and reports Claude-style hook events (turn start, tool
-  start/end, done) to nodeterm's loopback hook server, plus the terminal
-  title (`rein · bash`, `rein · needs you: write`, `rein · idle`) which is
-  the status surface for custom-agent nodes.
+  machine reboots.
+- **Status** — inside a nodeterm node rein reports Claude-style hook events
+  to nodeterm's loopback hook server, plus the terminal title.
 - **Approvals from the phone** — with `--ask bash,write` (or `/ask` in the
-  REPL), gated tools go through nodeterm's pending-files protocol
-  (`~/.nodeterm/pending/<id>.json`, the phone writes `<id>.answer`). The
+  REPL), gated tools go through nodeterm's pending-files protocol. The
   answer channel is the filesystem, not loopback, so a phone over SSH can
-  answer. On timeout, rein asks for local approval when a fallback is
-  available; otherwise it denies execution, with a visible note. Outside a
-  nodeterm node the same gate falls back to a
-  `[y/N]` prompt on stdin.
+  answer.
 
 The integration lives in one file (`src/harness/nodeterm.ts`) and is inert
-unless the `NODETERM_*` env is present — running rein in a plain terminal
-changes nothing. nodeterm is a surface, not a dependency: BUSL-1.1 license,
-no code coupling either way.
+unless the `NODETERM_*` env is present. nodeterm is a surface, not a
+dependency: BUSL-1.1 license, no code coupling either way.
 
 ## Known limits (honest list)
 
 - Single model per session (no mid-run model switching)
-- Subscription login needs a current official CLI and an eligible account. Cloud
-  login/paid inference is not exercised by offline tests. Copilot has no read-only
-  auth status command, so status reports its authentication as unverified until use.
-- Token usage depends on what the provider reports. Thinking is shown as status;
-  the activity view records visible responses and tool results. Meat produces
-  a reading diff after inference, not a patch approval UI.
-- Posthorse uses estimated token budgets. Configure the server's actual context
-  limit; a prompt or tool schema that cannot fit fresh still needs a larger window.
-- `rein loop` and `rein improve` require a clean Git root with an initial commit.
-  Commit or stash existing work before allowing automatic keep/discard.
-- `rein improve` uses its own test suite as the metric. Tests still need to cover
-  the behavior you expect it to preserve.
+- Subscription login needs a current official CLI and an eligible account.
+  Cloud login/paid inference is not exercised by offline tests.
+- Token usage depends on what the provider reports. Thinking is shown as
+  status. Meat produces a reading diff after inference, not a patch
+  approval UI.
+- Posthorse uses estimated token budgets. Configure the server's actual
+  context limit.
+- `rein loop` and `rein improve` require a clean Git root with an initial
+  commit.
+- Mastra Factory's first `setup` needs network access to install its
+  dependencies; the app itself runs from the installed project. Factory's
+  production profile requires a `DATABASE_URL`; the dev profile does not.
+- `rein os prepare` stages overlay kits for development VMs; it does not
+  produce a bootable Dareecho image.
 - Text tool protocol assumes the model can follow one example; 1–3B models
   still need nudging (the fallback nudge is built in)
 
@@ -1244,15 +998,21 @@ no code coupling either way.
 
 Architecture: [earendil-works/pi](https://github.com/earendil-works/pi)
 (especially `packages/ai` — "the hard part is the translation layer" — and
-`packages/agent`). Loop philosophy: [karpathy/autoresearch](https://github.com/karpathy/autoresearch).
+`packages/agent`). Loop philosophy:
+[karpathy/autoresearch](https://github.com/karpathy/autoresearch).
 Simplicity bar: [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT).
 Context windows: [fitchmultz/pi-posthorse](https://github.com/fitchmultz/pi-posthorse)
-(MIT, pinned source and native Rein adaptation).
-Completion discipline: [Leonxlnx/unlazy](https://github.com/Leonxlnx/unlazy)
-(MIT, vendored — the gate ledger and runnable oracles).
+(MIT, pinned source and native Rein adaptation). Completion discipline:
+[Leonxlnx/unlazy](https://github.com/Leonxlnx/unlazy) (MIT, vendored).
 Web engine: [Obscura](https://github.com/h4ckf0r0day/obscura), Apache-2.0,
-with a pinned native runtime and its upstream markdown converter.
-Search results: DuckDuckGo HTML.
+with a pinned native runtime. Search results: DuckDuckGo HTML.
 Hardware fit: [magnitudedev/magnitude](https://github.com/magnitudedev/magnitude)
-(Apache-2.0 — concepts ported: hardware discovery, per-domain memory
-reserves, Fits/DoesNotFit assessment, MoE-aware catalog).
+(Apache-2.0). Diff review: [Bold Software Meat](https://github.com/boldsoftware/meat),
+pinned under `vendor/meat/`. Fold and Matt Pocock workflows, pinned under
+`vendor/`.
+
+Mastra Factory: [mastra-ai/mastra](https://github.com/mastra-ai/mastra)
+(`@mastra/factory`) and
+[mastra-ai/softwarefactory-template](https://github.com/mastra-ai/softwarefactory-template),
+Apache-2.0. Installed as itself — Mastra's name, UI, and icon — as a native
+app alongside Dareecho, with the template vendored as a pure copy.

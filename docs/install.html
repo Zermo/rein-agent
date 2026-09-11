@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="Set up Rein for the way you work: choose an operator profile, optional skills, task limits, a model connection, and your first task.">
+<meta name="description" content="Set up Rein for the way you work: choose an operator profile, optional skills, task limits, a model connection, and your first task — then look inside the machine with Dareecho and Mastra Factory.">
 <title>Rein field guide · Set up your agent</title>
 <link rel="canonical" href="https://zermo.github.io/rein-agent/">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%22240%20200%20780%20780%22%20color%3D%22%23b54229%22%3E%3Crect%20x%3D%22240%22%20y%3D%22200%22%20width%3D%22780%22%20height%3D%22780%22%20rx%3D%2280%22%20fill%3D%22%23f5eddc%22%2F%3E%3Cpath%20fill%3D%22currentColor%22%20fill-rule%3D%22evenodd%22%20d%3D%22M466%20278H707C814%20278%20886%20354%20886%20456V509C886%20610%20833%20666%20762%20690L885%20902Q888%20907%20882%20907H666Q661%20907%20659%20902L541%20708H507V903Q507%20907%20503%20907H377Q372%20907%20372%20903V375C372%20321%20416%20278%20466%20278Z%20M616%20408H735L818%20586L794%20616H726L683%20582H543Q540%20581%20541%20577L615%20410Q615%20408%20616%20408Z%22%2F%3E%3Crect%20x%3D%22682%22%20y%3D%22446%22%20width%3D%2242%22%20height%3D%2238%22%20rx%3D%222%22%20fill%3D%22currentColor%22%2F%3E%3C%2Fsvg%3E">
 <meta name="theme-color" content="#f5eddc">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Boot up. Take Rein. | Installation field guide">
-<meta property="og:description" content="Install Rein, choose how your agent works with you, connect a local or cloud model, and start your first task.">
+<meta property="og:description" content="Install Rein, choose how your agent works with you, connect a local or cloud model, and start your first task. Learn the machine, keep your files, and run a software factory on it.">
 <meta property="og:url" content="https://zermo.github.io/rein-agent/">
 <meta property="og:image" content="https://zermo.github.io/rein-agent/assets/rein-field-guide-card.jpg">
 <meta property="og:image:width" content="1280">
@@ -34,7 +34,7 @@
 <main id="top">
 <header class="masthead"><a class="brand" href="#top" aria-label="Back to top"><svg class="brand-mark" viewBox="340 250 580 690" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M466 278H707C814 278 886 354 886 456V509C886 610 833 666 762 690L885 902Q888 907 882 907H666Q661 907 659 902L541 708H507V903Q507 907 503 907H377Q372 907 372 903V375C372 321 416 278 466 278Z M616 408H735L818 586L794 616H726L683 582H543Q540 581 541 577L615 410Q615 408 616 408Z"/><rect x="682" y="446" width="42" height="38" rx="2" fill="currentColor"/></svg>REIN</a><div class="right"><span class="eyebrow">Operator's field guide / 01</span><a href="https://github.com/Zermo/rein-agent/wiki">Wiki ↗</a><a href="https://github.com/Zermo/rein-agent">Source ↗</a></div></header>
 <section class="hero" aria-labelledby="title">
-  <div><p class="eyebrow">Your terminal · macOS · Linux · WSL</p><h1 id="title">Boot up.<br>Take rein.</h1><p class="intro">An agent for the way you work.<br>Your model. Your preferences.<br>Set up your first session.</p></div>
+  <div><p class="eyebrow">Your terminal · your machine · macOS · Linux · WSL</p><h1 id="title">Boot up.<br>Take rein.</h1><p class="intro">An agent for the way you work.<br>Your model. Your preferences.<br>Your machine, opened up.</p></div>
   <div class="hero-art">
     <svg viewBox="0 0 440 292" role="img" aria-labelledby="art-title art-desc" xmlns="http://www.w3.org/2000/svg">
       <title id="art-title">A terminal connected to a remote model server</title><desc id="art-desc">A retro computer and a server tower stand on a printed grid, joined by a red cable.</desc>
@@ -65,7 +65,7 @@
     <div class="art-caption"><span>FIG. 01 / TWO MACHINES, ONE SESSION</span><span>REIN SYSTEMS</span></div>
   </div>
 </section>
-<nav class="route" aria-label="Guide steps"><a href="#install"><span>01</span>Install</a><a href="#profile"><span>02</span>Your profile</a><a href="#limits"><span>03</span>Task limits</a><a href="#connect"><span>04</span>Connect</a><a href="#run"><span>05</span>First task</a><a href="#update"><span>06</span>Keep current</a></nav>
+<nav class="route" aria-label="Guide steps"><a href="#install"><span>01</span>Install</a><a href="#profile"><span>02</span>Your profile</a><a href="#limits"><span>03</span>Task limits</a><a href="#connect"><span>04</span>Connect</a><a href="#run"><span>05</span>First task</a><a href="#machine"><span>06</span>Inside the machine</a><a href="#update"><span>07</span>Keep current</a></nav>
 <div class="notice"><div class="stamp">ALREADY HAVE REIN?<br>START HERE.</div><p>Run <code>rein setup</code> for the complete walkthrough, or <code>rein setup profile</code> to add your work preferences without changing the model connection. <strong>You can review your choices before saving.</strong> Need a newer build? <a href="#update">Update Rein first.</a></p></div>
 
 <section class="step" id="install" aria-labelledby="install-title">
@@ -84,7 +84,7 @@ curl --version</code></pre></div>
     <details><summary>I want to install now and set up later.</summary><p>Add <code>--skip-setup</code> after <code>bash -s --</code> to skip the wizard, connection checks, and launch. <code>--no-launch</code> completes setup without starting chat. <code>--yes</code> runs unattended connection setup without inventing preferences or launching chat. Start the guided setup later with <code>rein setup</code>.</p></details>
     <details><summary>"rein: command not found" after installing?</summary><p>Open a fresh terminal shell. If it still cannot find Rein, check the global npm location:</p><pre><code>npm prefix -g</code></pre><p>On macOS and Linux, its <code>bin</code> directory must be on your shell's <code>PATH</code>. The installer prints the exact path when it detects this problem.</p></details>
     <details><summary>I want to use NodeTerm too.</summary><p>NodeTerm is optional. Add <code>--nodeterm</code> after <code>bash -s --</code> to install and register its macOS app, leaving it closed. Use <code>rein desktop open</code> when you want its separate canvas. Ordinary <code>rein</code> commands keep running in your current terminal.</p></details>
-    <details><summary>I am preparing a machine for Dareecho.</summary><p>Start with Dareecho Learn before changing any operating system. <code>rein learn</code> is read-only: it writes a fresh boot-chain, security, and persistence dossier under <code>~/.rein/redteam/</code> and refuses to overwrite one. Before a future replacement, use <code>rein export presets --to /path/to/backup</code> or <code>rein export browse</code>; export copies and never moves or deletes source files. Dareecho's current OS work prepares VM and ChromeOS userland overlays, not a bootable image or firmware installer. Read <a href="https://github.com/Zermo/rein-agent/wiki/Dareecho-export">Dareecho export</a> for the full sequence.</p></details>
+    <details><summary>I am preparing a machine for Dareecho.</summary><p>Start with Dareecho Learn before changing any operating system. <code>rein learn</code> is read-only: it writes a fresh boot-chain, security, and persistence dossier under <code>~/.rein/redteam/</code> and refuses to overwrite one. Before a future replacement, use <code>rein export presets --to /path/to/backup</code> or <code>rein export browse</code>; export copies and never moves or deletes source files. Dareecho's current OS work prepares VM and ChromeOS userland overlays, not a bootable image or firmware installer. Step <a href="#machine">06</a> covers the full machine tier, including Mastra Factory. Read <a href="https://github.com/Zermo/rein-agent/wiki/Dareecho-export">Dareecho export</a> for the full sequence.</p></details>
     <label class="finish js-only"><input type="checkbox" data-step="1">I can run <code>rein --version</code></label>
   </div>
 </section>
@@ -188,15 +188,54 @@ rein --no-tools -p "Reply with the single word: ok"</code></pre></div>
   </div>
 </section>
 
+<section class="step" id="machine" aria-labelledby="machine-title">
+  <aside><div class="step-number">06</div><div class="step-title">Inside the machine</div><p>Learn it, keep your files, and run a software factory on it.</p></aside>
+  <div><h2 id="machine-title">Open the machine up.</h2><p class="lead">Rein is an agent first and a machine tool second. The Dareecho tier learns what a machine is before you replace anything on it, copies the files that are yours before an OS change, and installs a real software factory next to your agent. Nothing in this tier is required for the terminal workflow above.</p>
+    <div class="tabs js-only" role="tablist" aria-label="Machine tier"><button class="tab" type="button" id="tab-dareecho" role="tab" aria-controls="panel-dareecho" aria-selected="true">Dareecho: learn + export</button><button class="tab" type="button" id="tab-factory" role="tab" aria-controls="panel-factory" aria-selected="false" tabindex="-1">Mastra Factory</button><button class="tab" type="button" id="tab-os" role="tab" aria-controls="panel-os" aria-selected="false" tabindex="-1">OS development</button></div>
+    <noscript><p>Machine-tier routes are all shown below. Pick the one that matches your machine.</p></noscript>
+    <div class="panel" id="panel-dareecho" role="tabpanel" aria-labelledby="tab-dareecho">
+      <h3>Learn the machine first.</h3><p>Dareecho Learn is a read-only assessment pass: boot chain of trust, security posture, and per-probe evidence. It writes a fresh dossier and refuses to overwrite an existing one. Attached iPhones and iPads are covered by the iOS pass.</p>
+      <div class="command"><div class="command-header"><span>LEARN THIS MACHINE (READ-ONLY)</span><button class="copy js-only" type="button" data-copy="learn-command" aria-label="Copy Dareecho Learn commands">Copy</button></div><pre><code id="learn-command">rein learn [--json]
+rein learn ios [--udid U]</code></pre></div>
+      <p>Dossiers are red-team assessments under <code>~/.rein/redteam/</code>. They do not bundle or invoke CyberStrike's offensive tooling. Before any eventual OS replacement, copy your personal files first — export is copy-only; sources are never moved or deleted.</p>
+      <div class="command"><div class="command-header"><span>KEEP YOUR FILES</span><button class="copy js-only" type="button" data-copy="export-command" aria-label="Copy export commands">Copy</button></div><pre><code id="export-command">rein export browse
+rein export presets --to /path/to/backup
+rein export ~/Documents ~/Pictures --to /path/to/backup</code></pre></div>
+      <p class="small">The standard groups cover Documents, Desktop, Downloads, Pictures, Movies, Music, plus Mail, keychains, browser profiles, and SSH/GPG keys where they exist. See <a href="https://github.com/Zermo/rein-agent/wiki/Dareecho-export">Dareecho export</a> for the operator runbook.</p>
+    </div>
+    <div class="panel" id="panel-factory" role="tabpanel" aria-labelledby="tab-factory">
+      <h3>A software factory on this machine.</h3><p>Mastra Factory is the open-source agent-building machine from the Mastra team. Rein installs it <strong>as itself</strong> — same name, same UI, same icon — as a native app that sits alongside Dareecho. Open the app and look at your machine's factory running live. It needs its own Node.js 22.19 or newer; the terminal CLI keeps working on 18.</p>
+      <div class="command"><div class="command-header"><span>INSTALL ONCE, THEN DRIVE IT</span><button class="copy js-only" type="button" data-copy="factory-command" aria-label="Copy Mastra Factory commands">Copy</button></div><pre><code id="factory-command">rein os factory setup      # template, key, .env, dependencies, build — never overwrites
+rein os factory dev        # single-machine profile: dev server, libSQL, no database
+rein os factory status
+rein os factory stop</code></pre></div>
+      <p>Two profiles. The <strong>production</strong> profile (<code>rein os factory start</code>) runs the built server and requires a <code>DATABASE_URL</code> (Postgres). The <strong>single-machine</strong> profile (<code>rein os factory dev</code>) runs the dev server with libSQL storage — no database, no Docker. The app chooses by configuration: a <code>DATABASE_URL</code> in the project environment selects production, otherwise dev.</p>
+      <p>The generated project is a pure copy of Mastra's <a href="https://github.com/mastra-ai/softwarefactory-template">factory template</a>, provisioned once into <code>~/.local/share/rein-factory</code>. Server state — pid, log, port — lives under <code>~/.local/state/rein-factory</code>, so the app and the terminal always see the same server. Model wiring is done in Factory's own Settings › Models.</p>
+      <p class="small">License: Apache-2.0, credited where it belongs in the app's NOTICE. The integration study, including the dormant Kepler EE code in <code>@mastra/core</code>, is in the <a href="https://github.com/Zermo/rein-agent/blob/main/docs/mastra-factory-integration.md">integration document</a>.</p>
+    </div>
+    <div class="panel" id="panel-os" role="tabpanel" aria-labelledby="tab-os">
+      <h3>OS development surface.</h3><p>Dareecho OS work is development tooling for overlay kits and the rain design language. It assesses the machine, stages kits into new directories you choose, and previews the theme in your terminal. It does not partition disks, install an operating system, or enable background services.</p>
+      <div class="command"><div class="command-header"><span>ASSESS, STAGE, PREVIEW</span><button class="copy js-only" type="button" data-copy="os-command" aria-label="Copy Dareecho OS commands">Copy</button></div><pre><code id="os-command">rein os plan [--json]                 # machine assessment + installation gates (read-only)
+rein os prepare --output ~/kits/omarchy   # stage a pinned Omarchy VM overlay kit
+rein os prepare --output ~/kits/chromeos --target chromeos
+rein os rain [--animate]              # the rain motif, static by default
+rein os rainmeter [--json]            # Rainmeter rebuild report
+rein os skin render|install|list      # Rainmeter-model skins</code></pre></div>
+      <p class="small">Rain previews are static unless you ask for motion; <code>REIN_REDUCED_MOTION=1</code> keeps previews and skins still. Read the <a href="https://github.com/Zermo/rein-agent/blob/main/docs/rein-os.md">Dareecho development guide</a> for the VM and ChromeOS overlay boundaries.</p>
+    </div>
+    <label class="finish js-only"><input type="checkbox" data-step="6">I know how to learn a machine, keep my files, and run Factory</label>
+  </div>
+</section>
+
 <section class="step" id="update" aria-labelledby="update-title">
-  <aside><div class="step-number">06</div><div class="step-title">Keep current</div><p>Install once. Update from the same terminal.</p></aside>
+  <aside><div class="step-number">07</div><div class="step-title">Keep current</div><p>Install once. Update from the same terminal.</p></aside>
   <div><h2 id="update-title">Fresh build. Same home.</h2><p>Fetch the current published installer and update Rein. Your model can be offline while this runs.</p>
     <div class="command"><div class="command-header"><span>UPDATE THE INSTALLED BUILD</span><button class="copy js-only" type="button" data-copy="update-command" aria-label="Copy update commands">Copy</button></div><pre><code id="update-command">rein update &amp;&amp; rein --version</code></pre></div>
     <p>Restart any running Rein sessions after updating. Your profile, configuration, notes, and saved sessions remain in <code>~/.rein</code>, or your custom <code>REIN_HOME</code>.</p>
     <details><summary>My version does not have "rein update" yet.</summary><p>Run the installer with setup skipped:</p><pre><code>curl -fsSL https://raw.githubusercontent.com/Zermo/rein-agent/main/install.sh \
   | bash -s -- --skip-setup</code></pre></details>
     <details><summary>The updater found local changes in its checkout.</summary><p>Commit or move those changes before updating. The installer preserves edits in its <code>~/.rein/repo</code> checkout. It does not overwrite them to force an update.</p></details>
-    <label class="finish js-only"><input type="checkbox" data-step="6">I know how to update Rein</label>
+    <label class="finish js-only"><input type="checkbox" data-step="7">I know how to update Rein</label>
   </div>
 </section>
 
@@ -210,15 +249,14 @@ rein --no-tools -p "Reply with the single word: ok"</code></pre></div>
 rein setup</code></pre><p>Rerun the npm installation command to update. The curl/Bash updater and tmux route in this guide use macOS, Linux, or WSL.</p></details>
 </div></section>
 
-<footer class="footer"><div><div class="progress-label" id="progress-label" aria-live="polite">YOUR INSTALLATION CHECKLIST</div><div class="progress-track" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div></div><button class="print js-only" id="print-guide" type="button">Print / save PDF ↗</button></footer>
-<div class="colophon"><span>REIN / FIELD GUIDE 01 / v0.14.0<br>Commands are copied, never executed by this page.<br><a href="https://github.com/Zermo/rein-agent/blob/main/docs/branding.md">Repo cards + product previews</a> · <a href="https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide">Deploy this guide</a></span><span>Documentation and visual review guided by<br><a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/engineering/write-docs">dzhng / write-docs</a> + <a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/visual/screenshot-critique">screenshot-critique</a></span></div>
+<footer class="footer"><div><div class="progress-label" id="progress-label" aria-live="polite">YOUR INSTALLATION CHECKLIST</div><div class="progress-track" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><button class="print js-only" id="print-guide" type="button">Print / save PDF ↗</button></footer>
+<div class="colophon"><span>REIN / FIELD GUIDE 01 / v0.15.0<br>Terminal · klaʊdbot · Dareecho · Mastra Factory<br>Commands are copied, never executed by this page.<br><a href="https://github.com/Zermo/rein-agent/blob/main/docs/branding.md">Repo cards + product previews</a> · <a href="https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide">Deploy this guide</a></span><span>Documentation and visual review guided by<br><a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/engineering/write-docs">dzhng / write-docs</a> + <a href="https://github.com/dzhng/skills/tree/c7957020f9fcb7321dbc339428b41cdff67c9637/skills/visual/screenshot-critique">screenshot-critique</a></span></div>
 <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
 </main>
 <script>
 document.documentElement.classList.add('js');
-const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
-function selectTab(tab, focus = false) {
-  for (const item of tabs) {
+function selectTab(tablist, tab, focus = false) {
+  for (const item of tablist.querySelectorAll('[role="tab"]')) {
     const selected = item === tab;
     item.setAttribute('aria-selected', String(selected));
     item.tabIndex = selected ? 0 : -1;
@@ -226,18 +264,21 @@ function selectTab(tab, focus = false) {
   }
   if (focus) tab.focus();
 }
-for (const [index, tab] of tabs.entries()) {
-  tab.addEventListener('click', () => selectTab(tab));
-  tab.addEventListener('keydown', event => {
-    let next;
-    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-    if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
-    if (event.key === 'Home') next = 0;
-    if (event.key === 'End') next = tabs.length - 1;
-    if (next !== undefined) { event.preventDefault(); selectTab(tabs[next], true); }
+for (const tablist of document.querySelectorAll('[role="tablist"]')) {
+  const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => selectTab(tablist, tab));
+    tab.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+      if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+      if (event.key === 'Home') next = 0;
+      if (event.key === 'End') next = tabs.length - 1;
+      if (next !== undefined) { event.preventDefault(); selectTab(tablist, tabs[next], true); }
+    });
   });
+  selectTab(tablist, tabs[0]);
 }
-selectTab(tabs[0]);
 for (const button of document.querySelectorAll('[data-copy]')) {
   button.addEventListener('click', async () => {
     const command = document.getElementById(button.dataset.copy);

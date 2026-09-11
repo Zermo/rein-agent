@@ -190,7 +190,7 @@ test("rein os dispatches factory verbs and rejects foreign flags", async t => {
 	// The OS help advertises the factory verbs.
 	const osHelp: string[] = [];
 	await runOSCommand(["help"], {}, { log: text => osHelp.push(text) });
-	assert.match(osHelp.join("\n"), /rein os factory setup\|start\|stop\|status\|open/);
+	assert.match(osHelp.join("\n"), /rein os factory setup\|start\|dev\|stop\|status\|open/);
 });
 
 test("the template resolver finds vendor/mastra-factory from tests, source, and bundle depths", () => {

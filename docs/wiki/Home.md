@@ -2,6 +2,8 @@
 
 Rein is a terminal agent for local models, your own server over SSH, and supported cloud connections. The guided setup asks how you work, suggests an optional skill pack, sets task limits, connects a model, and offers follow-ups before your first task in the same terminal. It can help with everyday plans and small improvements as well as projects.
 
+Rein is an agent first and a machine tool second. The Dareecho tier learns what a machine is before you replace anything on it, copies the files that are yours before an OS change, and installs a real software factory next to your agent.
+
 [![Rein installation field guide](https://zermo.github.io/rein-agent/assets/rein-field-guide-card.png)](https://zermo.github.io/rein-agent/)
 
 Open the [retro field guide](https://zermo.github.io/rein-agent/) for copyable commands, connection tabs, and a printable checklist.
@@ -14,6 +16,8 @@ Open the [retro field guide](https://zermo.github.io/rein-agent/) for copyable c
 | Set up rules-only follow-ups or the optional local helper | [Background coordination](https://github.com/Zermo/rein-agent/wiki/Background-coordination) |
 | Host a model locally or connect over LAN, mesh, or SSH | [Self-hosted models](https://github.com/Zermo/rein-agent/wiki/Self-hosted-models) |
 | Learn a machine before an OS replacement, or export personal files first | [Dareecho Learn + export](https://github.com/Zermo/rein-agent/wiki/Dareecho-export) |
+| Develop the OS path: plan, prepare a kit, or preview rain and skins | [Dareecho OS](https://github.com/Zermo/rein-agent/wiki/Dareecho-OS) |
+| Install and drive Mastra Factory, Mastra's software factory | [Mastra Factory](https://github.com/Zermo/rein-agent/wiki/Mastra-Factory) |
 | Use Codex, Copilot, Grok, or a cloud API key | [Cloud connections](https://github.com/Zermo/rein-agent/wiki/Cloud-connections) |
 | Publish the field guide or update this wiki | [Deploy the field guide](https://github.com/Zermo/rein-agent/wiki/Deploy-field-guide) |
 
@@ -24,3 +28,5 @@ This wiki's editable source lives in [docs/wiki](https://github.com/Zermo/rein-a
 - [Server discovery](https://github.com/Zermo/rein-agent/wiki/Server-discovery)
 - [Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and-serving)
 - [Grok and X Premium+](https://github.com/Zermo/rein-agent/wiki/Grok)
+- [Dareecho OS](https://github.com/Zermo/rein-agent/wiki/Dareecho-OS)
+- [Mastra Factory](https://github.com/Zermo/rein-agent/wiki/Mastra-Factory)

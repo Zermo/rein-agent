@@ -15,4 +15,6 @@
 - [Server discovery](https://github.com/Zermo/rein-agent/wiki/Server-discovery)
 - [Hardware and serving](https://github.com/Zermo/rein-agent/wiki/Hardware-and-serving)
 - [Dareecho Learn + export](https://github.com/Zermo/rein-agent/wiki/Dareecho-export)
+- [Dareecho OS](https://github.com/Zermo/rein-agent/wiki/Dareecho-OS)
+- [Mastra Factory](https://github.com/Zermo/rein-agent/wiki/Mastra-Factory)
 - [Grok and X Premium+](https://github.com/Zermo/rein-agent/wiki/Grok)

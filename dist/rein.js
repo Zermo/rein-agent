@@ -7344,7 +7344,7 @@ var init_command2 = __esm({
   rein os prepare --output <new-directory> [--target omarchy|chromeos]
                                            stage a pinned Omarchy VM overlay kit, or the
                                            ChromeOS userland kit (default target: omarchy)
-  rein os factory setup|start|stop|status|open
+  rein os factory setup|start|dev|stop|status|open
                                            Mastra Factory on this machine: install once,
                                            then drive the shared server (run rein os factory help)
   rein os rain [--static | --animate]        preview the rain motif in this terminal
