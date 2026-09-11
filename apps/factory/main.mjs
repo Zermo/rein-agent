@@ -2,23 +2,19 @@
 // Mastra Factory server alongside Dareecho. It does not rebrand Factory —
 // the name, UI, and icon stay Mastra's (see NOTICE).
 import { app, BrowserWindow, Menu, dialog, nativeImage, shell } from "electron";
-import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stopChild } from "./lifecycle.mjs";
-import { inspectProject, provisionProject, resolveProjectDir, resolveTemplateDir } from "./provision.mjs";
+import { buildProject, installDependencies, probeUrl, projectDirFor, serverPort, serverUrlFor, serverStatus, startServer, stopServer } from "./supervisor.mjs";
+import { inspectProject, provisionProject, resolveTemplateDir } from "./provision.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
-const port = Number(process.env.FACTORY_PORT?.trim() || 4111);
-if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-  console.error("FACTORY_PORT must be a whole number between 1 and 65535.");
-  process.exit(1);
-}
-const serverUrl = `http://127.0.0.1:${port}`;
+const port = serverPort({ env: process.env });
+const serverUrl = serverUrlFor(port);
 const startTimeoutMs = Number(process.env.FACTORY_START_TIMEOUT_MS?.trim() || 120_000);
-const projectDir = resolveProjectDir({ env: process.env, userHome: homedir() });
+const userHome = homedir();
 const templateDir = resolveTemplateDir({ appDirectory: directory, packaged: app.isPackaged, resourcesPath: process.resourcesPath });
 
 // Product identity: the app is Mastra Factory; Dareecho is the host.
@@ -27,34 +23,33 @@ app.setName("Mastra Factory");
 app.setAppUserModelId("org.zermo.mastra-factory");
 process.title = "mastra-factory";
 
-let window, server, owned = false, starting = false, quitting = false, shutdown = false, serverOutput = "";
+let window, starting = false, quitting = false, shutdown = false;
 const log = text => console.log(`[mastra-factory] ${text}`);
 const safeError = error => String(error?.message || "The operation failed.").slice(0, 2000);
-const tail = (bytes = 4096) => serverOutput.slice(-bytes).trim();
 const show = () => { if (window && !window.isDestroyed()) { window.show(); window.focus(); } };
 
-function serverStatus() {
-  return server && (server.exitCode === null && server.signalCode === null) ? "running" : "stopped";
-}
 function menuServerStatus() {
-  return serverStatus() === "running" ? "Running" : "Stopped";
+  // The supervisor's status is shared with `rein os factory status`.
+  return probeUrl(serverUrl, 500).then(code => (code !== undefined ? "Running" : "Stopped"));
 }
 function rebuildMenu() {
   if (!window) return;
-  const status = menuServerStatus();
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
+  void menuServerStatus().then(status => {
+    if (!window || window.isDestroyed()) return;
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: "Mastra Factory", submenu: [
       { label: "About Mastra Factory", click: showAbout },
       { type: "separator" },
       { label: "Open Mastra Factory", click: show },
       { label: "Reload", click: () => window?.reload() },
-      { label: "Restart server", click: restartServer, enabled: serverStatus() === "running" },
+      { label: "Restart server", click: restartServer, enabled: status === "Running" },
       { type: "separator" },
       { label: `Server: ${status}`, enabled: false },
       { role: "quit", label: "Quit Mastra Factory" },
     ] },
     { role: "editMenu" }, { role: "windowMenu" },
   ]));
+  });
 }
 function showAbout() {
   dialog.showMessageBox(window, {
@@ -68,88 +63,34 @@ function showAbout() {
   });
 }
 
-function attachOutput(child) {
-  const drain = stream => stream.on("data", chunk => { serverOutput = (serverOutput + chunk.toString("utf8")).slice(-32 * 1024); });
-  drain(child.stdout);
-  drain(child.stderr);
-}
-async function probe() {
-  try {
-    const response = await fetch(serverUrl + "/", { method: "GET", redirect: "manual", signal: AbortSignal.timeout(1500) });
-    await response.body?.cancel();
-    return response.status;
-  } catch {
-    return undefined;
-  }
-}
-async function startServer() {
-  if (server || starting) return;
+async function startSupervised() {
+  if (starting) return;
   starting = true;
   try {
-    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-    const child = spawn(npm, ["run", "start"], {
-      cwd: projectDir,
-      // Without DATABASE_URL the server needs NODE_ENV=development for
-      // single-machine libSQL storage; with it, production semantics apply.
-      env: { ...process.env, PORT: String(port), NODE_ENV: process.env.DATABASE_URL?.trim() ? "production" : "development" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    server = child;
-    owned = true;
-    attachOutput(child);
-    child.once("error", error => log(`Server spawn error: ${error.message}`));
-    child.once("exit", (code, signal) => {
-      log(`Server exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`);
-      if (owned) owned = false;
-      rebuildMenu();
-    });
-    const deadline = Date.now() + startTimeoutMs;
-    let lastStatus;
-    while (Date.now() < deadline) {
-      if (child.exitCode !== null || child.signalCode !== null) throw new Error(tail() || "The Mastra Factory server exited before it was ready.");
-      lastStatus = await probe();
-      if (lastStatus && lastStatus >= 200 && lastStatus < 400) { log(`Server ready at ${serverUrl} (HTTP ${lastStatus}).`); return; }
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    throw new Error(`The Mastra Factory server did not become ready within ${Math.round(startTimeoutMs / 1000)}s.\n${tail()}`);
-  } catch (error) {
-    await stopChild(server);
-    server = undefined;
-    owned = false;
-    throw error;
+    // Production when the machine has a database, single-machine otherwise.
+    const mode = process.env.DATABASE_URL?.trim() ? "production" : "dev";
+    await startServer({ env: process.env, userHome, port, timeoutMs: startTimeoutMs, attachIfRunning: true, mode, log });
   } finally {
     starting = false;
   }
 }
-async function stopServer() {
-  const child = server;
-  server = undefined;
-  if (owned && child) await stopChild(child);
-  owned = false;
+async function stopSupervised() {
+  try {
+    await stopServer({ env: process.env, userHome, log });
+  } catch {
+    /* A server this app did not start stays up when the window quits. */
+  }
 }
 async function restartServer() {
-  await stopServer();
+  await stopSupervised();
   try {
-    await startServer();
+    await startSupervised();
   } catch (error) {
     dialog.showMessageBox(window, { type: "error", title: "Mastra Factory", message: "The server restart failed.", detail: safeError(error), buttons: ["OK"], noLink: true });
   }
   rebuildMenu();
 }
-async function installDependencies() {
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  log("Installing Mastra Factory dependencies (one time).");
-  await new Promise((resolve, reject) => {
-    const child = spawn(npm, ["install", "--no-audit", "--no-fund"], { cwd: projectDir, stdio: ["ignore", "pipe", "pipe"] });
-    attachOutput(child);
-    child.once("error", error => reject(new Error(error.message)));
-    child.once("exit", code => {
-      if (code === 0) resolve();
-      else reject(new Error(`Dependency install finished with exit code ${code}.\n${tail()}`));
-    });
-  });
-  log("Dependency install finished.");
-}
+
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -162,7 +103,7 @@ else {
       event.preventDefault();
       if (quitting) return;
       quitting = true;
-      void stopServer().finally(() => {
+      void stopSupervised().finally(() => {
         window?.destroy();
         setImmediate(() => { shutdown = true; app.quit(); });
       });
@@ -173,13 +114,13 @@ else {
     if (process.platform === "darwin" && !appIcon.isEmpty()) app.dock.setIcon(appIcon);
 
     const setup = await (async () => {
+      const projectDir = projectDirFor({ env: process.env, userHome });
       const state = inspectProject({ projectDir, templateDir });
       if (!state.templateOk) throw new Error("The bundled Mastra Factory template is missing. Reinstall the app.");
       provisionProject({ projectDir, templateDir, databaseUrl: process.env.DATABASE_URL, log });
-      if (!state.installed) await installDependencies();
-      const existing = await probe();
-      if (existing && existing >= 200 && existing < 400) { log(`Using the already-running server at ${serverUrl}.`); return; }
-      await startServer();
+      if (!state.installed) await installDependencies(projectDir, { log });
+      if (!existsSync(join(projectDir, ".mastra", "output"))) await buildProject(projectDir, { log });
+      await startSupervised();
     })().catch(error => {
       dialog.showMessageBox({ type: "error", title: "Mastra Factory", message: "Mastra Factory could not start.", detail: safeError(error), buttons: ["OK"], noLink: true });
       app.quit();

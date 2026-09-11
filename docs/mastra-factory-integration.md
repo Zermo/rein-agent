@@ -126,16 +126,29 @@ template for agents to operate Factory), and the branding. Replacing the
 agent loop with the Rein loop is a deeper integration and a separate
 effort.
 
+### Done on this branch
+
+- `rein os factory setup|start|dev|stop|status|open` — the terminal drives
+  the same supervisor as the app. The supervisor module
+  (`apps/factory/supervisor.mjs`) is shared: server state (pid file, log,
+  port) lives under `~/.local/state/rein-factory`, the generated project
+  under `~/.local/share/rein-factory`, and either surface can start, stop,
+  and inspect the same server. Two profiles: `start` is the production
+  profile (built server, requires `DATABASE_URL`) and `dev` is the
+  single-machine profile (dev server, libSQL storage, no database); the app
+  picks by configuration. 12 CLI tests cover setup idempotence (install and
+  build each run once), both profiles, the start/status/stop lifecycle,
+  stale pid handling, foreign-port detection, and dispatch. Verified
+  end to end against the real Mastra Factory: setup → dev start → status →
+  stop on a scratch home.
+
 ### Next increments
 
-1. `rein os factory setup|start|stop|status|open` CLI verbs, so the
-   terminal can drive the same supervisor (the template's supervisor skill
-   already defines the read-only `mastra api factory` workflow).
-2. Kit staging: include the app (or its source, as the kit does for
+1. Kit staging: include the app (or its source, as the kit does for
    `apps/klaud`) in `rein os prepare` payloads with the verifier updated.
-3. Model wiring: pre-register the Dareecho model host as the Factory's
+2. Model wiring: pre-register the Dareecho model host as the Factory's
    default custom OpenAI-compatible provider on setup.
-4. Offline dependency bundle in the .app (today the one-time `npm install`
+3. Offline dependency bundle in the .app (today the one-time `npm install`
    needs network) and the Dareecho OS service unit.
 
 ## Risks and open questions

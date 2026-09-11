@@ -16,10 +16,13 @@ icon stay Mastra's. Dareecho is the host. See `NOTICE`.
 2. Generates the credential-encryption key and writes `.env` once: local
    sandbox, single-operator auth, no platform telemetry, single-machine
    libSQL storage (or Postgres when `DATABASE_URL` is provided).
-3. Installs the Factory dependencies one time (`npm install`).
-4. Starts the Factory server (`npm run start` in the project directory) and
-   waits for it to be ready. If a Factory server is already running on the
-   port, the app attaches to it instead of starting another.
+3. Installs the Factory dependencies one time (`npm install`) and builds
+   the server once (`mastra build`) for the production profile.
+4. Starts the Factory server in the project directory — production profile
+   (`mastra start`, requires `DATABASE_URL`) or the single-machine dev
+   profile (`mastra factory dev`, libSQL storage) — and waits for it to be
+   ready. If a Factory server is already running on the port, the app
+   attaches to it instead of starting another.
 5. Opens the Factory UI in a native window. External links open in the
    user's browser.
 
@@ -51,10 +54,33 @@ npm run dev       # run the wrapper against the vendored template
 npm run package:macos [-- --release]
 ```
 
+## The terminal drives the same supervisor
+
+The Rein CLI exposes the same state contract via `rein os factory`:
+
+```sh
+rein os factory setup     # one-time install: template, key, .env, dependencies, build
+rein os factory start     # production profile: built server, requires DATABASE_URL
+rein os factory dev       # single-machine profile: dev server, libSQL, no database
+rein os factory stop      # stop the server this supervisor started
+rein os factory status [--json]
+rein os factory open      # start if needed, open the UI in a browser
+```
+
+Server state (pid, log, port) lives under `~/.local/state/rein-factory` and
+the generated project under `~/.local/share/rein-factory`, so the app and
+the CLI start, stop, and inspect the same server. Whichever surface you use,
+the other sees it.
+
+The app chooses the profile by configuration: `DATABASE_URL` present runs
+production, otherwise the single-machine dev profile.
+
 ## Not included yet
 
-- `rein os factory` CLI verbs (setup/start/stop/status/open) and kit
-  staging — the next increment.
+- Kit staging of the app (or its source, as the kit does for `apps/klaud`)
+  in `rein os prepare` payloads.
+- Model-host pre-wiring: registering the Dareecho model host as the
+  Factory's default custom provider during setup.
 - Offline dependency bundle in the .app (today the one-time `npm install`
   needs network).
 - Linux/Windows packaging and the Dareecho OS service unit.

@@ -17,6 +17,7 @@
     "docs",
     "examples",
     "apps/klaud",
+    "apps/factory",
     "design.md",
     "tokens.css",
     "AGENTS.md",
