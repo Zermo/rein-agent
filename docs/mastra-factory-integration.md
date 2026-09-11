@@ -89,33 +89,54 @@ is read):
   stored provider keys persist as plaintext.
 - **PubSub/Redis:** optional, for multi-replica deployments.
 
-## Native Dareecho integration
+## Native Dareecho integration: a wrapped app, not a rebrand
 
-Dareecho's three tiers are the rein-agent CLI, the rein-klaud GUI, and the
-Dareecho OS. `rein os` currently exposes `plan`, `prepare`, `rain`,
-`rainmeter`, and `skin`. Factory fits as a first-class Dareecho service,
-not as bundled code:
+Decision: Mastra Factory keeps its name, interface, and icon. Dareecho
+hosts it. The app is installed alongside Dareecho — "look what's inside":
+open it and the machine's software factory is running, with issues,
+sessions, plans, and pull requests visible live.
 
-1. **`rein os factory setup`** — copy the forked template into the Dareecho
-   tree (refusing to overwrite, per convention), generate the credential
-   encryption key, write `.env` with `FACTORY_SANDBOX_PROVIDER=local` and
-   `MASTRACODE_AUTH_DISABLED=1` for a single-operator machine (or a
-   WorkOS pair), and point the default model at the Dareecho model host as
-   a custom OpenAI-compatible provider.
-2. **`rein os factory start|stop|status`** — supervise the server as a
-   local service (launchd on host, Omarchy service on the OS tier) and
-   report URL, queue, and blocked work. The template's supervisor skill
-   already defines the read-only `mastra api factory` workflow this would
-   wrap; mutations stay behind explicit authorization.
-3. **Model host as default provider** — Dareecho's self-hosted
-   OpenAI-compatible server is registered as the Factory's default custom
-   provider, so Factory runs against the same models the rest of Dareecho
-   uses, with no cloud model dependency.
+### What this branch ships
 
-What stays Mastra: the agent loop that executes sessions (Mastra
-agents/`code-sdk`/memory inside the sandbox). Replacing that with the
-Rein agent loop is a deeper integration and a separate effort; the
-practical native boundary is service + models + control plane.
+- **`vendor/mastra-factory/`** — the pure copy: an unmodified copy of
+  `mastra-ai/softwarefactory-template` at the pinned commit, with a
+  `PROVENANCE.md` record (upstream, SHA, date, license, fork for tracking).
+- **`apps/factory/`** — the native wrapper, following the `apps/klaud`
+  patterns (Electron 44, own lockfile, `package-macos.mjs` with signing,
+  notarization, ZIP roundtrip, and build report):
+  - `provision.mjs` (Electron-free, unit-tested): installs the generated
+    project into `~/.local/share/rein-factory` from the bundled template
+    once, never overwrites user state, generates
+    `FACTORY_CREDENTIAL_ENCRYPTION_KEY`, and writes `.env` (local sandbox,
+    single-operator auth, no platform telemetry, single-machine libSQL
+    storage or Postgres via `DATABASE_URL`).
+  - `main.mjs`: starts the Factory server (`npm run start`), waits for
+    readiness, attaches to an already-running server instead of starting a
+    duplicate, opens the Factory UI in a native window (external links go
+    to the user's browser), and stops the owned server on quit.
+  - `NOTICE` + `README.md`: attribution and the no-rebrand policy; the app
+    icon is the Factory PWA mark.
+  - `test/`: 11 passing tests for provisioning and lifecycle.
+
+### What stays Mastra
+
+The agent loop that executes sessions (Mastra agents/`code-sdk`/memory
+inside the sandbox), the UI, the supervisor skill (bundled with the
+template for agents to operate Factory), and the branding. Replacing the
+agent loop with the Rein loop is a deeper integration and a separate
+effort.
+
+### Next increments
+
+1. `rein os factory setup|start|stop|status|open` CLI verbs, so the
+   terminal can drive the same supervisor (the template's supervisor skill
+   already defines the read-only `mastra api factory` workflow).
+2. Kit staging: include the app (or its source, as the kit does for
+   `apps/klaud`) in `rein os prepare` payloads with the verifier updated.
+3. Model wiring: pre-register the Dareecho model host as the Factory's
+   default custom OpenAI-compatible provider on setup.
+4. Offline dependency bundle in the .app (today the one-time `npm install`
+   needs network) and the Dareecho OS service unit.
 
 ## Risks and open questions
 
@@ -128,3 +149,5 @@ practical native boundary is service + models + control plane.
   removes it from the loop.
 - Node 22.19+ is a hard floor for the service runtime, separate from the
   Rein bundle's Node 18 support.
+- One-time `npm install` of Factory dependencies needs network; the
+  offline bundle is a listed next increment.

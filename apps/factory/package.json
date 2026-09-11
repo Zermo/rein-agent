@@ -1,0 +1,23 @@
+{
+  "name": "@rein/factory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "productName": "Mastra Factory",
+  "description": "Native window and supervisor that hosts Mastra Factory alongside Dareecho. No rebranding: the Factory name, UI, and icon stay Mastra's.",
+  "main": "main.mjs",
+  "license": "MIT",
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "postinstall": "install-electron",
+    "dev": "electron .",
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs",
+    "package:macos": "node package-macos.mjs",
+    "package:macos:release": "node package-macos.mjs --release"
+  },
+  "devDependencies": {
+    "electron": "44.2.0"
+  },
+  "build": { "appId": "org.zermo.mastra-factory", "productName": "Mastra Factory", "icon": "icon.png" }
+}
