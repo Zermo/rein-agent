@@ -39,6 +39,8 @@
 .setup-error { padding: var(--space-md); margin-bottom: var(--space-md); background: var(--error-surface); color: var(--error-ink); border: 1px solid var(--error-ink); }
 .setup-error button { display: block; margin-top: var(--space-sm); }
 .setup-cancel { margin-top: var(--space-xl); }
+.setup-skip { border: 0; background: none; color: var(--ink-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; align-self: center; }
+.setup-skip:hover { color: var(--ink); }
 .setup-subscription { border-top: 1px solid var(--rule); margin-top: var(--space-md); padding-top: var(--space-sm); }
 .setup-subscription button { margin: var(--space-xs); }
 .device-code { display: block; font-size: 24px; letter-spacing: .15em; margin: var(--space-md) 0; }
