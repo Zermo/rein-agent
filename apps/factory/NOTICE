@@ -1,0 +1,18 @@
+Mastra Factory
+--------------
+This app wraps and hosts Mastra Factory, an open-source environment for
+building software with coding agents, without rebranding it.
+
+  Upstream:  https://github.com/mastra-ai/mastra (mastracode/factory)
+             https://github.com/mastra-ai/softwarefactory-template
+  License:   Apache License 2.0
+  Branding:  "Mastra Factory" and the Factory UI are Mastra's. The app icon
+             is the Factory PWA mark, and the interface keeps Factory's own
+             name and presentation.
+
+The bundled template (vendor/mastra-factory in the Dareecho tree,
+Resources/factory-template in this app) is an unmodified copy of the
+upstream template at a pinned commit; see its PROVENANCE record.
+
+The wrapper app (this directory) is MIT licensed, Copyright Zermo, and is
+part of Dareecho.

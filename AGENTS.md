@@ -46,6 +46,11 @@ Keep changes small and preserve compatibility with self-hosted model APIs.
   introduce CyberStrike code, offensive tools, or a runtime dependency into the
   Rein bundle. The public documentation must describe CyberStrike as credited
   research and a separately bounded future integration.
+- `codex/mastra-factory`: the Mastra Factory wrapper app (`apps/factory`) and the
+  vendored upstream template (`vendor/mastra-factory`). Keep Mastra Factory
+  branding, attribution, and the Apache-2.0 NOTICE as-is — the app is installed
+  alongside Dareecho, not rebranded. Keep the generated project in user state
+  (`~/.local/share/rein-factory`), created once and never overwritten.
 
 ## Public examples and private installations
 

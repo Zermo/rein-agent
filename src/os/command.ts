@@ -6,6 +6,7 @@ import { previewRain } from "./rain.ts";
 import { rainmeterReport, formatRainmeterReport } from "./rainmeter.ts";
 import { renderSkinFile, animateSkin } from "./skin/engine.ts";
 import { installSkin, listSkins, skinDirectoryDefault } from "./skin/install.ts";
+import { runFactoryCommand } from "./factory.ts";
 
 const HELP = `Dareecho development
 
@@ -13,6 +14,9 @@ const HELP = `Dareecho development
   rein os prepare --output <new-directory> [--target omarchy|chromeos]
                                            stage a pinned Omarchy VM overlay kit, or the
                                            ChromeOS userland kit (default target: omarchy)
+  rein os factory setup|start|dev|stop|status|open
+                                           Mastra Factory on this machine: install once,
+                                           then drive the shared server (run rein os factory help)
   rein os rain [--static | --animate]        preview the rain motif in this terminal
   rein os rainmeter [--json]                 Rainmeter rebuild report: pin, mapping, gates
   rein os skin render <file|dir> [--frames n]
@@ -39,7 +43,7 @@ export function isChromeOSRelease(contents: string): boolean {
 export async function runOSCommand(args: string[], flags: Flags = {}, deps: {
 	log?: (text: string) => void; hardware?: typeof profileHardware;
 	plan?: typeof planReinOS; prepare?: typeof prepareReinOS; rain?: typeof previewRain;
-	rainmeter?: () => ReturnType<typeof rainmeterReport>;
+	rainmeter?: () => ReturnType<typeof rainmeterReport>; factory?: typeof runFactoryCommand;
 	skinRender?: typeof renderSkinFile; skinAnimate?: typeof animateSkin;
 	skinInstall?: typeof installSkin; skinList?: typeof listSkins;
 } = {}): Promise<void> {
@@ -82,6 +86,11 @@ export async function runOSCommand(args: string[], flags: Flags = {}, deps: {
 		for (const key of Object.keys(flags)) if (!["json"].includes(key)) throw new Error("Unsupported rainmeter option --" + key);
 		const report = (deps.rainmeter ?? rainmeterReport)();
 		log(flags.json === true ? JSON.stringify(report, null, 2) : formatRainmeterReport(report));
+		return;
+	}
+	if (action === "factory") {
+		const factory = deps.factory ?? runFactoryCommand;
+		await factory(args.slice(1), flags, { log });
 		return;
 	}
 	const allowed = action === "plan" ? ["mode", "json"] : action === "prepare" ? ["output", "json", "target"] : action === "rain" ? ["animate", "static"] : [];
