@@ -151,9 +151,24 @@ effort.
 3. Offline dependency bundle in the .app (today the one-time `npm install`
    needs network) and the Dareecho OS service unit.
 
+## Dependency security
+
+The template's transitive dependency tree carries upstream advisories. Rein
+repairs the fixable ones at provision time: `provision.mjs` merges an
+`overrides` block into the generated project (user state, not the vendored
+copy) that pins `undici` 6.28.1, `lodash` 4.18.1, `adm-zip` 0.6.1, and
+`smol-toml` 1.8.0 to their first patched release. That clears 24 of the 34
+`npm audit` findings. The remaining 10 are one chain rooted at `extract-zip`,
+which has no patched release yet, reached through Mastra's browser-automation
+stack. The factory still boots and serves cleanly with the overrides applied
+(verified with a scratch-home `dev start`). Bumping `extract-zip` in
+`SECURITY_OVERRIDES` is the one-line follow-up once upstream ships a fix.
+
 ## Risks and open questions
 
 - Alpha versions upstream; pin and re-verify on each upgrade.
+- `extract-zip` (browser-automation stack) has no patched release; tracked in
+  `SECURITY_OVERRIDES` as the one remaining advisory chain.
 - EE-licensed dormant code inside `@mastra/core` — confirm the strict
   license reading before production deployment.
 - Local sandbox has no tenant isolation; acceptable for single-operator

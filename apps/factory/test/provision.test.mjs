@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultEnvFile, inspectProject, newCredentialKey, provisionProject, resolveProjectDir, resolveTemplateDir, templateComplete, validateCredentialKey } from "../provision.mjs";
+import { applySecurityOverrides, defaultEnvFile, inspectProject, newCredentialKey, provisionProject, resolveProjectDir, resolveTemplateDir, SECURITY_OVERRIDES, templateComplete, validateCredentialKey } from "../provision.mjs";
 
 const root = mkdtempSync(join(tmpdir(), "factory-provision-"));
 test.after(() => rmSync(root, { recursive: true, force: true }));
@@ -89,4 +89,45 @@ test("inspection reports readiness for install and start decisions", () => {
 
 test("the vendored template in the Dareecho tree is complete", () => {
   assert.equal(templateComplete(new URL("../../../vendor/mastra-factory", import.meta.url).pathname), true);
+});
+
+test("security overrides pin the vulnerable roots to their first patched release", () => {
+  assert.deepEqual(SECURITY_OVERRIDES, { undici: "6.28.1", lodash: "4.18.1", "adm-zip": "0.6.1", "smol-toml": "1.8.0" });
+});
+
+test("applySecurityOverrides writes the pins and is idempotent", () => {
+  const project = join(root, "override-1");
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, "package.json"), JSON.stringify({ name: "mastra-factory" }, null, 2) + "\n");
+  applySecurityOverrides(project);
+  const once = JSON.parse(readFileSync(join(project, "package.json"), "utf8"));
+  assert.deepEqual(once.overrides, SECURITY_OVERRIDES);
+  const before = readFileSync(join(project, "package.json"), "utf8");
+  applySecurityOverrides(project);
+  assert.equal(readFileSync(join(project, "package.json"), "utf8"), before, "a second run must not rewrite the file");
+});
+
+test("applySecurityOverrides preserves a project's own override for the same package", () => {
+  const project = join(root, "override-2");
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, "package.json"), JSON.stringify({ name: "mastra-factory", overrides: { lodash: "4.19.9" } }, null, 2) + "\n");
+  applySecurityOverrides(project);
+  const manifest = JSON.parse(readFileSync(join(project, "package.json"), "utf8"));
+  assert.equal(manifest.overrides.lodash, "4.19.9", "the project's own choice wins");
+  assert.equal(manifest.overrides.undici, "6.28.1", "the other pins are still applied");
+});
+
+test("provisioning applies the security overrides on both fresh and existing projects", () => {
+  const template = fixtureTemplate("template-ov");
+  const fresh = join(root, "project-fresh-ov");
+  provisionProject({ projectDir: fresh, templateDir: template });
+  const freshManifest = JSON.parse(readFileSync(join(fresh, "package.json"), "utf8"));
+  assert.deepEqual(freshManifest.overrides, SECURITY_OVERRIDES);
+  const existing = join(root, "project-existing-ov");
+  provisionProject({ projectDir: existing, templateDir: template });
+  writeFileSync(join(existing, "package.json"), JSON.stringify({ name: "mastra-factory" }, null, 2) + "\n");
+  const again = provisionProject({ projectDir: existing, templateDir: template });
+  assert.equal(again.created, false);
+  const existingManifest = JSON.parse(readFileSync(join(existing, "package.json"), "utf8"));
+  assert.deepEqual(existingManifest.overrides, SECURITY_OVERRIDES);
 });

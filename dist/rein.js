@@ -7049,9 +7049,22 @@ var init_supervisor = __esm({
 });
 
 // apps/factory/provision.mjs
-import { cpSync, existsSync as existsSync4, lstatSync as lstatSync5, mkdirSync as mkdirSync8, writeFileSync as writeFileSync7 } from "node:fs";
+import { cpSync, existsSync as existsSync4, lstatSync as lstatSync5, mkdirSync as mkdirSync8, readFileSync as readFileSync6, writeFileSync as writeFileSync7 } from "node:fs";
 import { join as join15 } from "node:path";
 import { randomBytes as randomBytes3 } from "node:crypto";
+function applySecurityOverrides(projectDir, { log = () => {
+} } = {}) {
+  const packageFile = join15(projectDir, "package.json");
+  const manifest3 = JSON.parse(readFileSync6(packageFile, "utf8"));
+  const overrides2 = { ...SECURITY_OVERRIDES, ...manifest3.overrides || {} };
+  const next = { ...manifest3, overrides: overrides2 };
+  const nextText = JSON.stringify(next, null, 2) + "\n";
+  if (nextText !== readFileSync6(packageFile, "utf8")) {
+    writeFileSync7(packageFile, nextText);
+    log("Pinned upstream dependencies to their first patched release (security overrides).");
+  }
+  return overrides2;
+}
 function newCredentialKey() {
   return randomBytes3(32).toString("base64");
 }
@@ -7110,19 +7123,27 @@ function provisionProject({ projectDir, templateDir, credentialKey, databaseUrl,
       writeFileSync7(join15(projectDir, ".env"), defaultEnvFile({ credentialKey: credentialKey ?? newCredentialKey(), databaseUrl }), { mode: 384 });
       log("Wrote the missing .env for the existing Mastra Factory project.");
     }
+    applySecurityOverrides(projectDir, { log });
     return { created: false };
   }
   if (!templateComplete(templateDir)) throw new Error("The bundled Mastra Factory template is missing files. Reinstall the app.");
   mkdirSync8(projectDir, { recursive: true });
   cpSync(templateDir, projectDir, { recursive: true, verbatimSymlinks: true });
   writeFileSync7(join15(projectDir, ".env"), defaultEnvFile({ credentialKey: credentialKey ?? newCredentialKey(), databaseUrl }), { mode: 384 });
+  applySecurityOverrides(projectDir, { log });
   log(`Installed Mastra Factory to ${projectDir}.`);
   return { created: true };
 }
-var TEMPLATE_REQUIRED_FILES;
+var TEMPLATE_REQUIRED_FILES, SECURITY_OVERRIDES;
 var init_provision = __esm({
   "apps/factory/provision.mjs"() {
     TEMPLATE_REQUIRED_FILES = ["package.json", "src/mastra/index.ts", ".env.schema", "pnpm-workspace.yaml"];
+    SECURITY_OVERRIDES = {
+      undici: "6.28.1",
+      lodash: "4.18.1",
+      "adm-zip": "0.6.1",
+      "smol-toml": "1.8.0"
+    };
   }
 });
 
@@ -8490,7 +8511,7 @@ var init_mdns = __esm({
 // src/agent/workspace.ts
 import { execFileSync } from "node:child_process";
 import { createHash as createHash7, randomUUID as randomUUID5 } from "node:crypto";
-import { lstatSync as lstatSync6, readFileSync as readFileSync6, realpathSync as realpathSync2 } from "node:fs";
+import { lstatSync as lstatSync6, readFileSync as readFileSync7, realpathSync as realpathSync2 } from "node:fs";
 import { dirname as dirname7, join as join21, resolve as resolve14, sep } from "node:path";
 function digest2(value) {
   return createHash7("sha256").update(value).digest("hex").slice(0, 24);
@@ -8557,7 +8578,7 @@ function sharedMemory(cwd, maxChars) {
     }
     const stat5 = lstatSync6(path2);
     if (!stat5.isFile() || stat5.isSymbolicLink() || stat5.nlink > 1) return void 0;
-    const text = readFileSync6(path2, "utf8").trim();
+    const text = readFileSync7(path2, "utf8").trim();
     return text ? text.slice(0, maxChars) : void 0;
   } catch {
     return void 0;
@@ -8616,7 +8637,7 @@ var init_workspace = __esm({
 });
 
 // src/agent/session.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync9, readFileSync as readFileSync7, readdirSync as readdirSync2, statSync as statSync3, writeFileSync as writeFileSync8 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync6, mkdirSync as mkdirSync9, readFileSync as readFileSync8, readdirSync as readdirSync2, statSync as statSync3, writeFileSync as writeFileSync8 } from "node:fs";
 import { homedir as homedir12 } from "node:os";
 import { join as join22 } from "node:path";
 import { randomUUID as randomUUID6, createHash as createHash8 } from "node:crypto";
@@ -8687,7 +8708,7 @@ function loadSession(sessionId, home) {
   const messages = [];
   const entries = [];
   let window;
-  for (const [index, line] of readFileSync7(path2, "utf8").split("\n").entries()) {
+  for (const [index, line] of readFileSync8(path2, "utf8").split("\n").entries()) {
     if (!line.trim()) continue;
     try {
       const obj = JSON.parse(line);
@@ -9199,12 +9220,12 @@ var init_agent_loop = __esm({
 });
 
 // src/ai/compat.ts
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync9, mkdirSync as mkdirSync10, existsSync as existsSync7 } from "node:fs";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync9, mkdirSync as mkdirSync10, existsSync as existsSync7 } from "node:fs";
 import { homedir as homedir13 } from "node:os";
 import { join as join23 } from "node:path";
 function readStore() {
   try {
-    if (existsSync7(storePath())) return JSON.parse(readFileSync8(storePath(), "utf8"));
+    if (existsSync7(storePath())) return JSON.parse(readFileSync9(storePath(), "utf8"));
   } catch {
   }
   return {};
@@ -9297,7 +9318,7 @@ var init_compat = __esm({
 });
 
 // src/harness/klaud/shell.ts
-import { closeSync as closeSync4, constants as constants8, lstatSync as lstatSync7, mkdirSync as mkdirSync11, openSync as openSync4, readFileSync as readFileSync9, renameSync as renameSync4, unlinkSync as unlinkSync4, writeFileSync as writeFileSync10 } from "node:fs";
+import { closeSync as closeSync4, constants as constants8, lstatSync as lstatSync7, mkdirSync as mkdirSync11, openSync as openSync4, readFileSync as readFileSync10, renameSync as renameSync4, unlinkSync as unlinkSync4, writeFileSync as writeFileSync10 } from "node:fs";
 import { randomUUID as randomUUID7 } from "node:crypto";
 import { homedir as homedir14 } from "node:os";
 import { dirname as dirname8, join as join24, resolve as resolve15 } from "node:path";
@@ -9341,7 +9362,7 @@ function loadKlaudShell(home) {
     throw error;
   }
   try {
-    const shell = JSON.parse(readFileSync9(fd, "utf8"));
+    const shell = JSON.parse(readFileSync10(fd, "utf8"));
     validateShell(shell);
     return shell;
   } finally {
@@ -9437,7 +9458,7 @@ var init_prompt = __esm({
 
 // src/harness/system-prompt.ts
 import { existsSync as existsSync8 } from "node:fs";
-import { readFileSync as readFileSync10 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 import { homedir as homedir15 } from "node:os";
 import { join as join25, resolve as resolve16 } from "node:path";
 function readProjectInstructions(cwd) {
@@ -9446,7 +9467,7 @@ function readProjectInstructions(cwd) {
     if (name === "AGENTS.md" && resolve16(cwd) === privateHome2) continue;
     const path2 = join25(cwd, name);
     if (existsSync8(path2)) {
-      const text = readFileSync10(path2, "utf8").trim();
+      const text = readFileSync11(path2, "utf8").trim();
       if (text) return `Project instructions:
 ${text}`;
     }
@@ -9456,7 +9477,7 @@ ${text}`;
 function readLessons(cwd) {
   const path2 = join25(cwd, "LESSONS.md");
   if (!existsSync8(path2)) return void 0;
-  const text = readFileSync10(path2, "utf8").trim();
+  const text = readFileSync11(path2, "utf8").trim();
   if (!text) return void 0;
   return `Lessons from previous sessions (trust but verify):
 ${text.slice(0, 4e3)}`;
@@ -9570,7 +9591,7 @@ var init_system_prompt = __esm({
 });
 
 // src/harness/tools/read.ts
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 var readTool, read_default;
 var init_read = __esm({
   "src/harness/tools/read.ts"() {
@@ -9590,7 +9611,7 @@ var init_read = __esm({
         const path2 = args.path;
         let text;
         try {
-          text = readFileSync11(path2, "utf8");
+          text = readFileSync12(path2, "utf8");
         } catch (err) {
           return { content: `read failed: ${err.message}`, isError: true };
         }
@@ -9654,7 +9675,7 @@ var init_write = __esm({
 });
 
 // src/harness/tools/edit.ts
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync12 } from "node:fs";
+import { readFileSync as readFileSync13, writeFileSync as writeFileSync12 } from "node:fs";
 function countOccurrences(text, needle) {
   let count = 0;
   let i = text.indexOf(needle);
@@ -9694,7 +9715,7 @@ var init_edit = __esm({
         const edits = args.edits;
         let text;
         try {
-          text = readFileSync12(path2, "utf8");
+          text = readFileSync13(path2, "utf8");
         } catch (err) {
           return { content: `edit failed: ${err.message}`, isError: true };
         }
@@ -9982,7 +10003,7 @@ var init_ls = __esm({
 
 // src/harness/obscura/install.ts
 import { createHash as createHash9 } from "node:crypto";
-import { accessSync as accessSync3, constants as constants9, createReadStream, existsSync as existsSync9, lstatSync as lstatSync8, readFileSync as readFileSync13, statSync as statSync5 } from "node:fs";
+import { accessSync as accessSync3, constants as constants9, createReadStream, existsSync as existsSync9, lstatSync as lstatSync8, readFileSync as readFileSync14, statSync as statSync5 } from "node:fs";
 import { chmod as chmod2, mkdir as mkdir5, mkdtemp as mkdtemp2, open as open4, readFile as readFile8, rename as rename3, rm as rm2, writeFile as writeFile5 } from "node:fs/promises";
 import { homedir as homedir16 } from "node:os";
 import { delimiter as delimiter5, dirname as dirname10, isAbsolute as isAbsolute5, join as join27, resolve as resolve17 } from "node:path";
@@ -9993,7 +10014,7 @@ function manifest2() {
   const here5 = dirname10(fileURLToPath4(import.meta.url));
   const path2 = [resolve17(here5, "../../../vendor/obscura/releases.json"), resolve17(here5, "../vendor/obscura/releases.json")].find(existsSync9);
   if (!path2) throw new Error("Obscura release metadata is missing. Reinstall the complete Rein package.");
-  return JSON.parse(readFileSync13(path2, "utf8"));
+  return JSON.parse(readFileSync14(path2, "utf8"));
 }
 function installRoot(home = process.env.REIN_HOME || join27(homedir16(), ".rein"), platform2 = process.platform, arch2 = process.arch) {
   return join27(resolve17(home), "native", "obscura", OBSCURA_VERSION, `${platform2}-${arch2}`);
@@ -10010,7 +10031,7 @@ function executable(path2) {
 function managedExecutable(directory3, asset) {
   try {
     if (!lstatSync8(directory3).isDirectory() || lstatSync8(directory3).isSymbolicLink()) return void 0;
-    const installed = JSON.parse(readFileSync13(join27(directory3, "install.json"), "utf8"));
+    const installed = JSON.parse(readFileSync14(join27(directory3, "install.json"), "utf8"));
     const members = asset?.members ?? (process.platform === "win32" ? ["obscura.exe", "obscura-worker.exe"] : ["obscura", "obscura-worker"]);
     if (installed.version !== OBSCURA_VERSION || asset && installed.sha256 !== asset.sha256) return void 0;
     for (const member of members) {
@@ -11097,7 +11118,7 @@ ${r.text.length > allowance ? r.text.slice(0, Math.max(0, allowance - 30)) + " [
 });
 
 // src/harness/tools/context.ts
-import { constants as constants10, closeSync as closeSync5, existsSync as existsSync11, fstatSync as fstatSync2, lstatSync as lstatSync9, mkdirSync as mkdirSync14, openSync as openSync5, readSync, readdirSync as readdirSync4, readFileSync as readFileSync15, realpathSync as realpathSync3, writeFileSync as writeFileSync14, renameSync as renameSync5, unlinkSync as unlinkSync5 } from "node:fs";
+import { constants as constants10, closeSync as closeSync5, existsSync as existsSync11, fstatSync as fstatSync2, lstatSync as lstatSync9, mkdirSync as mkdirSync14, openSync as openSync5, readSync, readdirSync as readdirSync4, readFileSync as readFileSync16, realpathSync as realpathSync3, writeFileSync as writeFileSync14, renameSync as renameSync5, unlinkSync as unlinkSync5 } from "node:fs";
 import { dirname as dirname12, isAbsolute as isAbsolute7, join as join31, relative as relative3, resolve as resolve20, sep as sep2 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { randomUUID as randomUUID10 } from "node:crypto";
@@ -11210,14 +11231,14 @@ function contextTools(state, cwd) {
       if (op === "read") {
         const path2 = safePath(root2, required(args.path, "path"));
         if (!existsSync11(path2)) return { isError: true, content: `No note ${relative3(root2, path2)}. Use notes op=list to discover existing notes, or op=write/append to save verified facts.` };
-        return { content: outputPage(readFileSync15(path2, "utf8"), offset) };
+        return { content: outputPage(readFileSync16(path2, "utf8"), offset) };
       }
       if (op === "list") return { content: outputPage([...noteFiles(root2)].map((p) => relative3(root2, p)).join("\n") || "(no notes yet)", offset) };
       const query = required(args.query, "query").toLowerCase();
       const hits = [];
       for (const file2 of noteFiles(root2)) {
         if (signal?.aborted) throw new Error("Operation aborted");
-        for (const [index, line] of readFileSync15(file2, "utf8").split("\n").entries()) {
+        for (const [index, line] of readFileSync16(file2, "utf8").split("\n").entries()) {
           const match = line.toLowerCase().indexOf(query);
           if (match >= 0) hits.push(`${relative3(root2, file2)}:${index + 1}: ${line.slice(Math.max(0, match - 60), match + 240)}`);
           if (hits.length >= 200) break;
@@ -11377,7 +11398,7 @@ __export(skills_exports, {
   skillRoster: () => skillRoster,
   skillTool: () => skillTool
 });
-import { readFileSync as readFileSync16, realpathSync as realpathSync4, existsSync as existsSync12 } from "node:fs";
+import { readFileSync as readFileSync17, realpathSync as realpathSync4, existsSync as existsSync12 } from "node:fs";
 import { dirname as dirname13, resolve as resolve21, sep as sep3 } from "node:path";
 import { fileURLToPath as fileURLToPath6 } from "node:url";
 function enabledSkills(home) {
@@ -11399,9 +11420,9 @@ function loadSkill(skills, name, file2 = "SKILL.md") {
   const root2 = realpathSync4(resolve21(skillsDir, name));
   const path2 = realpathSync4(resolve21(root2, file2));
   if (!path2.startsWith(root2 + sep3)) throw new Error("Skill references must stay inside the selected skill directory.");
-  const manifest3 = JSON.parse(readFileSync16(resolve21(skillsDir, "../manifest.json"), "utf8"));
+  const manifest3 = JSON.parse(readFileSync17(resolve21(skillsDir, "../manifest.json"), "utf8"));
   if (!Object.hasOwn(manifest3.files, `skills/${name}/${file2}`)) throw new Error("This file is not a bundled skill reference.");
-  const body2 = readFileSync16(path2, "utf8");
+  const body2 = readFileSync17(path2, "utf8");
   if (Buffer.byteLength(body2) > 24e3) throw new Error("Skill reference exceeds the 24 KB output limit.");
   return body2;
 }
@@ -11483,7 +11504,7 @@ var init_skills = __esm({
 });
 
 // src/harness/autonomy/state.ts
-import { closeSync as closeSync6, constants as constants11, fstatSync as fstatSync3, linkSync, lstatSync as lstatSync10, mkdirSync as mkdirSync15, openSync as openSync6, readFileSync as readFileSync17, readSync as readSync2, realpathSync as realpathSync5, renameSync as renameSync6, statSync as statSync6, unlinkSync as unlinkSync6, writeFileSync as writeFileSync15 } from "node:fs";
+import { closeSync as closeSync6, constants as constants11, fstatSync as fstatSync3, linkSync, lstatSync as lstatSync10, mkdirSync as mkdirSync15, openSync as openSync6, readFileSync as readFileSync18, readSync as readSync2, realpathSync as realpathSync5, renameSync as renameSync6, statSync as statSync6, unlinkSync as unlinkSync6, writeFileSync as writeFileSync15 } from "node:fs";
 import { homedir as homedir19 } from "node:os";
 import { join as join32, resolve as resolve22 } from "node:path";
 import { createHash as createHash10, randomUUID as randomUUID11 } from "node:crypto";
@@ -11542,7 +11563,7 @@ function validateState(state) {
 function deadLockOwner(path2, minimumAge) {
   try {
     regularFile3(path2, true);
-    const owner = JSON.parse(readFileSync17(path2, "utf8"));
+    const owner = JSON.parse(readFileSync18(path2, "utf8"));
     if (!Number.isSafeInteger(owner.pid) || owner.pid < 1 || typeof owner.token !== "string" || Date.now() - statSync6(path2).mtimeMs < minimumAge) return false;
     try {
       process.kill(owner.pid, 0);
@@ -11557,7 +11578,7 @@ function deadLockOwner(path2, minimumAge) {
 function releaseOwnedLock(path2, token2) {
   try {
     regularFile3(path2, true);
-    if (JSON.parse(readFileSync17(path2, "utf8")).token === token2) unlinkSync6(path2);
+    if (JSON.parse(readFileSync18(path2, "utf8")).token === token2) unlinkSync6(path2);
   } catch {
   }
 }
@@ -12317,7 +12338,7 @@ __export(store_exports, {
   newActivityId: () => newActivityId,
   readActivity: () => readActivity
 });
-import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync16, renameSync as renameSync7, openSync as openSync7, readFileSync as readFileSync18, closeSync as closeSync7, fstatSync as fstatSync4, constants as constants13, existsSync as existsSync15, unlinkSync as unlinkSync7 } from "node:fs";
+import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync16, renameSync as renameSync7, openSync as openSync7, readFileSync as readFileSync19, closeSync as closeSync7, fstatSync as fstatSync4, constants as constants13, existsSync as existsSync15, unlinkSync as unlinkSync7 } from "node:fs";
 import { randomUUID as randomUUID12 } from "node:crypto";
 import { homedir as homedir20 } from "node:os";
 import { join as join34, resolve as resolve25 } from "node:path";
@@ -12336,7 +12357,7 @@ function readActivity(id) {
   try {
     const stat5 = fstatSync4(fd);
     if (!stat5.isFile() || stat5.nlink !== 1 || stat5.size > 4 * 1024 * 1024) throw new Error("Activity data is not a bounded ordinary file.");
-    const state = JSON.parse(readFileSync18(fd, "utf8"));
+    const state = JSON.parse(readFileSync19(fd, "utf8"));
     if (state.id !== id || !Array.isArray(state.nodes) || state.nodes.length > 256) throw new Error("Invalid activity data.");
     return state;
   } finally {
@@ -12775,7 +12796,7 @@ var init_runner = __esm({
 
 // src/harness/klaud/bots.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
-import { closeSync as closeSync8, constants as constants14, fstatSync as fstatSync5, fsyncSync, lstatSync as lstatSync12, mkdirSync as mkdirSync17, openSync as openSync8, readFileSync as readFileSync19, renameSync as renameSync8, unlinkSync as unlinkSync9, writeFileSync as writeFileSync17 } from "node:fs";
+import { closeSync as closeSync8, constants as constants14, fstatSync as fstatSync5, fsyncSync, lstatSync as lstatSync12, mkdirSync as mkdirSync17, openSync as openSync8, readFileSync as readFileSync20, renameSync as renameSync8, unlinkSync as unlinkSync9, writeFileSync as writeFileSync17 } from "node:fs";
 import { homedir as homedir21 } from "node:os";
 import { join as join35, resolve as resolve26 } from "node:path";
 function validateBotAvatar(value) {
@@ -12835,7 +12856,7 @@ function listBots(home) {
     throw error;
   }
   try {
-    const registry = JSON.parse(readFileSync19(fd, "utf8"));
+    const registry = JSON.parse(readFileSync20(fd, "utf8"));
     validateRegistry(registry);
     return registry.bots;
   } finally {
@@ -12962,7 +12983,7 @@ var init_bots = __esm({
 });
 
 // src/harness/klaud/settings.ts
-import { closeSync as closeSync9, constants as constants15, fstatSync as fstatSync6, lstatSync as lstatSync13, mkdirSync as mkdirSync18, openSync as openSync9, readFileSync as readFileSync20, renameSync as renameSync9, unlinkSync as unlinkSync10, writeFileSync as writeFileSync18 } from "node:fs";
+import { closeSync as closeSync9, constants as constants15, fstatSync as fstatSync6, lstatSync as lstatSync13, mkdirSync as mkdirSync18, openSync as openSync9, readFileSync as readFileSync21, renameSync as renameSync9, unlinkSync as unlinkSync10, writeFileSync as writeFileSync18 } from "node:fs";
 import { randomUUID as randomUUID14 } from "node:crypto";
 import { join as join36, resolve as resolve27 } from "node:path";
 function validateRunSettingsPatch(value) {
@@ -13003,7 +13024,7 @@ function loadKlaudRunSettings(home) {
     if (!stat5.isFile() || stat5.nlink !== 1 || stat5.size > 4096 || named.isSymbolicLink() || named.ino !== stat5.ino || named.dev !== stat5.dev) throw new Error("Run settings must be a small ordinary file.");
     let settings;
     try {
-      settings = JSON.parse(readFileSync20(fd, "utf8"));
+      settings = JSON.parse(readFileSync21(fd, "utf8"));
     } catch {
       throw new Error("Invalid desktop run settings; the existing file was preserved.");
     }
@@ -13579,7 +13600,7 @@ __export(serve_exports, {
 });
 import { createServer as createServer3 } from "node:http";
 import { createHash as createHash11, randomBytes as randomBytes4, randomUUID as randomUUID16, timingSafeEqual } from "node:crypto";
-import { closeSync as closeSync11, constants as constants17, existsSync as existsSync16, fstatSync as fstatSync8, lstatSync as lstatSync15, mkdirSync as mkdirSync19, openSync as openSync11, readFileSync as readFileSync21, renameSync as renameSync10, unlinkSync as unlinkSync11, writeFileSync as writeFileSync19 } from "node:fs";
+import { closeSync as closeSync11, constants as constants17, existsSync as existsSync16, fstatSync as fstatSync8, lstatSync as lstatSync15, mkdirSync as mkdirSync19, openSync as openSync11, readFileSync as readFileSync22, renameSync as renameSync10, unlinkSync as unlinkSync11, writeFileSync as writeFileSync19 } from "node:fs";
 import { homedir as homedir24 } from "node:os";
 import { dirname as dirname15, join as join40, resolve as resolve31 } from "node:path";
 function json(res, status2, value) {
@@ -13606,7 +13627,7 @@ function privateRead(file2) {
   }
   try {
     if (fstatSync8(fd).size > MAX_BODY) throw new Error("rein-kla\u028Ad state file is too large.");
-    return readFileSync21(fd, "utf8");
+    return readFileSync22(fd, "utf8");
   } finally {
     closeSync11(fd);
   }
@@ -14296,7 +14317,7 @@ __export(mobile_exports, {
   validateMobileTrustedOrigin: () => validateMobileTrustedOrigin
 });
 import { createHash as createHash12, randomBytes as randomBytes5, randomUUID as randomUUID17, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { closeSync as closeSync12, constants as constants18, existsSync as existsSync17, fstatSync as fstatSync9, lstatSync as lstatSync16, mkdirSync as mkdirSync20, openSync as openSync12, readFileSync as readFileSync22, renameSync as renameSync11, unlinkSync as unlinkSync12, writeFileSync as writeFileSync20 } from "node:fs";
+import { closeSync as closeSync12, constants as constants18, existsSync as existsSync17, fstatSync as fstatSync9, lstatSync as lstatSync16, mkdirSync as mkdirSync20, openSync as openSync12, readFileSync as readFileSync23, renameSync as renameSync11, unlinkSync as unlinkSync12, writeFileSync as writeFileSync20 } from "node:fs";
 import { createServer as createServer4 } from "node:http";
 import { BlockList, isIP as isIP2 } from "node:net";
 import { homedir as homedir25 } from "node:os";
@@ -14367,7 +14388,7 @@ function readCredential(file2) {
     const stat5 = fstatSync9(fd);
     if (stat5.size > 1024) throw new Error("Mobile gateway credential file is too large.");
     if ((stat5.mode & 63) !== 0) throw new Error("Mobile gateway credential file must not be accessible by group or other users.");
-    return readFileSync22(fd, "utf8").trim();
+    return readFileSync23(fd, "utf8").trim();
   } finally {
     closeSync12(fd);
   }
@@ -14998,7 +15019,7 @@ var init_mobile = __esm({
 });
 
 // src/harness/desktop/surface.ts
-import { existsSync as existsSync18, lstatSync as lstatSync17, mkdirSync as mkdirSync21, readFileSync as readFileSync23, renameSync as renameSync12, writeFileSync as writeFileSync21, unlinkSync as unlinkSync13 } from "node:fs";
+import { existsSync as existsSync18, lstatSync as lstatSync17, mkdirSync as mkdirSync21, readFileSync as readFileSync24, renameSync as renameSync12, writeFileSync as writeFileSync21, unlinkSync as unlinkSync13 } from "node:fs";
 import { homedir as homedir26 } from "node:os";
 import { dirname as dirname17, join as join42, resolve as resolve33 } from "node:path";
 import { execFile as execFile10 } from "node:child_process";
@@ -15021,7 +15042,7 @@ function preferencesFile(home) {
 function preferredSurface(home = desktopHome()) {
   const file2 = preferencesFile(home);
   try {
-    const surface = JSON.parse(readFileSync23(file2, "utf8"))?.surface;
+    const surface = JSON.parse(readFileSync24(file2, "utf8"))?.surface;
     return surface === "nodeterm" || surface === "terminal" ? surface : "klaud";
   } catch {
     return "klaud";
@@ -15065,14 +15086,14 @@ async function registerRein(options = {}) {
   if (await running()) return "NodeTerm is running, so its settings were preserved. Close it when convenient and run rein desktop install --no-launch to register Rein as the default agent. For now, run rein --terminal in a NodeTerm terminal node.";
   const file2 = options.settingsFile ?? join42(homedir26(), "Library/Application Support/node-terminal/settings.json");
   if (existsSync18(file2) && (!lstatSync17(file2).isFile() || lstatSync17(file2).isSymbolicLink())) throw new Error("NodeTerm settings must be an ordinary file.");
-  const before = existsSync18(file2) ? readFileSync23(file2, "utf8") : void 0;
+  const before = existsSync18(file2) ? readFileSync24(file2, "utf8") : void 0;
   const command = [options.node ?? "node", options.cli ?? resolve33(process.argv[1]), "--terminal"].map(shellQuote).join(" ");
   const next = registeredSettings(before === void 0 ? {} : JSON.parse(before), command);
   mkdirSync21(dirname17(file2), { recursive: true, mode: 448 });
   const temp = `${file2}.${randomUUID18()}.tmp`;
   try {
     writeFileSync21(temp, JSON.stringify(next, null, 2) + "\n", { flag: "wx", mode: 384 });
-    if (await running() || (existsSync18(file2) ? readFileSync23(file2, "utf8") : void 0) !== before) throw new Error("NodeTerm settings changed during registration. Close the app and retry.");
+    if (await running() || (existsSync18(file2) ? readFileSync24(file2, "utf8") : void 0) !== before) throw new Error("NodeTerm settings changed during registration. Close the app and retry.");
     renameSync12(temp, file2);
   } finally {
     if (existsSync18(temp)) unlinkSync13(temp);
@@ -15746,7 +15767,7 @@ var init_rules = __esm({
 // src/harness/autonomy/service.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
 import { createHash as createHash15, randomUUID as randomUUID19 } from "node:crypto";
-import { closeSync as closeSync14, constants as constants22, fstatSync as fstatSync11, lstatSync as lstatSync19, mkdirSync as mkdirSync22, openSync as openSync14, readFileSync as readFileSync24, renameSync as renameSync13, unlinkSync as unlinkSync14, writeFileSync as writeFileSync22 } from "node:fs";
+import { closeSync as closeSync14, constants as constants22, fstatSync as fstatSync11, lstatSync as lstatSync19, mkdirSync as mkdirSync22, openSync as openSync14, readFileSync as readFileSync25, renameSync as renameSync13, unlinkSync as unlinkSync14, writeFileSync as writeFileSync22 } from "node:fs";
 import { homedir as homedir28 } from "node:os";
 import { basename as basename2, dirname as dirname19, isAbsolute as isAbsolute9, join as join46, relative as relative5, resolve as resolve35 } from "node:path";
 function absolute2(value, name) {
@@ -15860,7 +15881,7 @@ function ownedContent2(path2, options) {
     const stat5 = fstatSync11(fd);
     const uid = options.uid ?? process.getuid?.();
     if (!stat5.isFile() || stat5.size > 64 * 1024 || stat5.mode & 18 || uid !== void 0 && stat5.uid !== uid) throw new Error(`Service file is not privately owned by the current user: ${path2}`);
-    const text = readFileSync24(fd, "utf8");
+    const text = readFileSync25(fd, "utf8");
     const boundary = text.indexOf("\n");
     const body2 = text.slice(boundary + 1);
     if (boundary < 0 || text !== signedContent2(body2, cfg.scope, cfg.platform === "darwin")) throw new Error(`Refusing to overwrite or delete a modified or unrelated service file: ${path2}`);
@@ -16246,7 +16267,7 @@ import { randomUUID as randomUUID20 } from "node:crypto";
 import { spawn as spawn16 } from "node:child_process";
 import { request as request4 } from "node:http";
 import { createServer as createServer5 } from "node:net";
-import { accessSync as accessSync5, constants as constants23, existsSync as existsSync20, lstatSync as lstatSync20, mkdirSync as mkdirSync23, readFileSync as readFileSync25, realpathSync as realpathSync7, renameSync as renameSync14, statfsSync as statfsSync2, statSync as statSync7, unlinkSync as unlinkSync15, writeFileSync as writeFileSync23 } from "node:fs";
+import { accessSync as accessSync5, constants as constants23, existsSync as existsSync20, lstatSync as lstatSync20, mkdirSync as mkdirSync23, readFileSync as readFileSync26, realpathSync as realpathSync7, renameSync as renameSync14, statfsSync as statfsSync2, statSync as statSync7, unlinkSync as unlinkSync15, writeFileSync as writeFileSync23 } from "node:fs";
 import { delimiter as delimiter6, isAbsolute as isAbsolute11, join as join48, resolve as resolve37 } from "node:path";
 function guardianBaseUrl(value) {
   let url;
@@ -16269,7 +16290,7 @@ function readGuardianConfig() {
   if (!existsSync20(path2)) return defaultGuardianConfig();
   const stat5 = lstatSync20(path2);
   if (!stat5.isFile() || stat5.isSymbolicLink() || stat5.nlink !== 1 || stat5.size > 4096) throw new Error("Guardian configuration must be a small private regular file.");
-  return validated(JSON.parse(readFileSync25(path2, "utf8")));
+  return validated(JSON.parse(readFileSync26(path2, "utf8")));
 }
 function configureGuardian(options) {
   const config = validated({ ...defaultGuardianConfig(), ...options });
@@ -16503,7 +16524,7 @@ function runtimeRecord() {
   if (lstatSync20(autonomyDirectory()).isSymbolicLink()) throw new Error("Invalid guardian runtime directory.");
   const stat5 = lstatSync20(path2);
   if (!stat5.isFile() || stat5.isSymbolicLink() || stat5.nlink !== 1 || stat5.size > 4096) throw new Error("Invalid guardian runtime record.");
-  const record3 = JSON.parse(readFileSync25(path2, "utf8"));
+  const record3 = JSON.parse(readFileSync26(path2, "utf8"));
   if (record3?.version !== 1 || record3.kind !== "rein-headless-guardian" || typeof record3.executable !== "string" || !isAbsolute11(record3.executable) || /[\x00-\x1f\x7f]/.test(record3.executable)) throw new Error("Invalid guardian runtime record.");
   return { ...record3, baseUrl: guardianBaseUrl(record3.baseUrl) };
 }
@@ -19075,7 +19096,7 @@ __export(doctor_exports, {
   usesLocalHardware: () => usesLocalHardware
 });
 import { execFileSync as execFileSync4 } from "node:child_process";
-import { chmodSync, existsSync as existsSync22, lstatSync as lstatSync21, readFileSync as readFileSync26, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { chmodSync, existsSync as existsSync22, lstatSync as lstatSync21, readFileSync as readFileSync27, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
 import { homedir as homedir33 } from "node:os";
 import { dirname as dirname22, join as join56 } from "node:path";
 function checkNodeRuntime(version = process.versions.node) {
@@ -19227,7 +19248,7 @@ async function runDoctor(opts = {}) {
       let installedPackage = false;
       try {
         const packageRoot = dirname22(dirname22(real));
-        installedPackage = JSON.parse(readFileSync26(join56(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join56(packageRoot, "dist", "rein.js");
+        installedPackage = JSON.parse(readFileSync27(join56(packageRoot, "package.json"), "utf8")).name === "rein-agent" && real === join56(packageRoot, "dist", "rein.js");
       } catch {
       }
       const distOk = installedPackage || repo && existsSync22(join56(repo, "dist", "rein.js"));
@@ -19407,7 +19428,7 @@ __export(loop_exports, {
   runExperimentLoop: () => runExperimentLoop
 });
 import { execFileSync as execFileSync5 } from "node:child_process";
-import { existsSync as existsSync23, readFileSync as readFileSync27, appendFileSync as appendFileSync3, realpathSync as realpathSync10 } from "node:fs";
+import { existsSync as existsSync23, readFileSync as readFileSync28, appendFileSync as appendFileSync3, realpathSync as realpathSync10 } from "node:fs";
 import { join as join57, resolve as resolve47 } from "node:path";
 import { randomUUID as randomUUID22 } from "node:crypto";
 function incompleteRunReason(messages) {
@@ -19486,8 +19507,8 @@ async function runExperimentLoop(opts, dependencies = {}) {
   if (!existsSync23(metricPath)) {
     throw new Error(`No ${metricFile} in ${cwd} \u2014 put the metric command in a fenced code block (three backticks) and what METRIC= means, then re-run.`);
   }
-  const task = readFileSync27(taskPath, "utf8");
-  const metricDoc = readFileSync27(metricPath, "utf8");
+  const task = readFileSync28(taskPath, "utf8");
+  const metricDoc = readFileSync28(metricPath, "utf8");
   const metricCmd = readMetricCommand(metricDoc);
   if (!metricCmd) throw new Error("METRIC.md has no metric command");
   requireCleanGit(cwd);
@@ -19602,7 +19623,7 @@ __export(improve_exports, {
   runImproveLoop: () => runImproveLoop
 });
 import { execFileSync as execFileSync6 } from "node:child_process";
-import { cpSync as cpSync2, existsSync as existsSync24, mkdtempSync as mkdtempSync2, readFileSync as readFileSync28, appendFileSync as appendFileSync4, rmSync as rmSync4 } from "node:fs";
+import { cpSync as cpSync2, existsSync as existsSync24, mkdtempSync as mkdtempSync2, readFileSync as readFileSync29, appendFileSync as appendFileSync4, rmSync as rmSync4 } from "node:fs";
 import { tmpdir as tmpdir5 } from "node:os";
 import { join as join58, dirname as dirname23, resolve as resolve48 } from "node:path";
 import { fileURLToPath as fileURLToPath9 } from "node:url";
@@ -19632,7 +19653,7 @@ function runHarnessTests(repoDir) {
 function harnessLessons(repoDir) {
   const path2 = join58(repoDir, "LESSONS.md");
   if (!existsSync24(path2)) return "";
-  const text = readFileSync28(path2, "utf8");
+  const text = readFileSync29(path2, "utf8");
   const m = text.match(/## harness\s*\n([\s\S]*?)(?=\n## |$)/);
   return m?.[1]?.trim() ?? "";
 }
@@ -19759,7 +19780,7 @@ __export(heartbeat_exports, {
   parseHeartbeat: () => parseHeartbeat,
   runHeartbeat: () => runHeartbeat
 });
-import { appendFileSync as appendFileSync5, existsSync as existsSync25, mkdirSync as mkdirSync24, readFileSync as readFileSync29, writeFileSync as writeFileSync24 } from "node:fs";
+import { appendFileSync as appendFileSync5, existsSync as existsSync25, mkdirSync as mkdirSync24, readFileSync as readFileSync30, writeFileSync as writeFileSync24 } from "node:fs";
 import { homedir as homedir34 } from "node:os";
 import { isAbsolute as isAbsolute14, join as join59, resolve as resolve49 } from "node:path";
 function parseHeartbeat(text) {
@@ -19815,7 +19836,7 @@ async function runHeartbeat(opts = {}, dependencies = {}) {
     say(dim(`create one: rein heartbeat --init --file ${file2}`));
     return 1;
   }
-  const { tasks, improveGoal } = parseHeartbeat(readFileSync29(file2, "utf8"));
+  const { tasks, improveGoal } = parseHeartbeat(readFileSync30(file2, "utf8"));
   say(bold(`heartbeat \xB7 ${file2}`) + dim(` \xB7 ${(/* @__PURE__ */ new Date()).toISOString()}`));
   say(`
 ${bold("1/4 self-heal")}`);
@@ -20637,14 +20658,14 @@ var init_repl = __esm({
 
 // src/cli.ts
 init_models();
-import { readFileSync as readFileSync30 } from "node:fs";
+import { readFileSync as readFileSync31 } from "node:fs";
 async function printHardwareSection() {
   const { printServingAdvice: printServingAdvice2 } = await Promise.resolve().then(() => (init_server_setup(), server_setup_exports));
   await printServingAdvice2();
 }
 function cliVersion() {
   try {
-    return JSON.parse(readFileSync30(new URL("../package.json", import.meta.url), "utf8")).version;
+    return JSON.parse(readFileSync31(new URL("../package.json", import.meta.url), "utf8")).version;
   } catch {
     return "0.0.0";
   }
