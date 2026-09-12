@@ -2,12 +2,38 @@
 // created once from the bundled template, never overwritten, and only the
 // missing .env is filled in afterwards. Keep this module Electron-free so the
 // test suite runs under plain Node.
-import { cpSync, existsSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 
 export const PROJECT_DIR_NAME = "rein-factory";
 export const TEMPLATE_REQUIRED_FILES = ["package.json", "src/mastra/index.ts", ".env.schema", "pnpm-workspace.yaml"];
+
+// Upstream security advisories in the template's transitive dependencies, fixed
+// by pinning each root package to the first patched release. These are applied
+// to the provisioned project (user state) so the vendored template stays a pure
+// copy. The project's own overrides win, so a future Mastra release can take over.
+// extract-zip has no patched release yet, so the browser-automation chain that
+// depends on it (via Mastra's agent-browser) remains until upstream fixes it.
+export const SECURITY_OVERRIDES = {
+  undici: "6.28.1",
+  lodash: "4.18.1",
+  "adm-zip": "0.6.1",
+  "smol-toml": "1.8.0",
+};
+
+export function applySecurityOverrides(projectDir, { log = () => {} } = {}) {
+  const packageFile = join(projectDir, "package.json");
+  const manifest = JSON.parse(readFileSync(packageFile, "utf8"));
+  const overrides = { ...SECURITY_OVERRIDES, ...(manifest.overrides || {}) };
+  const next = { ...manifest, overrides };
+  const nextText = JSON.stringify(next, null, 2) + "\n";
+  if (nextText !== readFileSync(packageFile, "utf8")) {
+    writeFileSync(packageFile, nextText);
+    log("Pinned upstream dependencies to their first patched release (security overrides).");
+  }
+  return overrides;
+}
 
 export function resolveProjectDir({ env = process.env, userHome = "" } = {}) {
   const explicit = env.FACTORY_PROJECT?.trim();
@@ -86,12 +112,14 @@ export function provisionProject({ projectDir, templateDir, credentialKey, datab
       writeFileSync(join(projectDir, ".env"), defaultEnvFile({ credentialKey: credentialKey ?? newCredentialKey(), databaseUrl }), { mode: 0o600 });
       log("Wrote the missing .env for the existing Mastra Factory project.");
     }
+    applySecurityOverrides(projectDir, { log });
     return { created: false };
   }
   if (!templateComplete(templateDir)) throw new Error("The bundled Mastra Factory template is missing files. Reinstall the app.");
   mkdirSync(projectDir, { recursive: true });
   cpSync(templateDir, projectDir, { recursive: true, verbatimSymlinks: true });
   writeFileSync(join(projectDir, ".env"), defaultEnvFile({ credentialKey: credentialKey ?? newCredentialKey(), databaseUrl }), { mode: 0o600 });
+  applySecurityOverrides(projectDir, { log });
   log(`Installed Mastra Factory to ${projectDir}.`);
   return { created: true };
 }
