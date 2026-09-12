@@ -80,6 +80,12 @@ the operator through:
 3. **Meet your bot.** Continue an imported bot or create one with a name and
    avatar. A suggested first task fills the message box without sending it.
 
+Steps 1 and 2 are optional. **Skip for now · open the console** creates a
+default bot (or continues an imported one), completes setup, and drops the
+operator into the app; the connection and work style can be finished later from
+Settings › Assisted setup. Only the starting point (step 0) and a bot are
+required to enter.
+
 The local gateway uses `~/.klaudbot/workspace` as its writable working directory,
 including during source development. Packaged apps launch the embedded Rein
 bundle; source runs use the checkout's `dist/rein.js`, or `bin/rein.js` when that

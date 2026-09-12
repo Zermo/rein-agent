@@ -84,13 +84,17 @@ export function SetupWizard({ api, inspection, connection, bots = [], selectedBo
       setSetup(result); setStep(3);
     });
   }
-  async function finish() {
+  async function finish(starterText = inspection.completed ? undefined : starter) {
     await run(async () => {
       let selected = bots.find(bot => bot.id === existingBot) ?? created.current;
       if (!selected) { selected = await api.request("createBot", { name: name.trim(), avatar }); created.current = selected; }
-      await onFinish(selected, inspection.completed ? undefined : starter);
+      await onFinish(selected, starterText);
     });
   }
+  // Escape hatch: the optional steps (model, work style) can be finished later
+  // from Settings › Assisted setup. This opens the console now with a default
+  // bot, so setup is no longer a wall that must be cleared end-to-end.
+  const skip = () => { void finish(undefined); };
   const selectedBot = bots.find(bot => bot.id === existingBot);
   const loginPending = !!login && ["starting", "waiting"].includes(login.status);
   const modelConfigured = usableConfiguration(accounts?.configured);
@@ -134,14 +138,14 @@ export function SetupWizard({ api, inspection, connection, bots = [], selectedBo
             {subscriptions.includes(provider) && <div className="setup-subscription"><p>The official {provider} CLI handles sign-in on this computer. A compatible subscription and installed CLI are required.</p>{accountStatus && <p role="status">{accountStatus.detail}</p>}<button disabled={working || !!login && ["starting", "waiting"].includes(login.status)} onClick={() => void run(async () => setLogin(await api.request("startLogin", { provider })))}>Connect {provider} account</button>{login && <div role="status"><p>{login.message}</p>{login.userCode && <code className="device-code">{login.userCode}</code>}{login.verificationURL && <button onClick={() => void run(() => api.openAccountAuth(login.verificationURL))}>Open secure sign-in</button>}{["starting", "waiting"].includes(login.status) && <button onClick={() => void run(async () => setLogin(await api.request("cancelLogin", { id: login.id })))}>Cancel sign-in</button>}</div>}</div>}
           {keepConnection && <button disabled={working} onClick={() => void run(async () => setCheck(await api.request("probeModel")))}>Check saved connection</button>}
           {check && <p role="status" className="setup-found">{check.message}</p>}
-          <div className="setup-actions"><button className="primary" disabled={working || loginPending || !keepConnection && !model.trim()} onClick={saveConnection}>{keepConnection ? "Continue with this connection" : "Save and check connection"}</button><button disabled={working || loginPending} onClick={() => setStep(2)}>Set up a model later</button></div>
+          <div className="setup-actions"><button className="primary" disabled={working || loginPending || !keepConnection && !model.trim()} onClick={saveConnection}>{keepConnection ? "Continue with this connection" : "Save and check connection"}</button><button disabled={working || loginPending} onClick={() => setStep(2)}>Set up a model later</button><button className="setup-skip" disabled={working || loginPending} onClick={skip}>Skip for now · open the console</button></div>
         </>}
       </>}
       {step === 2 && setup && <>
         {setup.profile && <label className="setup-option"><input type="checkbox" checked={keepProfile} onChange={event => setKeepProfile(event.target.checked)}/><span><strong>Keep my existing working preferences</strong><small>Your copied voice, notes, and native skill choices stay in use.</small></span></label>}
         {!keepProfile && <><div className="setup-fields">{setup.items.map(item => <React.Fragment key={item.id}><label htmlFor={`setup-${item.id}`}>{item.prompt.replaceAll("Rein", "your bot")}</label><select id={`setup-${item.id}`} value={answers[item.id]} onChange={event => setAnswers(previous => ({ ...previous, [item.id]: event.target.value }))}>{item.choices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select></React.Fragment>)}</div>{pack && <label className="setup-option"><input type="checkbox" checked={enablePack} onChange={event => setEnablePack(event.target.checked)}/><span><strong>Add {pack.label.toLowerCase()} skills</strong><small>{pack.description} Optional; you can skip this.</small></span></label>}</>}
         <details className="setup-help" open><summary>Room for longer tasks</summary>{setup.budgetsNeedReview && <p role="status">Your earlier task limits need attention. We have filled in working defaults; review and save them below.</p>}<p>Limits pause a task for review. They do not grant permission for new work. A turn is one model response; an iteration is one autonomy work cycle.</p><div className="setup-budget-fields"><label>Turns per task<input type="number" min="1" max="10000" value={maxTurns} onChange={event => setMaxTurns(event.target.value)}/></label><label>Autonomy iterations<input type="number" min="1" max="1000" value={maxIterations} onChange={event => setMaxIterations(event.target.value)}/></label></div><p className="muted">Autonomy stays off until you enable it. These limits apply when you run it.</p></details>
-        <div className="setup-actions"><button disabled={working} onClick={() => setStep(1)}>Back</button><button className="primary" disabled={working} onClick={savePreferences}>Save my preferences</button></div>
+        <div className="setup-actions"><button disabled={working} onClick={() => setStep(1)}>Back</button><button className="primary" disabled={working} onClick={savePreferences}>Save my preferences</button><button className="setup-skip" disabled={working} onClick={skip}>Skip for now · open the console</button></div>
       </>}
       {step === 3 && <>
         {bots.length > 0 && <div className="setup-fields"><label htmlFor="setup-existing-bot">Continue a conversation</label><select id="setup-existing-bot" value={existingBot} onChange={event => setExistingBot(event.target.value)}><option value="">Create a new bot</option>{bots.map(bot => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</select></div>}
