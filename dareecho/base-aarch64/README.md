@@ -61,6 +61,9 @@ Every target fact below was read from the S25 Ultra during the install test
 ## Status
 
 This is a **build definition and gate map**, produced as the base for the
-aarch64 port. It is not yet a booted image: the frontier gates (Adreno 830
-driver maturity on SM8750, DSI display bring-up, the S938U bootloader unlock,
-and a signed A/B/AVB image) are the work it scopes. See `gates.md`.
+aarch64 port. It is not yet a booted image. The good news from grounding it
+against upstream: the **SM8750 SoC is largely mainlined** (clocks, DPU
+display, interconnect, camera, a QRD device tree). The open work is narrower
+than a greenfield port: the **S938U (US) bootloader unlock** (the access
+gate), the exact **`sun` board** overlay, the **Adreno 3D/Vulkan** driver (not
+yet mainlined), modem/telephony, and a signed A/B/AVB image. See `gates.md`.

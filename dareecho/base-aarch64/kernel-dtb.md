@@ -37,9 +37,19 @@ with the Qualcomm SM8750 platform enabled.
   `msm_drm`, `ufs`/`mmc`, `qcom` storage, and the FBE/`crypt` modules if the
   data payload is to be read.
 
-## Gate
+## Upstream state (grounded)
 
-This is a **frontier gate**: SM8750/"sun" is a current flagship SoC and full
-mainline enablement (GPU + display + modem) is the long pole of the port. The
-build definition pins the intent; the working kernel is produced and validated
-on hardware as the gate clears. See `gates.md`.
+The SM8750 SoC is **largely mainlined** (verified against `torvalds/linux`):
+clock controllers (`gpucc`/`tcsrcc`/`videocc`/`camcc`/`dispcc`-`sm8750.c`),
+the **DPU display** (`dpu_12_0_sm8750.h`), interconnect (`sm8750.c`), camera
+(`iris_platform_sm8750.h`), and a QRD device tree (`sm8750-qrd.dts`). This is
+not a greenfield SoC bring-up.
+
+The open kernel work is narrower:
+- the exact S25 Ultra **`sun` board** overlay (panel, modem, cameras) —
+  upstream has the QRD board, not Samsung's `sun` board;
+- the **Adreno GPU 3D/Vulkan** driver — SM8750 is not yet in
+  `drivers/gpu/drm/msm/adreno` (display DPU is separate and mainlined);
+- modem/telephony bring-up (non-blocking for boot).
+
+See `gates.md` for the full gate map and status.

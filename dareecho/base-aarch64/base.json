@@ -49,13 +49,17 @@
     "components": ["harness", "meat-wasm", "factory-ui", "os-identity"]
   },
   "gates": [
-    { "id": "bootloader-unlock", "status": "blocked", "note": "S938U (US): ro.oem_unlock_supported empty; Samsung does not offer an OEM-unlock path on this model. Access gate for the whole swap." },
-    { "id": "kernel-sm8750", "status": "gate", "note": "aarch64 mainline kernel with the SM8750/'sun' platform enabled." },
-    { "id": "gpu-adreno", "status": "gate", "note": "msm_gpu/freedreno + firmware for this Adreno; 2D/3D acceleration bring-up." },
-    { "id": "display-dsi", "status": "gate", "note": "msm-drm DPU + DSI panel bring-up for 1440x3120." },
-    { "id": "avb-signing", "status": "gate", "note": "signed vbmeta + A/B partitions; verified boot green must be satisfied or the slot rejected." },
-    { "id": "modem-telephony", "status": "gate", "note": "Qualcomm X modem + RIL; call/SMS/data. Non-blocking for the OS swap, blocking for a daily driver." }
+    { "id": "bootloader-unlock", "status": "blocked", "note": "S938U (US): ro.oem_unlock_supported empty; no OEM-unlock path. Access gate for the whole swap; unlock wipes the device." },
+    { "id": "board-dt-sun", "status": "gate", "note": "Exact S25 Ultra 'sun' board DT (panel/modem/cameras). Upstream has sm8750-qrd.dts (QRD), not the sun board." },
+    { "id": "gpu-adreno", "status": "gate", "note": "Adreno 3D/Vulkan (msm_gpu/freedreno) for SM8750 not yet mainlined; the open driver. Display DPU is separate and mainlined." },
+    { "id": "display-dsi", "status": "gate", "note": "msm-drm DPU for SM8750 is mainlined (dpu_12_0_sm8750.h); bring-up is the sun panel over DSI." },
+    { "id": "avb-signing", "status": "gate", "note": "AVB 1.3 vbmeta + partition signing so the green verified-boot chain holds on the _b slot." },
+    { "id": "modem-telephony", "status": "gate", "note": "Qualcomm X modem + RIL; call/SMS/data. Non-blocking for boot/OS, blocking for a daily driver." }
   ],
+  "upstreamState": {
+    "mainlined": ["clocks (gpucc/tcsrcc/videocc/camcc/dispcc)", "dpu_12_0_sm8750.h (display DPU)", "interconnect sm8750.c", "iris camera sm8750", "sm8750-qrd.dts"],
+    "notMainlined": ["Adreno GPU 3D/Vulkan (no SM8750 in drivers/gpu/drm/msm/adreno)", "S25 Ultra 'sun' board overlay"]
+  },
   "sources": [
     "https://archlinuxarm.org",
     "https://kernel.org",
