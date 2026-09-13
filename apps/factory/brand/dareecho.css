@@ -1,0 +1,39 @@
+/* Dareecho OS identity for the Factory surface.
+   Palette and motion policy from src/os/assets/rain/theme.json
+   (displayName "Dareecho"; motion default "static"). The rain stays in the
+   frame: a quiet, low-opacity plate behind the app, never over its content. */
+:root {
+	--dareecho-cream: #f5eddc;
+	--dareecho-rust: #b54229;
+	--dareecho-amber: #ebbc5c;
+	--dareecho-green: #284d3d;
+	--dareecho-ink: #252a25;
+}
+html { background: var(--dareecho-ink); }
+/* Rain plate: static by default; a slow drift only for motion-tolerant users. */
+body::after {
+	content: "";
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	opacity: 0.07;
+	background-image: repeating-linear-gradient(
+		104deg,
+		transparent 0 44px,
+		rgba(245, 237, 220, 0.6) 44px 45px,
+		transparent 45px 112px
+	);
+}
+@media (prefers-reduced-motion: no-preference) {
+	body::after { animation: dareecho-rain 26s linear infinite; }
+}
+@media (prefers-reduced-motion: reduce) {
+	body::after { animation: none; opacity: 0.05; }
+}
+@keyframes dareecho-rain {
+	from { background-position: 0 0; }
+	to { background-position: -48px 140px; }
+}
+/* The app chrome keeps the Factory surface; Dareecho owns the frame:
+   tab title, install name, and favicon are rewritten by the brand gateway. */

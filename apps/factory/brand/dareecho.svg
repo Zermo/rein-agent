@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Dareecho mark: rain in the frame. Palette from src/os/assets/rain/theme.json. -->
+  <rect width="64" height="64" rx="14" fill="#252a25"/>
+  <g stroke-linecap="round" fill="none">
+    <line x1="19" y1="12" x2="14" y2="30" stroke="#f5eddc" stroke-width="3" opacity="0.95"/>
+    <line x1="33" y1="9" x2="28" y2="27" stroke="#ebbc5c" stroke-width="3" opacity="0.95"/>
+    <line x1="47" y1="12" x2="42" y2="30" stroke="#f5eddc" stroke-width="3" opacity="0.7"/>
+    <line x1="25" y1="36" x2="20" y2="53" stroke="#f5eddc" stroke-width="3" opacity="0.5"/>
+    <line x1="41" y1="38" x2="36" y2="54" stroke="#b54229" stroke-width="3" opacity="0.85"/>
+  </g>
+</svg>
