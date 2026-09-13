@@ -5658,6 +5658,21 @@ export function androidUserHome(home, allowStaging = false) {
   if (allowStaging && /\/com\.[A-Za-z0-9_.]+\/files\/home$/.test(home)) return home;
   fail('Run this as the Android app user; its home must be an app-private userland home under /data/.../files/home.');
 }
+async function prop(name) {
+  try {
+    const { execFileSync } = await import('node:child_process');
+    return execFileSync('getprop', [name], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch { return ''; }
+}
+async function androidRelease() {
+  const candidates = [process.env.REIN_OS_ANDROID_RELEASE, process.env['ro.build.version.release'], await prop('ro.build.version.release')].map(value => (value || '').trim());
+  const release = candidates.find(value => /^\d{1,2}(\.\d+)?$/.test(value));
+  if (release) return release;
+  fail('This kit targets Android; the device must report its release (getprop ro.build.version.release or REIN_OS_ANDROID_RELEASE).');
+}
+async function androidModel() {
+  return (process.env['ro.product.model'] || (await prop('ro.product.model'))).trim();
+}
 export function validateTarget(platform, arch, release) {
   if (platform !== 'android') fail('Apply this overlay only on an Android device userland (for example Termux).');
   if (arch !== 'arm64') fail('This kit targets aarch64 Android.');
@@ -5693,9 +5708,9 @@ export async function main(args) {
   const files = await verifyPayload();
   if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
   const userHome = androidUserHome(homedir(), Boolean(process.env.REIN_OS_ANDROID_HOME));
-  const release = (process.env['ro.build.version.release'] || process.env.REIN_OS_ANDROID_RELEASE || '').trim();
+  const release = await androidRelease();
   validateTarget(process.platform, process.arch, release);
-  const model = (process.env['ro.product.model'] || '').trim();
+  const model = await androidModel();
   const baseVersion = release + (model ? ' ' + model : '');
   const destination = join(userHome, '.local/share/rein-os');
   const launcher = join(userHome, '.local/bin/rein');
