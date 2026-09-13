@@ -21,14 +21,16 @@ export interface StackTier {
 	status: "included" | "app" | "gate";
 }
 
-export function dareechoStack(profile: { os: string; arch: string }, options: { chromeos?: boolean } = {}): StackTier[] {
+export function dareechoStack(profile: { os: string; arch: string }, options: { chromeos?: boolean; android?: boolean } = {}): StackTier[] {
 	const agent: StackTier = { tier: "agent", name: "rein-agent", runs: "CLI agent, always-running gateway (rein serve), bots, tmux harness", status: "included" };
 	const gui: StackTier = profile.os === "darwin"
 		? { tier: "gui", name: "rein-klaʊd", runs: "published macOS app connects to rein serve (bot mode)", status: "app" }
 		: { tier: "gui", name: "rein-klaʊd", runs: "app source ships in the kit; a validated runtime for this platform is a gate", status: "gate" };
 	const os: StackTier = options.chromeos
 		? { tier: "os", name: "Dareecho", runs: "userland kit with OS identity; the verified ChromeOS root stays ChromeOS", status: "included" }
-		: profile.os === "linux" && profile.arch === "x64"
+		: options.android || profile.os === "android"
+			? { tier: "os", name: "Dareecho", runs: "userland kit with OS identity; the verified Android root stays Android", status: "included" }
+			: profile.os === "linux" && profile.arch === "x64"
 			? { tier: "os", name: "Dareecho", runs: "clean-install kit: pinned Omarchy base + full userland + OS identity", status: "included" }
 		: profile.os === "darwin"
 			? { tier: "os", name: "Dareecho", runs: "native macOS host path; the Dareecho OS kit targets x86-64 Linux", status: "gate" }
@@ -50,7 +52,7 @@ export interface ReinOSPlan {
 	sources: string[];
 }
 
-export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | "image"; chromeos?: boolean } = {}): ReinOSPlan {
+export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | "image"; chromeos?: boolean; android?: boolean } = {}): ReinOSPlan {
 	if (!profile || typeof profile.os !== "string" || typeof profile.arch !== "string" ||
 		!Array.isArray(profile.gpus) || !profile.gpus.every(gpu => gpu && typeof gpu === "object")) {
 		throw new Error("A hardware profile with OS, architecture, and GPUs is required.");
@@ -58,15 +60,16 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 	const mode = options.mode ?? "host";
 	if (mode !== "host" && mode !== "image") throw new Error("OS mode must be host or image.");
 	const chromeos = options.chromeos === true;
+	const android = options.android === true || profile.os === "android";
 	const platform = { os: profile.os, arch: profile.arch };
-	const recognized = ["darwin", "linux", "win32"].includes(profile.os) && ["x64", "arm64"].includes(profile.arch);
+	const recognized = ["darwin", "linux", "win32", "android"].includes(profile.os) && ["x64", "arm64"].includes(profile.arch);
 	const apple = profile.os === "darwin" && profile.arch === "arm64";
 	const plan: ReinOSPlan = {
 		schemaVersion: 1, mode, platform, status: recognized ? "candidate" : "unsupported",
-		adapter: "unsupported", runtimes: [], stack: dareechoStack(profile, { chromeos }), facts: [], gates: [], next: [], sources: [],
+		adapter: "unsupported", runtimes: [], stack: dareechoStack(profile, { chromeos, android }), facts: [], gates: [], next: [], sources: [],
 	};
 	if (mode === "host") {
-		plan.adapter = !recognized ? "unsupported" : profile.os === "darwin" ? "macos-native" : profile.os === "win32" ? "windows-with-wsl2" : "linux-native";
+		plan.adapter = !recognized ? "unsupported" : profile.os === "darwin" ? "macos-native" : profile.os === "win32" ? "windows-with-wsl2" : profile.os === "android" ? "android-userland" : "linux-native";
 		plan.runtimes = !recognized ? [] : apple ? ["MLX", "llama.cpp (Metal)", "existing OpenAI-compatible server"] :
 			["llama.cpp", "existing OpenAI-compatible server"];
 		if (recognized && profile.os === "linux" && profile.gpus.some(gpu => gpu.vendor === "nvidia" || gpu.vendor === "amd")) {
@@ -93,6 +96,18 @@ export function planReinOS(profile: HardwareProfile, options: { mode?: "host" | 
 			);
 			plan.sources.push("https://chromium.googlesource.com/chromiumos/docs/+/HEAD/developer_mode.md");
 			plan.next = ["rein export presets --to <external-drive>", "rein os prepare --target chromeos --output ./rein-os-kit"];
+		}
+		if (android && recognized && profile.os === "android") {
+			plan.adapter = "android-userland";
+			plan.facts.push("Android reports as android to the harness. The overlay installs only into the app user's home (e.g. Termux under /data/data); the verified-boot base, system partitions, and other apps stay untouched.");
+			plan.facts.push("Android app data lives under /data/data/<package> and /sdcard; copy what is yours to an external drive before any OS-level change.");
+			plan.gates.push(
+				{ id: "userland", status: "required", detail: "Confirm a persistent shell userland (Termux) with a Node 18+ environment and a writable app-private home." },
+				{ id: "model-endpoint", status: "required", detail: "Point REIN_BASE_URL at a reachable LAN or cloud model server; the phone does not host one." },
+				{ id: "backup", status: "required", detail: "Copy the app's private files and /sdcard to an external drive before any OS-level change." },
+			);
+			plan.sources.push("https://termux.dev/docs");
+			plan.next = ["rein os prepare --target android --output ./rein-os-kit"];
 		}
 		plan.gates.push(
 			{ id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No Dareecho host adapter is defined for this OS and architecture." },

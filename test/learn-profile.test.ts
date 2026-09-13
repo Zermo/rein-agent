@@ -204,3 +204,30 @@ test("real macOS pass on this machine produces five boot stages and a verified e
 	assert.ok(learn.machine.model.length > 0);
 	assert.ok(learn.probes.every(p => typeof p.detail === "string"));
 });
+
+test("Android learn pass records the device, boot chain, and userland gates", async () => {
+	const { learn } = await learnMachine({
+		platform: "android",
+		hostname: () => "s25ultra",
+		now: () => new Date("2026-01-01T00:00:00Z"),
+		run: fakeRun({
+			"uname -sr": ok("linux 6.6.98-android15-8"),
+			"getprop ro.product.model": ok("SM-S938U"),
+			"getprop ro.build.version.release": ok("16"),
+			"pm list packages": fail("pm: not found"),
+			"ls /data/data/com.termux": ok("files usr"),
+		}),
+		read: async (path: string) => path === "/proc/meminfo" ? "MemTotal:       12000000 kB\nMemAvailable:   8000000 kB\n" : path === "/proc/cpuinfo" ? "processor\t: 0\nprocessor\t: 1\n" : undefined,
+	});
+	assert.equal(learn.machine.os, "android");
+	assert.equal(learn.machine.release, "Android 16");
+	assert.equal(learn.machine.model, "SM-S938U");
+	assert.equal(learn.machine.ramBytes, 12000000 * 1024);
+	assert.equal(learn.machine.virtualized, "physical");
+	assert.deepEqual(learn.bootChain.map(stage => stage.stage), ["bootrom", "firmware", "verified-boot", "kernel", "userland"]);
+	const gates = Object.fromEntries(learn.gates.map(g => [g.id, g.status]));
+	assert.equal(gates["android-release"], "verified");
+	assert.equal(gates["verified-boot"], "verified");
+	assert.equal(gates["userland"], "verified");
+	assert.equal(gates["backup"], "required");
+});

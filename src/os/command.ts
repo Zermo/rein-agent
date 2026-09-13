@@ -11,9 +11,10 @@ import { runFactoryCommand } from "./factory.ts";
 const HELP = `Dareecho development
 
   rein os plan [--mode host|image] [--json]   assess this machine and show installation gates
-  rein os prepare --output <new-directory> [--target omarchy|chromeos]
-                                           stage a pinned Omarchy VM overlay kit, or the
-                                           ChromeOS userland kit (default target: omarchy)
+  rein os prepare --output <new-directory> [--target omarchy|chromeos|android]
+                                           stage a pinned Omarchy VM overlay kit, the
+                                           ChromeOS userland kit, or the Android userland kit
+(default target: omarchy)
   rein os factory setup|start|dev|stop|status|open
                                            Mastra Factory on this machine: install once,
                                            then drive the shared server (run rein os factory help)
@@ -116,16 +117,19 @@ export async function runOSCommand(args: string[], flags: Flags = {}, deps: {
 		if (mode === "host" && hardware.os === "linux") {
 			try { chromeos = isChromeOSRelease(await readFile("/etc/os-release", "utf8")); } catch { /* not ChromeOS */ }
 		}
-		const plan = (deps.plan ?? planReinOS)(hardware, { mode, chromeos });
+		const android = mode === "host" && hardware.os === "android";
+		const plan = (deps.plan ?? planReinOS)(hardware, { mode, chromeos, android });
 		log(flags.json === true ? JSON.stringify(plan, null, 2) : formatReinOSPlan(plan)); return;
 	}
 	if (action === "prepare") {
 		if (typeof flags.output !== "string" || !flags.output.trim() || /[\x00-\x1f\x7f]/.test(flags.output)) throw new Error("--output requires a new directory path.");
-		if (flags.target !== undefined && flags.target !== "omarchy" && flags.target !== "chromeos") throw new Error("--target must be omarchy or chromeos.");
-		const kit = await (deps.prepare ?? prepareReinOS)({ output: flags.output, target: flags.target as "omarchy" | "chromeos" | undefined });
+		if (flags.target !== undefined && flags.target !== "omarchy" && flags.target !== "chromeos" && flags.target !== "android") throw new Error("--target must be omarchy, chromeos, or android.");
+		const kit = await (deps.prepare ?? prepareReinOS)({ output: flags.output, target: flags.target as "omarchy" | "chromeos" | "android" | undefined });
 		log(flags.json === true ? JSON.stringify(kit, null, 2) : kit.manifest.target === "chromeos"
 			? `Prepared Dareecho ChromeOS kit: ${kit.output}\nFollow its README in an arc shell as the chronos user. The verified root and A/B partitions are not touched.`
-			: `Prepared Dareecho VM kit: ${kit.output}\nFollow its README before booting or installing a VM. No operating system or service was changed.`); return;
+			: kit.manifest.target === "android"
+				? `Prepared Dareecho Android kit: ${kit.output}\nFollow its README in Termux as the app user. The Android base, verified boot, and other apps are not touched.`
+				: `Prepared Dareecho VM kit: ${kit.output}\nFollow its README before booting or installing a VM. No operating system or service was changed.`); return;
 	}
 	throw new Error("Unknown OS action. Run rein os help.");
 }

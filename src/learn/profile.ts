@@ -214,7 +214,42 @@ export async function learnMachine(deps: LearnDeps = {}): Promise<Outcome> {
 			{ id: "secure-boot", status: secureboot.ok ? "verified" : "required", detail: `Secure Boot ${secureboot.ok ? (sbOn ? "enabled" : "disabled") : "unknown"}.` },
 			{ id: "tpm", status: tpm.ok ? "verified" : "required", detail: `TPM ${tpm.ok ? firstLine(tpm.stdout) : "state unknown"}.` },
 		);
+	} else if (platform === "android") {
+		const [uname, meminfo, cpuinfo, model, release, packages, termux] = await Promise.all([
+			out("uname", "uname", ["-sr"]),
+			(async () => { const text = await read("/proc/meminfo"); probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== undefined, detail: text ? firstLine(text) : "missing" }); return text; })(),
+			(async () => { const text = await read("/proc/cpuinfo"); probes.push({ id: "cpuinfo", command: "/proc/cpuinfo", ok: text !== undefined, detail: text ? firstLine(text) : "missing" }); return text; })(),
+			out("model", "getprop", ["ro.product.model"]),
+			out("release", "getprop", ["ro.build.version.release"]),
+			out("packages", "pm", ["list", "packages"]),
+			out("termux", "ls", ["/data/data/com.termux"]),
+		]);
+		const roRelease = (release.ok ? firstLine(release.stdout) : undefined) ?? (process.env["ro.build.version.release"]?.trim() || undefined);
+		const roModel = (model.ok ? firstLine(model.stdout) : undefined) ?? (process.env["ro.product.model"]?.trim() || undefined);
+		machine.os = "android";
+		machine.release = roRelease ? `Android ${roRelease}` : "unknown";
+		machine.model = roModel ?? "unknown";
+		const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
+		machine.ramBytes = mem ? Number(mem) * 1024 : undefined;
+		machine.cpu = `${(cpuinfo ?? "").split("\n").map(l => l.trim()).filter(l => l.startsWith("processor")).length || "?"} logical cores, aarch64`;
+		machine.kernel = uname.stdout.trim().split(" ").slice(-1)[0] ?? undefined;
+		machine.virtualized = "physical";
+		const termuxOk = termux.ok;
+		bootChain.push(
+			{ stage: "bootrom", trust: "immutable", notes: "Per-board ROM; not updatable through the OS." },
+			{ stage: "firmware", trust: "oem-signed", notes: "Android bootloader (ABOOT); updates arrive through OTA." },
+			{ stage: "verified-boot", trust: "AVB verified boot", notes: "Android Verified Boot signs boot and system partitions; the userland overlay must not touch them." },
+			{ stage: "kernel", trust: "oem-signed", evidence: "uname", notes: machine.kernel ?? "release unknown." },
+			{ stage: "userland", trust: "app-private UID sandbox", evidence: termuxOk ? "/data/data/com.termux" : undefined, notes: `Termux ${termuxOk ? "present" : "not read"}; app data stays under /data/data/<package>, invisible to other apps. ${packages.ok ? "Package list recorded." : "Package list not read."}` },
+		);
+		gates.push(
+			{ id: "android-release", status: roRelease ? "verified" : "required", detail: roRelease ? `Android ${roRelease} read.` : "Android release not read; identify the device before planning." },
+			{ id: "verified-boot", status: "verified", detail: "Android Verified Boot is a base-system invariant; the overlay installs only into the app user's private home." },
+			{ id: "userland", status: termuxOk ? "verified" : "required", detail: termuxOk ? "Termux userland present; the overlay has a persistent home." : "Termux not found; install it (F-Droid) before an overlay pass." },
+			{ id: "backup", status: "required", detail: "Copy the app's private files and /sdcard to an external drive before any OS-level change." },
+		);
 	} else {
+
 		notes.push(`No learn pass is defined for platform "${platform}"; structure only.`);
 		gates.push({ id: "platform", status: "blocked", detail: `No Dareecho learn adapter for "${platform}".` });
 	}

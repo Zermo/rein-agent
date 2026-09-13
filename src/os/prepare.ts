@@ -12,12 +12,12 @@ export const OS_SKIN_FILES = ["src/os/assets/skins/dareecho.ini"] as const;
 export const OS_APP_FILES = ["apps/klaud/main.mjs"] as const;
 const REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES, ...OS_SKIN_FILES, ...OS_APP_FILES];
 const VENDOR = ["meat", "mattpocock", "ponytail", "unlazy", "obscura", "fold", "pi-posthorse"];
-export type OSTarget = "omarchy" | "chromeos";
+export type OSTarget = "omarchy" | "chromeos" | "android";
 export interface OSKitManifest {
 	schemaVersion: 1;
-	kind: "omarchy-post-install-overlay" | "chromeos-user-overlay";
+	kind: "omarchy-post-install-overlay" | "chromeos-user-overlay" | "android-user-overlay";
 	bootable: false;
-	target: "linux-x64" | "chromeos";
+	target: "linux-x64" | "chromeos" | "android";
 	reinVersion: string;
 	omarchy?: typeof OMARCHY_BASE;
 	/** Pinned upstream for the built-in device toolkit (rein argent). */
@@ -50,7 +50,7 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 	validPath(options.output);
 	if (options.bundleRoot !== undefined) validPath(options.bundleRoot);
 	const target: OSTarget = options.target ?? "omarchy";
-	if (target !== "omarchy" && target !== "chromeos") throw new Error("--target must be omarchy or chromeos.");
+	if (target !== "omarchy" && target !== "chromeos" && target !== "android") throw new Error("--target must be omarchy, chromeos, or android.");
 	const output = resolve(options.output);
 	const root = options.bundleRoot === undefined ? await sourceRoot() : resolve(options.bundleRoot);
 	await realpath(dirname(output)); // Never create an unexpected chain of parents.
@@ -83,9 +83,9 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 	payload.set("package.json", Buffer.from(JSON.stringify({ name: "rein-agent", version: pkg.version, type: "module", engines: { node: ">=18" } }, null, 2) + "\n"));
 	const manifest: OSKitManifest = {
 		schemaVersion: 1,
-		kind: target === "omarchy" ? "omarchy-post-install-overlay" : "chromeos-user-overlay",
+		kind: target === "omarchy" ? "omarchy-post-install-overlay" : target === "chromeos" ? "chromeos-user-overlay" : "android-user-overlay",
 		bootable: false,
-		target: target === "omarchy" ? "linux-x64" : "chromeos",
+		target: target === "omarchy" ? "linux-x64" : target === "chromeos" ? "chromeos" : "android",
 		reinVersion: pkg.version,
 		...(target === "omarchy" ? { omarchy: OMARCHY_BASE } : {}),
 		argent: ARGENT_BASE,
@@ -107,9 +107,12 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 			await put("install-overlay.mjs", INSTALL_OVERLAY);
 			await put("fetch-upstream.mjs", FETCH_UPSTREAM);
 			await put("README.md", KIT_README.replace("{{REIN_VERSION}}", pkg.version));
-		} else {
+		} else if (target === "chromeos") {
 			await put("install-chromeos.mjs", INSTALL_CHROMEOS);
 			await put("README.md", CHROMEOS_README);
+		} else {
+			await put("install-android.mjs", INSTALL_ANDROID);
+			await put("README.md", ANDROID_README);
 		}
 		await put("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
 	} catch {
@@ -117,6 +120,124 @@ export async function prepareReinOS(options: { output: string; bundleRoot?: stri
 	}
 	return { output, manifest, files };
 }
+
+const INSTALL_ANDROID = String.raw`import { createHash } from 'node:crypto';
+import { lstat, readFile, mkdir, writeFile, realpath } from 'node:fs/promises';
+import { dirname, resolve, join } from 'node:path';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+const kit = dirname(fileURLToPath(import.meta.url));
+const fail = message => { throw new Error(message); };
+async function absent(path) {
+  try { await lstat(path); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  fail('Destination already exists; it was preserved: ' + path);
+}
+export function androidUserHome(home, allowStaging = false) {
+  if (/^\/data\/(?:data\/|user\/\d+\/)com\.[A-Za-z0-9_.]+\/files\/home$/.test(home)) return home;
+  if (allowStaging && /\/com\.[A-Za-z0-9_.]+\/files\/home$/.test(home)) return home;
+  fail('Run this as the Android app user; its home must be an app-private userland home under /data/.../files/home.');
+}
+export function validateTarget(platform, arch, release) {
+  if (platform !== 'android') fail('Apply this overlay only on an Android device userland (for example Termux).');
+  if (arch !== 'arm64') fail('This kit targets aarch64 Android.');
+  if (!/^\d{1,2}(\.\d+)?$/.test((release || '').trim())) fail('This kit targets Android; the device must report its release (ro.build.version.release).');
+}
+async function verifyPayload() {
+  const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
+  if (manifest.schemaVersion !== 1 || manifest.kind !== 'android-user-overlay' || manifest.target !== 'android' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent || !manifest.rainmeter) fail('Invalid Android kit manifest.');
+  const seen = new Set();
+  const result = [];
+  const payloadRoot = await lstat(join(kit, 'payload'));
+  if (!payloadRoot.isDirectory() || payloadRoot.isSymbolicLink()) fail('Payload must be a regular directory.');
+  for (const entry of manifest.files) {
+    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+@/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
+    seen.add(entry.path);
+    let path = join(kit, 'payload');
+    for (const part of entry.path.split('/')) {
+      path = join(path, part);
+      if ((await lstat(path)).isSymbolicLink()) fail('Payload links are not accepted.');
+    }
+    const stat = await lstat(path);
+    if (!stat.isFile() || stat.size !== entry.bytes || stat.size > 128 * 1024 * 1024) fail('Payload size/type mismatch: ' + entry.path);
+    const data = await readFile(path);
+    if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
+    result.push([entry.path, data]);
+  }
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini', 'apps/klaud/main.mjs']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  return result;
+}
+export async function main(args) {
+  if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-android.mjs --verify | --check | --install');
+  if (args[0] === '--help') { console.log('Dareecho Android userland. Verify checks the exported files; check validates the device; install creates a new app-local Dareecho installation with its OS identity. No model downloads, setup, or services are started.'); return; }
+  const files = await verifyPayload();
+  if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
+  const userHome = androidUserHome(homedir(), Boolean(process.env.REIN_OS_ANDROID_HOME));
+  const release = (process.env['ro.build.version.release'] || process.env.REIN_OS_ANDROID_RELEASE || '').trim();
+  validateTarget(process.platform, process.arch, release);
+  const model = (process.env['ro.product.model'] || '').trim();
+  const baseVersion = release + (model ? ' ' + model : '');
+  const destination = join(userHome, '.local/share/rein-os');
+  const launcher = join(userHome, '.local/bin/rein');
+  const identity = join(userHome, '.local/bin/dareecho');
+  await absent(destination);
+  await absent(launcher);
+  await absent(identity);
+  if (args[0] === '--check') { console.log('REIN_OS_TARGET_READY'); return; }
+  const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
+  await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+  await mkdir(dirname(launcher), { recursive: true, mode: 0o700 });
+  await mkdir(destination, { mode: 0o700 });
+  for (const [relative, data] of files) {
+    const path = join(destination, relative);
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await writeFile(path, data, { flag: 'wx', mode: 0o600 });
+  }
+  const entry = join(destination, 'dist/rein.js');
+  const wrapper = '#!/usr/bin/env node\n' + 'import("node:child_process").then(({spawn})=>{\n' + 'const child=spawn(process.execPath,[' + JSON.stringify(entry) + ',...process.argv.slice(2)],{stdio:"inherit"});\n' + 'child.on("error",e=>{console.error(e.message);process.exitCode=1});\nchild.on("exit",(code,signal)=>{if(signal)process.kill(process.pid,signal);else process.exitCode=code??1});\n});\n';
+  await writeFile(launcher, wrapper, { flag: 'wx', mode: 0o700 });
+  await writeFile(join(destination, 'dareecho-release'), JSON.stringify({ name: 'Dareecho', version: manifest.reinVersion, base: { name: 'Android', installed: baseVersion }, pins: { argent: manifest.argent, rainmeter: manifest.rainmeter } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  const dareechoScript = '#!/usr/bin/env node\n' + 'import("node:fs/promises").then(({readFile})=>{readFile((process.env.HOME||"") + "/.local/share/rein-os/dareecho-release", "utf8").then(text=>{const release=JSON.parse(text);if(process.argv[2]==="--json"){console.log(JSON.stringify(release,null,2));}else{console.log(release.name+" "+release.version+" (base: "+release.base.name+" "+release.base.installed+")");}}).catch(error=>{console.error("Dareecho installation not found: "+error.message);process.exitCode=1;});});\n';
+  await writeFile(identity, dareechoScript, { flag: 'wx', mode: 0o700 });
+  console.log('REIN_OS_ANDROID_INSTALLED\nThe user now identifies as Dareecho. Run ~/.local/bin/dareecho for the OS identity, then ~/.local/bin/rein --version and ~/.local/bin/rein setup. Your Android base, verified boot, and other apps are untouched.');
+}
+const invoked = process.argv[1] && await realpath(process.argv[1]).catch(() => '');
+if (invoked === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
+`;
+
+const ANDROID_README = `# Dareecho Android userland kit
+
+Staged ${new Date().toISOString().slice(0, 10)}
+Target: aarch64 Android device userland (for example Termux). The Android base, verified boot, and other apps stay untouched; Dareecho installs only into the app user's private home.
+Bootable: no. This is a userland kit, not an OS image.
+
+## What this kit is
+The full offline Dareecho payload (the terminal skin engine, the Argent device toolkit, the rain motif, the OS identity files) plus an explicit, read-then-write Android userland installer. It stages a new app-local Dareecho installation with its OS identity, and never modifies the Android base.
+
+## Before you start
+- Install Termux (F-Droid), then: pkg install nodejs (Node 18+), git, curl, tmux, python, zstd.
+- This phone does not host a model server. Point REIN_BASE_URL at a reachable LAN or cloud OpenAI-compatible endpoint before rein setup.
+- Android app data lives under /data/data/<package> and /sdcard. Copy what is yours to an external drive before any OS-level change.
+
+## How to run it
+1. Copy this kit directory to the phone (for example ~/rein-os-kit).
+2. Verify the export, then check the device:
+   node install-android.mjs --verify
+   node install-android.mjs --check
+   The check verifies the machine identifies as Android (platform android, aarch64, ro.build.version.release) with an app-private home under /data/.../files/home. On a staging host, REIN_OS_ANDROID_HOME and REIN_OS_ANDROID_RELEASE override those two facts.
+3. Install:
+   node install-android.mjs --install
+4. Confirm the identity and the agent:
+   ~/.local/bin/dareecho
+   ~/.local/bin/rein --version
+   ~/.local/bin/rein setup
+
+## Guarantees
+- Nothing runs until you say install.
+- The installer verifies every payload file against the manifest before writing.
+- It refuses to start if the destination already exists; existing files are preserved.
+- It writes only under the app user's private home; the system partitions and verified boot are not touched.
+`;
+
 
 const INSTALL_OVERLAY = String.raw`import { createHash } from 'node:crypto';
 import { lstat, readFile, mkdir, writeFile, realpath } from 'node:fs/promises';
@@ -149,7 +270,7 @@ async function verifyPayload() {
   const payloadRoot = await lstat(join(kit, 'payload'));
   if (!payloadRoot.isDirectory() || payloadRoot.isSymbolicLink()) fail('Payload must be a regular directory.');
   for (const entry of manifest.files) {
-    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
+    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+@/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
     seen.add(entry.path);
     let path = join(kit, 'payload');
     for (const part of entry.path.split('/')) {
@@ -255,7 +376,7 @@ async function verifyPayload() {
   const payloadRoot = await lstat(join(kit, 'payload'));
   if (!payloadRoot.isDirectory() || payloadRoot.isSymbolicLink()) fail('Payload must be a regular directory.');
   for (const entry of manifest.files) {
-    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
+    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+@/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
     seen.add(entry.path);
     let path = join(kit, 'payload');
     for (const part of entry.path.split('/')) {

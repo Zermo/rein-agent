@@ -273,3 +273,102 @@ test("a non-chronos home is refused by the ChromeOS bootstrap", async t => {
 	const env = { ...process.env, HOME: user, USERPROFILE: user, REIN_OS_OSRELEASE: osRelease };
 	await assert.rejects(exec(process.execPath, [runner, "--check"], { env }), /chronos/);
 });
+
+test("the Android kit exports a userland installer, not the Omarchy fetch", async t => {
+	const f = await fixture(t);
+	const output = join(f.base, "kit-android");
+	const kit = await prepareReinOS({ output, bundleRoot: f.root, target: "android" });
+	assert.equal(kit.manifest.kind, "android-user-overlay");
+	assert.equal(kit.manifest.target, "android");
+	assert.equal(kit.manifest.bootable, false);
+	assert.ok(!("omarchy" in kit.manifest), "the Android kit does not pin Omarchy");
+	assert.ok(kit.files.includes("install-android.mjs"));
+	assert.ok(!kit.files.includes("fetch-upstream.mjs"));
+	const readme = await readFile(join(output, "README.md"), "utf8");
+	assert.match(readme, /Termux/);
+	assert.match(readme, /verified boot/);
+	assert.match(readme, /app user's private home/);
+});
+
+test("the Android target check rejects foreign platforms, architectures, and missing releases", async t => {
+	const f = await fixture(t);
+	const output = join(f.base, "kit-android-gate");
+	await prepareReinOS({ output, bundleRoot: f.root, target: "android" });
+	const runner = join(f.base, "android-gate.mjs");
+	await writeFile(runner, [
+		"Object.defineProperty(process, 'platform', { value: 'android' });",
+		`const m = await import(${JSON.stringify(pathToFileURL(join(output, "install-android.mjs")).href)});`,
+		"const gate = (fn) => { try { fn(); return 'pass'; } catch { return 'blocked'; } };",
+		"console.log(JSON.stringify({",
+		"  home: m.androidUserHome('/data/data/com.termux/files/home'),",
+		"  staging: m.androidUserHome('/tmp/staging/com.termux/files/home', true),",
+		"  ok: gate(() => m.validateTarget('android', 'arm64', '16')),",
+		"  platform: gate(() => m.validateTarget('linux', 'arm64', '16')),",
+		"  arch: gate(() => m.validateTarget('android', 'x64', '16')),",
+		"  release: gate(() => m.validateTarget('android', 'arm64', ''))",
+		"}));",
+	].join("\n"));
+	const out = await exec(process.execPath, [runner]);
+	const r = JSON.parse(out.stdout.trim());
+	assert.equal(r.home, "/data/data/com.termux/files/home");
+	assert.equal(r.staging, "/tmp/staging/com.termux/files/home");
+	assert.equal(r.ok, "pass");
+	assert.equal(r.platform, "blocked");
+	assert.equal(r.arch, "blocked");
+	assert.equal(r.release, "blocked");
+});
+
+test("the Android bootstrap installs app user files only, and preserves app data", async t => {
+	const f = await fixture(t);
+	const output = join(f.base, "kit-android-home");
+	await prepareReinOS({ output, bundleRoot: f.root, target: "android" });
+	const user = join(f.base, "data/data/com.termux/files/home");
+	await mkdir(join(user, "Documents"), { recursive: true });
+	await writeFile(join(user, "Documents/note.md"), "preserve-me");
+	await mkdir(join(user, ".local/share"), { recursive: true });
+	await writeFile(join(user, ".local/share/myfiles-marker"), "user-data");
+	const runner = join(f.base, "android-runner.mjs");
+	await writeFile(runner, `Object.defineProperty(process,'platform',{value:'android'}); const {main}=await import(${JSON.stringify(pathToFileURL(join(output, "install-android.mjs")).href)}); await main(process.argv.slice(2));`);
+	const env = { ...process.env, HOME: user, USERPROFILE: user, REIN_OS_ANDROID_HOME: "1", REIN_OS_ANDROID_RELEASE: "16", "ro.product.model": "SM-FIXTURE" };
+	const check = await exec(process.execPath, [runner, "--check"], { env });
+	assert.match(check.stdout, /REIN_OS_TARGET_READY/);
+	const installed = await exec(process.execPath, [runner, "--install"], { env });
+	assert.match(installed.stdout, /REIN_OS_ANDROID_INSTALLED/);
+	assert.match(installed.stdout, /verified boot/);
+	const launcher = join(user, ".local/bin/rein");
+	assert.match((await exec(process.execPath, [launcher, "--version"], { env })).stdout, /fixture-rein --version/);
+	assert.equal(await readFile(join(user, "Documents/note.md"), "utf8"), "preserve-me");
+	assert.equal(await readFile(join(user, ".local/share/myfiles-marker"), "utf8"), "user-data");
+	assert.match((await exec(process.execPath, [join(user, ".local/bin/dareecho")], { env })).stdout, /Dareecho 1\.2\.3 \(base: Android 16 SM-FIXTURE\)/);
+	const release = JSON.parse(await readFile(join(user, ".local/share/rein-os/dareecho-release"), "utf8"));
+	assert.equal(release.base.name, "Android");
+	assert.ok(!("omarchy" in release.pins), "the Android identity pins the toolkits, not Omarchy");
+	await assert.rejects(exec(process.execPath, [runner, "--install"], { env }), /already exists/);
+});
+
+test("a non-app-private home is refused by the Android bootstrap", async t => {
+	const f = await fixture(t);
+	const output = join(f.base, "kit-android-home-bad");
+	await prepareReinOS({ output, bundleRoot: f.root, target: "android" });
+	const user = join(f.base, "plain-user");
+	await mkdir(user, { recursive: true });
+	const runner = join(f.base, "android-runner2.mjs");
+	await writeFile(runner, `Object.defineProperty(process,'platform',{value:'android'}); const {main}=await import(${JSON.stringify(pathToFileURL(join(output, "install-android.mjs")).href)}); await main(process.argv.slice(2));`);
+	const env = { ...process.env, HOME: user, USERPROFILE: user, REIN_OS_ANDROID_RELEASE: "16" };
+	await assert.rejects(exec(process.execPath, [runner, "--check"], { env }), /app-private/);
+});
+
+test("payload paths may contain @ (retina asset names)", async t => {
+	const f = await fixture(t);
+	await writeFile(join(f.root, "apps/klaud/tray-ready@2x.png"), "fixture-retina");
+	const output = join(f.base, "kit-at");
+	const kit = await prepareReinOS({ output, bundleRoot: f.root, target: "android" });
+	assert.ok(kit.manifest.files.some(entry => entry.path === "apps/klaud/tray-ready@2x.png"), "the @2x asset ships in the manifest");
+	const runner = join(f.base, "android-at.mjs");
+	await writeFile(runner, `Object.defineProperty(process,'platform',{value:'android'}); const {main}=await import(${JSON.stringify(pathToFileURL(join(output, "install-android.mjs")).href)}); await main(["--check"]);`);
+	const home = join(f.base, "data/data/com.termux/files/home");
+	await mkdir(home, { recursive: true });
+	const env = { ...process.env, HOME: home, REIN_OS_ANDROID_HOME: "1", REIN_OS_ANDROID_RELEASE: "16" };
+	const check = await exec(process.execPath, [runner], { env });
+	assert.match(check.stdout, /REIN_OS_TARGET_READY/);
+});

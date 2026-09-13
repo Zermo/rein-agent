@@ -1654,6 +1654,7 @@ var init_catalog = __esm({
 // src/hardware/profile.ts
 var profile_exports = {};
 __export(profile_exports, {
+  androidFacts: () => androidFacts,
   appleBandwidth: () => appleBandwidth,
   gb: () => gb,
   limitContainerMemory: () => limitContainerMemory,
@@ -1892,6 +1893,38 @@ async function profileLinux() {
     notes
   };
 }
+function androidFacts(env = process.env) {
+  const release3 = env["ro.build.version.release"]?.trim() || void 0;
+  const model = env["ro.product.model"]?.trim() || void 0;
+  return { release: release3, model };
+}
+async function profileAndroid() {
+  const meminfo = parseKV(await read("/proc/meminfo") ?? "");
+  const total = num(meminfo.MemTotal) != null ? num(meminfo.MemTotal) * 1024 : os.totalmem();
+  const available = num(meminfo.MemAvailable) != null ? num(meminfo.MemAvailable) * 1024 : num(meminfo.MemFree) != null ? num(meminfo.MemFree) * 1024 : os.freemem();
+  const cpuinfo = await read("/proc/cpuinfo");
+  const blocks = (cpuinfo ?? "").split(/\n\s*\n/).map(parseKV);
+  const cores = blocks.filter((b) => b.processor != null).length || os.cpus().length;
+  const flags = (blocks.find((b) => b.flags || b.Features)?.flags ?? blocks.find((b) => b.Features)?.Features ?? "").split(/\s+/);
+  const facts = androidFacts();
+  const notes = ["Physical GPU memory (Adreno/Mali) is not independently probed on Android userland; missing GPU data does not establish that no accelerator exists."];
+  if (facts.model) notes.push(`Device model per ro.product.model: ${facts.model}.`);
+  if (facts.release) notes.push(`Android release per ro.build.version.release: ${facts.release}.`);
+  return {
+    os: "android",
+    arch: process.arch,
+    cpu: {
+      name: blocks.find((b) => b["model name"])?.["model name"] ?? blocks.find((b) => b.Hardware)?.Hardware ?? os.cpus()[0]?.model ?? "Android CPU",
+      cores,
+      physicalCores: cores,
+      features: ["asimd", "fp", "neon"].filter((f) => flags.includes(f))
+    },
+    ram: { totalBytes: total, availableBytes: Math.min(available, total) },
+    gpus: [],
+    unifiedMemory: false,
+    notes
+  };
+}
 async function profileOther() {
   return {
     os: `${os.platform()} (${os.release()})`,
@@ -1906,6 +1939,7 @@ async function profileOther() {
 async function profileHardware() {
   if (process.platform === "darwin") return profileDarwin();
   if (process.platform === "linux") return profileLinux();
+  if (process.platform === "android") return profileAndroid();
   return profileOther();
 }
 function gb(bytes, digits = 0) {
@@ -5223,7 +5257,7 @@ Run rein hardware for catalog recommendations and rein models for API discovery.
 function dareechoStack(profile, options = {}) {
   const agent = { tier: "agent", name: "rein-agent", runs: "CLI agent, always-running gateway (rein serve), bots, tmux harness", status: "included" };
   const gui = profile.os === "darwin" ? { tier: "gui", name: "rein-kla\u028Ad", runs: "published macOS app connects to rein serve (bot mode)", status: "app" } : { tier: "gui", name: "rein-kla\u028Ad", runs: "app source ships in the kit; a validated runtime for this platform is a gate", status: "gate" };
-  const os7 = options.chromeos ? { tier: "os", name: "Dareecho", runs: "userland kit with OS identity; the verified ChromeOS root stays ChromeOS", status: "included" } : profile.os === "linux" && profile.arch === "x64" ? { tier: "os", name: "Dareecho", runs: "clean-install kit: pinned Omarchy base + full userland + OS identity", status: "included" } : profile.os === "darwin" ? { tier: "os", name: "Dareecho", runs: "native macOS host path; the Dareecho OS kit targets x86-64 Linux", status: "gate" } : { tier: "os", name: "Dareecho", runs: "no OS kit for this platform yet", status: "gate" };
+  const os7 = options.chromeos ? { tier: "os", name: "Dareecho", runs: "userland kit with OS identity; the verified ChromeOS root stays ChromeOS", status: "included" } : options.android || profile.os === "android" ? { tier: "os", name: "Dareecho", runs: "userland kit with OS identity; the verified Android root stays Android", status: "included" } : profile.os === "linux" && profile.arch === "x64" ? { tier: "os", name: "Dareecho", runs: "clean-install kit: pinned Omarchy base + full userland + OS identity", status: "included" } : profile.os === "darwin" ? { tier: "os", name: "Dareecho", runs: "native macOS host path; the Dareecho OS kit targets x86-64 Linux", status: "gate" } : { tier: "os", name: "Dareecho", runs: "no OS kit for this platform yet", status: "gate" };
   return [agent, gui, os7];
 }
 function planReinOS(profile, options = {}) {
@@ -5233,8 +5267,9 @@ function planReinOS(profile, options = {}) {
   const mode = options.mode ?? "host";
   if (mode !== "host" && mode !== "image") throw new Error("OS mode must be host or image.");
   const chromeos = options.chromeos === true;
+  const android = options.android === true || profile.os === "android";
   const platform2 = { os: profile.os, arch: profile.arch };
-  const recognized = ["darwin", "linux", "win32"].includes(profile.os) && ["x64", "arm64"].includes(profile.arch);
+  const recognized = ["darwin", "linux", "win32", "android"].includes(profile.os) && ["x64", "arm64"].includes(profile.arch);
   const apple = profile.os === "darwin" && profile.arch === "arm64";
   const plan = {
     schemaVersion: 1,
@@ -5243,14 +5278,14 @@ function planReinOS(profile, options = {}) {
     status: recognized ? "candidate" : "unsupported",
     adapter: "unsupported",
     runtimes: [],
-    stack: dareechoStack(profile, { chromeos }),
+    stack: dareechoStack(profile, { chromeos, android }),
     facts: [],
     gates: [],
     next: [],
     sources: []
   };
   if (mode === "host") {
-    plan.adapter = !recognized ? "unsupported" : profile.os === "darwin" ? "macos-native" : profile.os === "win32" ? "windows-with-wsl2" : "linux-native";
+    plan.adapter = !recognized ? "unsupported" : profile.os === "darwin" ? "macos-native" : profile.os === "win32" ? "windows-with-wsl2" : profile.os === "android" ? "android-userland" : "linux-native";
     plan.runtimes = !recognized ? [] : apple ? ["MLX", "llama.cpp (Metal)", "existing OpenAI-compatible server"] : ["llama.cpp", "existing OpenAI-compatible server"];
     if (recognized && profile.os === "linux" && profile.gpus.some((gpu) => gpu.vendor === "nvidia" || gpu.vendor === "amd")) {
       plan.runtimes.push("vLLM (verify GPU, driver, and runtime compatibility)");
@@ -5276,6 +5311,18 @@ function planReinOS(profile, options = {}) {
       );
       plan.sources.push("https://chromium.googlesource.com/chromiumos/docs/+/HEAD/developer_mode.md");
       plan.next = ["rein export presets --to <external-drive>", "rein os prepare --target chromeos --output ./rein-os-kit"];
+    }
+    if (android && recognized && profile.os === "android") {
+      plan.adapter = "android-userland";
+      plan.facts.push("Android reports as android to the harness. The overlay installs only into the app user's home (e.g. Termux under /data/data); the verified-boot base, system partitions, and other apps stay untouched.");
+      plan.facts.push("Android app data lives under /data/data/<package> and /sdcard; copy what is yours to an external drive before any OS-level change.");
+      plan.gates.push(
+        { id: "userland", status: "required", detail: "Confirm a persistent shell userland (Termux) with a Node 18+ environment and a writable app-private home." },
+        { id: "model-endpoint", status: "required", detail: "Point REIN_BASE_URL at a reachable LAN or cloud model server; the phone does not host one." },
+        { id: "backup", status: "required", detail: "Copy the app's private files and /sdcard to an external drive before any OS-level change." }
+      );
+      plan.sources.push("https://termux.dev/docs");
+      plan.next = ["rein os prepare --target android --output ./rein-os-kit"];
     }
     plan.gates.push(
       { id: "dependencies", status: recognized ? "required" : "blocked", detail: recognized ? "Verify Node, Git, Bash, tmux, Python, and zstd in the actual execution environment." : "No Dareecho host adapter is defined for this OS and architecture." },
@@ -5506,7 +5553,7 @@ async function prepareReinOS(options) {
   validPath(options.output);
   if (options.bundleRoot !== void 0) validPath(options.bundleRoot);
   const target = options.target ?? "omarchy";
-  if (target !== "omarchy" && target !== "chromeos") throw new Error("--target must be omarchy or chromeos.");
+  if (target !== "omarchy" && target !== "chromeos" && target !== "android") throw new Error("--target must be omarchy, chromeos, or android.");
   const output = resolve8(options.output);
   const root2 = options.bundleRoot === void 0 ? await sourceRoot() : resolve8(options.bundleRoot);
   await realpath3(dirname5(output));
@@ -5547,9 +5594,9 @@ async function prepareReinOS(options) {
   payload.set("package.json", Buffer.from(JSON.stringify({ name: "rein-agent", version: pkg.version, type: "module", engines: { node: ">=18" } }, null, 2) + "\n"));
   const manifest3 = {
     schemaVersion: 1,
-    kind: target === "omarchy" ? "omarchy-post-install-overlay" : "chromeos-user-overlay",
+    kind: target === "omarchy" ? "omarchy-post-install-overlay" : target === "chromeos" ? "chromeos-user-overlay" : "android-user-overlay",
     bootable: false,
-    target: target === "omarchy" ? "linux-x64" : "chromeos",
+    target: target === "omarchy" ? "linux-x64" : target === "chromeos" ? "chromeos" : "android",
     reinVersion: pkg.version,
     ...target === "omarchy" ? { omarchy: OMARCHY_BASE } : {},
     argent: ARGENT_BASE,
@@ -5570,9 +5617,12 @@ async function prepareReinOS(options) {
       await put("install-overlay.mjs", INSTALL_OVERLAY);
       await put("fetch-upstream.mjs", FETCH_UPSTREAM);
       await put("README.md", KIT_README.replace("{{REIN_VERSION}}", pkg.version));
-    } else {
+    } else if (target === "chromeos") {
       await put("install-chromeos.mjs", INSTALL_CHROMEOS);
       await put("README.md", CHROMEOS_README);
+    } else {
+      await put("install-android.mjs", INSTALL_ANDROID);
+      await put("README.md", ANDROID_README);
     }
     await put("manifest.json", JSON.stringify(manifest3, null, 2) + "\n");
   } catch {
@@ -5580,7 +5630,7 @@ async function prepareReinOS(options) {
   }
   return { output, manifest: manifest3, files };
 }
-var OS_THEME_FILES, OS_SKIN_FILES, OS_APP_FILES, REQUIRED, VENDOR, sha, INSTALL_OVERLAY, FETCH_UPSTREAM, INSTALL_CHROMEOS, CHROMEOS_README, KIT_README;
+var OS_THEME_FILES, OS_SKIN_FILES, OS_APP_FILES, REQUIRED, VENDOR, sha, INSTALL_ANDROID, ANDROID_README, INSTALL_OVERLAY, FETCH_UPSTREAM, INSTALL_CHROMEOS, CHROMEOS_README, KIT_README;
 var init_prepare = __esm({
   "src/os/prepare.ts"() {
     init_plan();
@@ -5592,6 +5642,121 @@ var init_prepare = __esm({
     REQUIRED = ["dist/rein.js", "dist/meat-worker.js", "vendor/meat/meat.wasm.gz", "vendor/meat/wasm_exec.cjs", "LICENSE", ...OS_THEME_FILES, ...OS_SKIN_FILES, ...OS_APP_FILES];
     VENDOR = ["meat", "mattpocock", "ponytail", "unlazy", "obscura", "fold", "pi-posthorse"];
     sha = (data) => createHash4("sha256").update(data).digest("hex");
+    INSTALL_ANDROID = String.raw`import { createHash } from 'node:crypto';
+import { lstat, readFile, mkdir, writeFile, realpath } from 'node:fs/promises';
+import { dirname, resolve, join } from 'node:path';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+const kit = dirname(fileURLToPath(import.meta.url));
+const fail = message => { throw new Error(message); };
+async function absent(path) {
+  try { await lstat(path); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  fail('Destination already exists; it was preserved: ' + path);
+}
+export function androidUserHome(home, allowStaging = false) {
+  if (/^\/data\/(?:data\/|user\/\d+\/)com\.[A-Za-z0-9_.]+\/files\/home$/.test(home)) return home;
+  if (allowStaging && /\/com\.[A-Za-z0-9_.]+\/files\/home$/.test(home)) return home;
+  fail('Run this as the Android app user; its home must be an app-private userland home under /data/.../files/home.');
+}
+export function validateTarget(platform, arch, release) {
+  if (platform !== 'android') fail('Apply this overlay only on an Android device userland (for example Termux).');
+  if (arch !== 'arm64') fail('This kit targets aarch64 Android.');
+  if (!/^\d{1,2}(\.\d+)?$/.test((release || '').trim())) fail('This kit targets Android; the device must report its release (ro.build.version.release).');
+}
+async function verifyPayload() {
+  const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
+  if (manifest.schemaVersion !== 1 || manifest.kind !== 'android-user-overlay' || manifest.target !== 'android' || manifest.bootable !== false || !Array.isArray(manifest.files) || !manifest.argent || !manifest.rainmeter) fail('Invalid Android kit manifest.');
+  const seen = new Set();
+  const result = [];
+  const payloadRoot = await lstat(join(kit, 'payload'));
+  if (!payloadRoot.isDirectory() || payloadRoot.isSymbolicLink()) fail('Payload must be a regular directory.');
+  for (const entry of manifest.files) {
+    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+@/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
+    seen.add(entry.path);
+    let path = join(kit, 'payload');
+    for (const part of entry.path.split('/')) {
+      path = join(path, part);
+      if ((await lstat(path)).isSymbolicLink()) fail('Payload links are not accepted.');
+    }
+    const stat = await lstat(path);
+    if (!stat.isFile() || stat.size !== entry.bytes || stat.size > 128 * 1024 * 1024) fail('Payload size/type mismatch: ' + entry.path);
+    const data = await readFile(path);
+    if (createHash('sha256').update(data).digest('hex') !== entry.sha256) fail('Payload checksum mismatch: ' + entry.path);
+    result.push([entry.path, data]);
+  }
+  for (const name of ['dist/rein.js', 'dist/meat-worker.js', 'vendor/meat/meat.wasm.gz', 'vendor/meat/wasm_exec.cjs', 'package.json', 'LICENSE', 'src/os/assets/rain/theme.json', 'src/os/assets/rain/wallpaper.svg', 'src/os/assets/skins/dareecho.ini', 'apps/klaud/main.mjs']) if (!seen.has(name)) fail('Required payload missing: ' + name);
+  return result;
+}
+export async function main(args) {
+  if (args.length !== 1 || !['--help', '--verify', '--check', '--install'].includes(args[0])) fail('Usage: node install-android.mjs --verify | --check | --install');
+  if (args[0] === '--help') { console.log('Dareecho Android userland. Verify checks the exported files; check validates the device; install creates a new app-local Dareecho installation with its OS identity. No model downloads, setup, or services are started.'); return; }
+  const files = await verifyPayload();
+  if (args[0] === '--verify') { console.log('REIN_OS_PAYLOAD_OK'); return; }
+  const userHome = androidUserHome(homedir(), Boolean(process.env.REIN_OS_ANDROID_HOME));
+  const release = (process.env['ro.build.version.release'] || process.env.REIN_OS_ANDROID_RELEASE || '').trim();
+  validateTarget(process.platform, process.arch, release);
+  const model = (process.env['ro.product.model'] || '').trim();
+  const baseVersion = release + (model ? ' ' + model : '');
+  const destination = join(userHome, '.local/share/rein-os');
+  const launcher = join(userHome, '.local/bin/rein');
+  const identity = join(userHome, '.local/bin/dareecho');
+  await absent(destination);
+  await absent(launcher);
+  await absent(identity);
+  if (args[0] === '--check') { console.log('REIN_OS_TARGET_READY'); return; }
+  const manifest = JSON.parse(await readFile(join(kit, 'manifest.json'), 'utf8'));
+  await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+  await mkdir(dirname(launcher), { recursive: true, mode: 0o700 });
+  await mkdir(destination, { mode: 0o700 });
+  for (const [relative, data] of files) {
+    const path = join(destination, relative);
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await writeFile(path, data, { flag: 'wx', mode: 0o600 });
+  }
+  const entry = join(destination, 'dist/rein.js');
+  const wrapper = '#!/usr/bin/env node\n' + 'import("node:child_process").then(({spawn})=>{\n' + 'const child=spawn(process.execPath,[' + JSON.stringify(entry) + ',...process.argv.slice(2)],{stdio:"inherit"});\n' + 'child.on("error",e=>{console.error(e.message);process.exitCode=1});\nchild.on("exit",(code,signal)=>{if(signal)process.kill(process.pid,signal);else process.exitCode=code??1});\n});\n';
+  await writeFile(launcher, wrapper, { flag: 'wx', mode: 0o700 });
+  await writeFile(join(destination, 'dareecho-release'), JSON.stringify({ name: 'Dareecho', version: manifest.reinVersion, base: { name: 'Android', installed: baseVersion }, pins: { argent: manifest.argent, rainmeter: manifest.rainmeter } }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  const dareechoScript = '#!/usr/bin/env node\n' + 'import("node:fs/promises").then(({readFile})=>{readFile((process.env.HOME||"") + "/.local/share/rein-os/dareecho-release", "utf8").then(text=>{const release=JSON.parse(text);if(process.argv[2]==="--json"){console.log(JSON.stringify(release,null,2));}else{console.log(release.name+" "+release.version+" (base: "+release.base.name+" "+release.base.installed+")");}}).catch(error=>{console.error("Dareecho installation not found: "+error.message);process.exitCode=1;});});\n';
+  await writeFile(identity, dareechoScript, { flag: 'wx', mode: 0o700 });
+  console.log('REIN_OS_ANDROID_INSTALLED\nThe user now identifies as Dareecho. Run ~/.local/bin/dareecho for the OS identity, then ~/.local/bin/rein --version and ~/.local/bin/rein setup. Your Android base, verified boot, and other apps are untouched.');
+}
+const invoked = process.argv[1] && await realpath(process.argv[1]).catch(() => '');
+if (invoked === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
+`;
+    ANDROID_README = `# Dareecho Android userland kit
+
+Staged ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}
+Target: aarch64 Android device userland (for example Termux). The Android base, verified boot, and other apps stay untouched; Dareecho installs only into the app user's private home.
+Bootable: no. This is a userland kit, not an OS image.
+
+## What this kit is
+The full offline Dareecho payload (the terminal skin engine, the Argent device toolkit, the rain motif, the OS identity files) plus an explicit, read-then-write Android userland installer. It stages a new app-local Dareecho installation with its OS identity, and never modifies the Android base.
+
+## Before you start
+- Install Termux (F-Droid), then: pkg install nodejs (Node 18+), git, curl, tmux, python, zstd.
+- This phone does not host a model server. Point REIN_BASE_URL at a reachable LAN or cloud OpenAI-compatible endpoint before rein setup.
+- Android app data lives under /data/data/<package> and /sdcard. Copy what is yours to an external drive before any OS-level change.
+
+## How to run it
+1. Copy this kit directory to the phone (for example ~/rein-os-kit).
+2. Verify the export, then check the device:
+   node install-android.mjs --verify
+   node install-android.mjs --check
+   The check verifies the machine identifies as Android (platform android, aarch64, ro.build.version.release) with an app-private home under /data/.../files/home. On a staging host, REIN_OS_ANDROID_HOME and REIN_OS_ANDROID_RELEASE override those two facts.
+3. Install:
+   node install-android.mjs --install
+4. Confirm the identity and the agent:
+   ~/.local/bin/dareecho
+   ~/.local/bin/rein --version
+   ~/.local/bin/rein setup
+
+## Guarantees
+- Nothing runs until you say install.
+- The installer verifies every payload file against the manifest before writing.
+- It refuses to start if the destination already exists; existing files are preserved.
+- It writes only under the app user's private home; the system partitions and verified boot are not touched.
+`;
     INSTALL_OVERLAY = String.raw`import { createHash } from 'node:crypto';
 import { lstat, readFile, mkdir, writeFile, realpath } from 'node:fs/promises';
 import { dirname, resolve, join } from 'node:path';
@@ -5623,7 +5788,7 @@ async function verifyPayload() {
   const payloadRoot = await lstat(join(kit, 'payload'));
   if (!payloadRoot.isDirectory() || payloadRoot.isSymbolicLink()) fail('Payload must be a regular directory.');
   for (const entry of manifest.files) {
-    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
+    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+@/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
     seen.add(entry.path);
     let path = join(kit, 'payload');
     for (const part of entry.path.split('/')) {
@@ -5727,7 +5892,7 @@ async function verifyPayload() {
   const payloadRoot = await lstat(join(kit, 'payload'));
   if (!payloadRoot.isDirectory() || payloadRoot.isSymbolicLink()) fail('Payload must be a regular directory.');
   for (const entry of manifest.files) {
-    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
+    if (typeof entry.path !== 'string' || !/^[a-zA-Z0-9_.+@/-]+$/.test(entry.path) || entry.path.startsWith('/') || entry.path.split('/').some(p => !p || p === '.' || p === '..') || seen.has(entry.path) || !/^[a-f0-9]{64}$/.test(entry.sha256)) fail('Invalid payload manifest entry.');
     seen.add(entry.path);
     let path = join(kit, 'payload');
     for (const part of entry.path.split('/')) {
@@ -7378,16 +7543,18 @@ async function runOSCommand(args, flags = {}, deps = {}) {
       } catch {
       }
     }
-    const plan = (deps.plan ?? planReinOS)(hardware, { mode, chromeos });
+    const android = mode === "host" && hardware.os === "android";
+    const plan = (deps.plan ?? planReinOS)(hardware, { mode, chromeos, android });
     log(flags.json === true ? JSON.stringify(plan, null, 2) : formatReinOSPlan(plan));
     return;
   }
   if (action === "prepare") {
     if (typeof flags.output !== "string" || !flags.output.trim() || /[\x00-\x1f\x7f]/.test(flags.output)) throw new Error("--output requires a new directory path.");
-    if (flags.target !== void 0 && flags.target !== "omarchy" && flags.target !== "chromeos") throw new Error("--target must be omarchy or chromeos.");
+    if (flags.target !== void 0 && flags.target !== "omarchy" && flags.target !== "chromeos" && flags.target !== "android") throw new Error("--target must be omarchy, chromeos, or android.");
     const kit = await (deps.prepare ?? prepareReinOS)({ output: flags.output, target: flags.target });
     log(flags.json === true ? JSON.stringify(kit, null, 2) : kit.manifest.target === "chromeos" ? `Prepared Dareecho ChromeOS kit: ${kit.output}
-Follow its README in an arc shell as the chronos user. The verified root and A/B partitions are not touched.` : `Prepared Dareecho VM kit: ${kit.output}
+Follow its README in an arc shell as the chronos user. The verified root and A/B partitions are not touched.` : kit.manifest.target === "android" ? `Prepared Dareecho Android kit: ${kit.output}
+Follow its README in Termux as the app user. The Android base, verified boot, and other apps are not touched.` : `Prepared Dareecho VM kit: ${kit.output}
 Follow its README before booting or installing a VM. No operating system or service was changed.`);
     return;
   }
@@ -7407,9 +7574,10 @@ var init_command2 = __esm({
     HELP = `Dareecho development
 
   rein os plan [--mode host|image] [--json]   assess this machine and show installation gates
-  rein os prepare --output <new-directory> [--target omarchy|chromeos]
-                                           stage a pinned Omarchy VM overlay kit, or the
-                                           ChromeOS userland kit (default target: omarchy)
+  rein os prepare --output <new-directory> [--target omarchy|chromeos|android]
+                                           stage a pinned Omarchy VM overlay kit, the
+                                           ChromeOS userland kit, or the Android userland kit
+(default target: omarchy)
   rein os factory setup|start|dev|stop|status|open
                                            Mastra Factory on this machine: install once,
                                            then drive the shared server (run rein os factory help)
@@ -18407,6 +18575,48 @@ async function learnMachine(deps = {}) {
       { id: "secure-boot", status: secureboot.ok ? "verified" : "required", detail: `Secure Boot ${secureboot.ok ? sbOn ? "enabled" : "disabled" : "unknown"}.` },
       { id: "tpm", status: tpm.ok ? "verified" : "required", detail: `TPM ${tpm.ok ? firstLine(tpm.stdout) : "state unknown"}.` }
     );
+  } else if (platform2 === "android") {
+    const [uname, meminfo, cpuinfo, model, release3, packages, termux] = await Promise.all([
+      out("uname", "uname", ["-sr"]),
+      (async () => {
+        const text = await read2("/proc/meminfo");
+        probes.push({ id: "meminfo", command: "/proc/meminfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
+        return text;
+      })(),
+      (async () => {
+        const text = await read2("/proc/cpuinfo");
+        probes.push({ id: "cpuinfo", command: "/proc/cpuinfo", ok: text !== void 0, detail: text ? firstLine(text) : "missing" });
+        return text;
+      })(),
+      out("model", "getprop", ["ro.product.model"]),
+      out("release", "getprop", ["ro.build.version.release"]),
+      out("packages", "pm", ["list", "packages"]),
+      out("termux", "ls", ["/data/data/com.termux"])
+    ]);
+    const roRelease = (release3.ok ? firstLine(release3.stdout) : void 0) ?? (process.env["ro.build.version.release"]?.trim() || void 0);
+    const roModel = (model.ok ? firstLine(model.stdout) : void 0) ?? (process.env["ro.product.model"]?.trim() || void 0);
+    machine.os = "android";
+    machine.release = roRelease ? `Android ${roRelease}` : "unknown";
+    machine.model = roModel ?? "unknown";
+    const mem = /MemTotal:\s+(\d+)\s*kB/.exec(meminfo ?? "")?.[1];
+    machine.ramBytes = mem ? Number(mem) * 1024 : void 0;
+    machine.cpu = `${(cpuinfo ?? "").split("\n").map((l) => l.trim()).filter((l) => l.startsWith("processor")).length || "?"} logical cores, aarch64`;
+    machine.kernel = uname.stdout.trim().split(" ").slice(-1)[0] ?? void 0;
+    machine.virtualized = "physical";
+    const termuxOk = termux.ok;
+    bootChain.push(
+      { stage: "bootrom", trust: "immutable", notes: "Per-board ROM; not updatable through the OS." },
+      { stage: "firmware", trust: "oem-signed", notes: "Android bootloader (ABOOT); updates arrive through OTA." },
+      { stage: "verified-boot", trust: "AVB verified boot", notes: "Android Verified Boot signs boot and system partitions; the userland overlay must not touch them." },
+      { stage: "kernel", trust: "oem-signed", evidence: "uname", notes: machine.kernel ?? "release unknown." },
+      { stage: "userland", trust: "app-private UID sandbox", evidence: termuxOk ? "/data/data/com.termux" : void 0, notes: `Termux ${termuxOk ? "present" : "not read"}; app data stays under /data/data/<package>, invisible to other apps. ${packages.ok ? "Package list recorded." : "Package list not read."}` }
+    );
+    gates.push(
+      { id: "android-release", status: roRelease ? "verified" : "required", detail: roRelease ? `Android ${roRelease} read.` : "Android release not read; identify the device before planning." },
+      { id: "verified-boot", status: "verified", detail: "Android Verified Boot is a base-system invariant; the overlay installs only into the app user's private home." },
+      { id: "userland", status: termuxOk ? "verified" : "required", detail: termuxOk ? "Termux userland present; the overlay has a persistent home." : "Termux not found; install it (F-Droid) before an overlay pass." },
+      { id: "backup", status: "required", detail: "Copy the app's private files and /sdcard to an external drive before any OS-level change." }
+    );
   } else {
     notes.push(`No learn pass is defined for platform "${platform2}"; structure only.`);
     gates.push({ id: "platform", status: "blocked", detail: `No Dareecho learn adapter for "${platform2}".` });
@@ -20724,7 +20934,7 @@ Usage:
   rein hardware [--json]        model fit and serving recipes for this machine
     --context <tokens>          plan the recipe's context memory
     --focus everyday|coding|ops|research|creative   choose task-oriented recommendations
-  rein learn [--json]           read-only learn pass on this machine (macOS/Windows/Linux, any arch)
+  rein learn [--json]           read-only learn pass on this machine (macOS/Windows/Linux/Android, any arch)
                                 writes a new dossier directory under ~/.rein/redteam/
   rein learn ios [--udid U]     learn an attached iOS device via libimobiledevice
     --output <new-directory>    write the dossier to a new directory of your choice

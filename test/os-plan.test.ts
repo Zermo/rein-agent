@@ -93,3 +93,17 @@ test("the full Rein system is three tiers: agent, GUI, and OS", () => {
 	assert.deepEqual(plan.stack.map(tier => tier.tier), ["agent", "gui", "os"]);
 	assert.match(formatReinOSPlan(plan), /rein-kla\u028ad/);
 });
+
+test("Android planning uses the userland adapter and gates userland, model endpoint, and backup", () => {
+	const plan = planReinOS(profile("android", "arm64"));
+	assert.equal(plan.status, "candidate");
+	assert.equal(plan.adapter, "android-userland");
+	assert.equal(dareechoStack({ os: "android", arch: "arm64" })[2].status, "included");
+	assert.match(dareechoStack({ os: "android", arch: "arm64" })[2].runs, /verified Android root stays Android/);
+	const gateIds = plan.gates.map(gate => gate.id);
+	for (const id of ["userland", "model-endpoint", "backup"]) assert.ok(gateIds.includes(id), `missing gate ${id}`);
+	assert.match(plan.facts.join("\n"), /verified-boot base, system partitions, and other apps stay untouched/);
+	assert.ok(plan.next.includes("rein os prepare --target android --output ./rein-os-kit"));
+	assert.ok(plan.sources.includes("https://termux.dev/docs"));
+	assert.equal(planReinOS(profile("android", "arm64"), { mode: "image" }).status, "unsupported");
+});

@@ -90,7 +90,7 @@ Usage:
   rein hardware [--json]        model fit and serving recipes for this machine
     --context <tokens>          plan the recipe's context memory
     --focus everyday|coding|ops|research|creative   choose task-oriented recommendations
-  rein learn [--json]           read-only learn pass on this machine (macOS/Windows/Linux, any arch)
+  rein learn [--json]           read-only learn pass on this machine (macOS/Windows/Linux/Android, any arch)
                                 writes a new dossier directory under ~/.rein/redteam/
   rein learn ios [--udid U]     learn an attached iOS device via libimobiledevice
     --output <new-directory>    write the dossier to a new directory of your choice

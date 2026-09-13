@@ -357,7 +357,7 @@ rein export <paths…> --to D   exactly the paths you name.
 
 rein os plan [--json]         assess this machine and show installation gates (read-only)
 rein os prepare --output D    stage a pinned Omarchy VM overlay kit, or the ChromeOS
-                              userland kit (--target omarchy|chromeos)
+                              userland kit (--target omarchy|chromeos|android)
 rein os rain [--animate]      preview the rain motif in this terminal (static by default)
 rein os rainmeter [--json]    Rainmeter rebuild report: pin, mapping, gates
 rein os skin render|install|list   render, stage, and list Rainmeter-model skins

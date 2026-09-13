@@ -205,6 +205,32 @@ export async function profileLinux(): Promise<HardwareProfile> {
 		ram, gpus, unifiedMemory: nvidia.some(g => g.sharedMemory), notes,
 	};
 }
+/** Android device properties; injected for tests. */
+export function androidFacts(env: Record<string, string | undefined> = process.env): { release?: string; model?: string } {
+	const release = env["ro.build.version.release"]?.trim() || undefined;
+	const model = env["ro.product.model"]?.trim() || undefined;
+	return { release, model };
+}
+async function profileAndroid(): Promise<HardwareProfile> {
+	const meminfo = parseKV((await read("/proc/meminfo")) ?? "");
+	const total = num(meminfo.MemTotal) != null ? num(meminfo.MemTotal)! * 1024 : os.totalmem();
+	const available = num(meminfo.MemAvailable) != null ? num(meminfo.MemAvailable)! * 1024 : num(meminfo.MemFree) != null ? num(meminfo.MemFree)! * 1024 : os.freemem();
+	const cpuinfo = await read("/proc/cpuinfo");
+	const blocks = (cpuinfo ?? "").split(/\n\s*\n/).map(parseKV);
+	const cores = blocks.filter(b => b.processor != null).length || os.cpus().length;
+	const flags = (blocks.find(b => b.flags || b.Features)?.flags ?? blocks.find(b => b.Features)?.Features ?? "").split(/\s+/);
+	const facts = androidFacts();
+	const notes = ["Physical GPU memory (Adreno/Mali) is not independently probed on Android userland; missing GPU data does not establish that no accelerator exists."];
+	if (facts.model) notes.push(`Device model per ro.product.model: ${facts.model}.`);
+	if (facts.release) notes.push(`Android release per ro.build.version.release: ${facts.release}.`);
+	return {
+		os: "android", arch: process.arch,
+		cpu: { name: blocks.find(b => b["model name"])?.["model name"] ?? blocks.find(b => b.Hardware)?.Hardware ?? os.cpus()[0]?.model ?? "Android CPU",
+			cores, physicalCores: cores, features: ["asimd", "fp", "neon"].filter(f => flags.includes(f)) },
+		ram: { totalBytes: total, availableBytes: Math.min(available, total) },
+		gpus: [], unifiedMemory: false, notes,
+	};
+}
 async function profileOther(): Promise<HardwareProfile> {
 	return {
 		os: `${os.platform()} (${os.release()})`, arch: os.arch(),
@@ -219,6 +245,7 @@ async function profileOther(): Promise<HardwareProfile> {
 export async function profileHardware(): Promise<HardwareProfile> {
 	if (process.platform === "darwin") return profileDarwin();
 	if (process.platform === "linux") return profileLinux();
+	if (process.platform === "android") return profileAndroid();
 	return profileOther();
 }
 export function gb(bytes: number, digits = 0): string {
