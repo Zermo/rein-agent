@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "dareecho-base-aarch64-s25ultra",
+  "displayName": "Dareecho base (aarch64, Galaxy S25 Ultra)",
+  "architecture": "aarch64",
+  "base": {
+    "name": "omarchy",
+    "pinned": {
+      "repository": "https://github.com/omacom/omarchy.git",
+      "tag": "v4.0.2",
+      "commit": "346e69e1cec6c4e8924531874af6ba010a1bc99e"
+    },
+    "family": "archlinux",
+    "port": "archlinuxarm",
+    "portArch": "aarch64"
+  },
+  "device": {
+    "model": "SM-S938U",
+    "name": "Galaxy S25 Ultra (US)",
+    "soc": { "model": "SM8750", "vendor": "Qualcomm", "board": "sun" },
+    "gpu": { "name": "Adreno", "api": ["vulkan", "egl"] },
+    "display": { "width": 1440, "height": 3120, "density": 600 },
+    "ramBytes": 11986704384,
+    "storageBytes": 220200461312,
+    "abi": "arm64-v8a"
+  },
+  "osUnderTest": {
+    "name": "Android",
+    "release": "16",
+    "sdk": 36,
+    "kernel": "6.6",
+    "fingerprint": "samsung/pa3qsqw/pa3q:16/BP4A.251205.006/S938USQSCCZF9_OYNCCZF9:user/release-keys"
+  },
+  "boot": {
+    "scheme": "ab",
+    "activeSlot": "_a",
+    "targetSlot": "_b",
+    "avb": "1.3",
+    "verifiedBoot": "green",
+    "locked": true,
+    "oemUnlockSupported": false,
+    "selinux": "enforcing",
+    "encryption": "file"
+  },
+  "userland": {
+    "name": "rein",
+    "portable": true,
+    "requires": { "node": ">=18" },
+    "components": ["harness", "meat-wasm", "factory-ui", "os-identity"]
+  },
+  "gates": [
+    { "id": "bootloader-unlock", "status": "blocked", "note": "S938U (US): ro.oem_unlock_supported empty; Samsung does not offer an OEM-unlock path on this model. Access gate for the whole swap." },
+    { "id": "kernel-sm8750", "status": "gate", "note": "aarch64 mainline kernel with the SM8750/'sun' platform enabled." },
+    { "id": "gpu-adreno", "status": "gate", "note": "msm_gpu/freedreno + firmware for this Adreno; 2D/3D acceleration bring-up." },
+    { "id": "display-dsi", "status": "gate", "note": "msm-drm DPU + DSI panel bring-up for 1440x3120." },
+    { "id": "avb-signing", "status": "gate", "note": "signed vbmeta + A/B partitions; verified boot green must be satisfied or the slot rejected." },
+    { "id": "modem-telephony", "status": "gate", "note": "Qualcomm X modem + RIL; call/SMS/data. Non-blocking for the OS swap, blocking for a daily driver." }
+  ],
+  "sources": [
+    "https://archlinuxarm.org",
+    "https://kernel.org",
+    "https://avb.dev",
+    "https://source.android.com/docs/core/architecture"
+  ]
+}
