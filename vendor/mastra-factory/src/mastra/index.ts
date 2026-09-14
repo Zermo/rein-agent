@@ -126,12 +126,29 @@ if (redisUrl) {
 //      supported combination.
 //   4. Nothing configured — leave undefined and MastraFactory installs its
 //      platform-backed default provider.
+// Local single-operator identity. In MASTRACODE_AUTH_DISABLED mode the Factory
+// still requires a resolved tenant (user + org) for its data routes — "no
+// provider" 401s them. A stable local operator (no external sign-in) makes the
+// single-machine setup work: the studio runs as the Dareecho operator.
+class LocalOperatorAuth implements IMastraAuthProvider {
+  readonly name = 'local-operator';
+  async authenticateToken(_token: string, _request: unknown) {
+    return { id: 'local', name: 'Dareecho', email: 'local@dareecho.local', organizationId: 'local' };
+  }
+  authorizeUser(_user: unknown, _request: unknown) {
+    return true;
+  }
+  mapUserToResourceId(user: { id?: string } | null) {
+    return user?.id ?? undefined;
+  }
+}
+
 const authDisabled = process.env.MASTRACODE_AUTH_DISABLED === '1';
 const workosConfigured = Boolean(process.env.WORKOS_API_KEY?.trim() && process.env.WORKOS_CLIENT_ID?.trim());
 let auth: IMastraAuthProvider | null | undefined;
 
 if (authDisabled) {
-  auth = null;
+  auth = new LocalOperatorAuth();
 } else if (process.env.MASTRA_SHARED_API_URL?.trim()) {
   if (workosConfigured) {
     console.warn(
