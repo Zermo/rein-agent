@@ -3,8 +3,10 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { BlockList, isIP } from "node:net";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentTool, AgentToolResult } from "../../agent/agent-loop.ts";
 import { createSession, loadSession, sessionPath } from "../../agent/session.ts";
 import type { AssistantMessage, AssistantMessageEvent, Tool } from "../../ai/types.ts";
@@ -19,7 +21,7 @@ import { createBot, getBot, listBots } from "./bots.ts";
 import type { KlaudBot } from "./bots.ts";
 
 export interface ServeOptions {
-	host?: "127.0.0.1";
+	host?: string;
 	port?: number;
 	home?: string;
 	token?: string;
@@ -34,6 +36,42 @@ const PENDING_TIMEOUT = 120_000;
 const FRONTEND_NAMES = new Set(["patchShell", "setPref", "navigateTo", "confirmAction"]);
 const processHome = () => resolve(process.env.REIN_HOME || join(homedir(), ".rein"));
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const privateHosts = new BlockList();
+privateHosts.addSubnet("127.0.0.0", 8, "ipv4");
+privateHosts.addSubnet("10.0.0.0", 8, "ipv4");
+privateHosts.addSubnet("172.16.0.0", 12, "ipv4");
+privateHosts.addSubnet("192.168.0.0", 16, "ipv4");
+privateHosts.addSubnet("169.254.0.0", 16, "ipv4");
+privateHosts.addSubnet("100.64.0.0", 10, "ipv4");
+privateHosts.addSubnet("::1", 128, "ipv6");
+privateHosts.addSubnet("fc00::", 7, "ipv6");
+privateHosts.addSubnet("fe80::", 10, "ipv6");
+const PUBLIC_FILES: Record<string, string> = { "/": "index.html", "/index.html": "index.html", "/browser.js": "browser.js", "/renderer.js": "renderer.js", "/styles.css": "styles.css", "/icon.svg": "icon.svg" };
+const PUBLIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
+const FALLBACK_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>rein-klaʊd</title></head><body><p>rein-klaʊd</p><p>API on this origin. Bearer required except <code>/</code> and <code>/health</code>.</p></body></html>`;
+/** Explicit numeric private/loopback/mesh bind. Never 0.0.0.0, ::, hostnames, or public addresses. */
+export function validateBindHost(value: string): string {
+	if (typeof value !== "string" || !value || value !== value.trim()) throw new Error("rein serve --host must be an explicit numeric interface address.");
+	const zoneAt = value.indexOf("%");
+	const host = zoneAt === -1 ? value : value.slice(0, zoneAt);
+	const zone = zoneAt === -1 ? undefined : value.slice(zoneAt + 1);
+	const family = isIP(host);
+	if (!family || zone !== undefined && (family !== 6 || !zone || !/^[A-Za-z0-9_.-]{1,64}$/.test(zone))) throw new Error("rein serve --host must be an explicit numeric interface address.");
+	if (!privateHosts.check(host, family === 4 ? "ipv4" : "ipv6")) throw new Error("rein serve may bind only to loopback, private, link-local, ULA, or private-mesh addresses; wildcard and public addresses are refused.");
+	if (family === 4) return host;
+	const canonical = new URL(`http://[${host}]/`).hostname.slice(1, -1);
+	return zone === undefined ? canonical : `${canonical}%${zone}`;
+}
+function klaudUiRoot(): string | undefined {
+	const here = dirname(fileURLToPath(import.meta.url));
+	for (const candidate of [join(here, "../../../apps/klaud/dist"), join(here, "../apps/klaud/dist")]) {
+		try {
+			const index = join(candidate, "index.html");
+			const stat = lstatSync(index);
+			if (!stat.isSymbolicLink() && stat.isFile()) return resolve(candidate);
+		} catch { /* missing checkout UI */ }
+	}
+}
 class HttpError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
 const invalid = (message: string): never => { throw new HttpError(400, message); };
 function json(res: ServerResponse, status: number, value: unknown) {
@@ -168,8 +206,9 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHandle> {
-	if (opts.host !== undefined && opts.host !== "127.0.0.1") throw new Error("rein serve binds only to 127.0.0.1.");
+	const bindHost = validateBindHost(opts.host ?? "127.0.0.1");
 	if (opts.port !== undefined && (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535)) throw new Error("Invalid port, expected 0 through 65535.");
+	const uiRoot = klaudUiRoot();
 	const home = resolve(opts.home ?? processHome()), cwd = resolve(opts.cwd ?? process.cwd());
 	// Runner, model config, and session APIs are process-scoped. Never switch env for a request.
 	const checkHome = () => { if (!opts.run && home !== processHome()) throw new Error("Set REIN_HOME to the requested home before starting rein serve; the runner uses process-wide configuration and sessions."); };
@@ -207,8 +246,8 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 			run.emit({ type: "CUSTOM", name: kind === "approval" ? "klaud.approval" : "klaud.frontend_tool", value: kind === "approval" ? { runId: run.id, id, tool, summary } : { runId: run.id, toolCallId: id, toolName: tool, args } });
 		});
 	}
-	function runTools(run: ActiveRun, declarations: Tool[]): AgentTool[] {
-		const backend = createKlaudTools(home).map(tool => ({ ...tool, async execute(id: string, args: Record<string, unknown>, signal?: AbortSignal) {
+	function runTools(run: ActiveRun, declarations: Tool[], toolCwd: string): AgentTool[] {
+		const backend = createKlaudTools(home, toolCwd).map(tool => ({ ...tool, async execute(id: string, args: Record<string, unknown>, signal?: AbortSignal) {
 			if (run.controller.signal.aborted || signal?.aborted) throw new Error("Run cancelled.");
 			const result = await tool.execute(id, args, signal);
 			if (tool.name === "klaud_patch_shell" && !result.isError) { broadcast(stateDelta(args.patch as JsonPatchOp[])); publishState(); }
@@ -249,7 +288,8 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		try {
 			run.emit({ type: "RUN_STARTED", threadId, runId: id });
 			run.emit(stateSnapshot(snapshot()));
-			const additions = runTools(run, declarations);
+			const workCwd = bot?.cwd ?? cwd;
+			const additions = runTools(run, declarations, workCwd);
 			if (opts.run) {
 				const iterator = opts.run(input.message as string, additions)[Symbol.asyncIterator]();
 				try {
@@ -267,9 +307,9 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 				if (!existsSync(file)) {
 					if (bot) throw new Error("Bot session is missing.");
 					mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-					checkStorage(file); createSession({ id: sessionId, cwd }, home);
+					checkStorage(file); createSession({ id: sessionId, cwd: workCwd }, home);
 				}
-				const runner = await createRunner({ cwd, sessionId, surface: "klaud", toolGuard: async (name, args) => {
+				const runner = await createRunner({ cwd: workCwd, sessionId, surface: "klaud", toolGuard: async (name, args) => {
 					if (controller.signal.aborted) return "Run cancelled.";
 					const mutates = ["bash", "write", "edit", "gates"].includes(name) || name === "tmux" && !["list", "capture"].includes(String(args.op));
 					if (!mutates) return;
@@ -308,8 +348,23 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Content-Type-Options", "nosniff"); res.setHeader("Referrer-Policy", "no-referrer"); res.setHeader("X-Frame-Options", "DENY");
 		void (async () => {
 			if (closing) throw new HttpError(503, "Server is closing.");
-			if (req.headers.host !== url.slice(7) || req.headers.origin && req.headers.origin !== url) throw new HttpError(403, "Invalid Host or Origin.");
-			if (req.method === "GET" && req.url === "/health") { json(res, 200, { ok: true, name: "rein-klaud" }); return; }
+			if (req.headers.host !== new URL(url).host || req.headers.origin && req.headers.origin !== url) throw new HttpError(403, "Invalid Host or Origin.");
+			const path = (req.url ?? "/").split("?")[0];
+			if (req.method === "GET" && path === "/health") { json(res, 200, { ok: true, name: "rein-klaud" }); return; }
+			if (req.method === "GET" && Object.hasOwn(PUBLIC_FILES, path)) {
+				const name = PUBLIC_FILES[path];
+				if (uiRoot) {
+					try {
+						const file = join(uiRoot, name);
+						const stat = lstatSync(file);
+						if (stat.isSymbolicLink() || !stat.isFile() || resolve(file) !== join(uiRoot, name)) throw new HttpError(404, "Not found.");
+						res.writeHead(200, { "Content-Type": PUBLIC_TYPES[extname(name)] ?? "application/octet-stream" }).end(readFileSync(file));
+						return;
+					} catch (error) { if (error instanceof HttpError) throw error; }
+				}
+				if (name === "index.html") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(FALLBACK_HTML); return; }
+				throw new HttpError(404, "Not found.");
+			}
 			const provided = Buffer.from(req.headers.authorization ?? "");
 			if (provided.length !== authorization.length || !timingSafeEqual(provided, authorization)) throw new HttpError(401, "Bearer token required.");
 			if (req.method === "GET" && req.url === "/state") { json(res, 200, snapshot()); return; }
@@ -372,8 +427,9 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		});
 	});
 	server.requestTimeout = 15_000; server.headersTimeout = 5000;
-	await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(opts.port ?? 0, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); }); });
-	url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+	await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(opts.port ?? 0, bindHost, () => { server.removeListener("error", reject); resolve(); }); });
+	const addr = server.address() as { address: string; port: number; family: string };
+	url = addr.family === "IPv6" || addr.family === "6" ? `http://[${addr.address}]:${addr.port}` : `http://${addr.address}:${addr.port}`;
 	try {
 		if (opts.token === undefined) { tokenFile = join(home, "klaud", `serve-${new URL(url).port}.token`); privateWrite(tokenFile, token + "\n"); }
 	} catch (error) { await new Promise<void>(resolve => server.close(() => resolve())); throw error; }

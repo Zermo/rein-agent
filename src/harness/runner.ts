@@ -116,7 +116,11 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	const skillRuntime = withContextTools ? createSkillRuntime() : undefined;
 	const basePrompt = (opts.systemPrompt ?? buildSystemPrompt(opts.cwd, opts.surface)) + (withContextTools ? contextGuidance + skillRuntime!.guidance : "");
 	const tools = [...(opts.tools ?? toolsForCwd(opts.cwd))];
-	if (withContextTools) tools.push(...createKlaudTools());
+	if (withContextTools) {
+		for (const tool of createKlaudTools(undefined, opts.cwd)) {
+			if (!tools.some(existing => existing.name === tool.name)) tools.push(tool);
+		}
+	}
 	let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
 
 	const steering: AgentMessage[] = [];

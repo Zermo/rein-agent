@@ -38,12 +38,20 @@ test("bots create, list, and reopen the same private JSONL session", (t) => {
 	assert.equal(header.version, 1);
 	assert.equal(header.id, bot.sessionId);
 	assert.equal(header.cwd, process.cwd());
+	assert.equal(bot.computer, "local");
+	assert.equal(bot.engine, "openai-compat");
+	assert.equal(bot.cwd, process.cwd());
 	assert.equal(fs.statSync(file).mode & 0o777, 0o600);
 	assert.equal(fs.statSync(registry(home)).mode & 0o777, 0o600);
 	assert.deepEqual(fs.readdirSync(join(home, "klaud")), ["bots.json"]);
 	const copy = listBots(home);
 	copy[0].name = "Changed locally";
 	assert.equal(getBot(bot.id, home).name, "Research");
+	fs.writeFileSync(registry(home), JSON.stringify({ version: 1, bots: [{ id: bot.id, name: bot.name, sessionId: bot.sessionId, created: bot.created }] }, null, 2) + "\n");
+	const legacy = listBots(home)[0];
+	assert.equal(legacy.computer, "local");
+	assert.equal(legacy.engine, "openai-compat");
+	assert.equal(legacy.cwd, undefined);
 });
 
 test("explicit homes do not alter ambient session paths or REIN_HOME", (t) => {
@@ -83,6 +91,7 @@ test("malformed registries and duplicate identities are preserved without creati
 		"{broken", "null", JSON.stringify({ version: 2, bots: [] }), JSON.stringify({ version: 1, bots: {} }),
 		JSON.stringify({ version: 1, bots: [bot, bot] }),
 		JSON.stringify({ version: 1, bots: [bot, { ...bot, id: "klaud-bot-abcdefab" }] }),
+		JSON.stringify({ version: 1, bots: [{ ...bot, computer: "local", engine: "grok", cwd: process.cwd() }] }),
 		...[{ name: " " }, { name: "bad\nname" }, { sessionId: "../outside" }, { id: "../outside" }, { created: "invalid" }]
 			.map(patch => JSON.stringify({ version: 1, bots: [{ ...bot, ...patch }] })),
 	]) {

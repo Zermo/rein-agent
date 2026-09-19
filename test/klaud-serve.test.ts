@@ -265,3 +265,18 @@ test("a thrown run and truncated output emit RUN_ERROR without RUN_FINISHED", as
 		assert.ok(!events.some(e => e.type === "RUN_FINISHED"));
 	}
 });
+
+test("bind host refuses wildcards and public addresses; loopback still serves a public browser origin", async t => {
+	const { validateBindHost } = await import("../src/harness/klaud/serve.ts");
+	assert.equal(validateBindHost("127.0.0.1"), "127.0.0.1");
+	assert.equal(validateBindHost("10.0.0.56"), "10.0.0.56");
+	for (const host of ["0.0.0.0", "::", "8.8.8.8", "localhost", "example.com"]) {
+		assert.throws(() => validateBindHost(host));
+	}
+	const server = await fixture(t, { host: "127.0.0.1" });
+	const page = await fetch(server.url + "/");
+	assert.equal(page.status, 200);
+	assert.match(page.headers.get("content-type")!, /text\/html/);
+	assert.equal((await fetch(server.url + "/state")).status, 401);
+	assert.equal((await fetch(server.url + "/health")).status, 200);
+});

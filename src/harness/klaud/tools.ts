@@ -1,4 +1,5 @@
 import type { AgentTool, AgentToolResult } from "../../agent/agent-loop.ts";
+import { toolsForCwd } from "../tools/index.ts";
 import { applyKlaudPatch, KLAUD_SHELL_POINTERS, loadKlaudShell, saveKlaudShell } from "./shell.ts";
 import type { JsonPatchOp } from "./shell.ts";
 
@@ -6,8 +7,15 @@ function toolError(error: unknown): AgentToolResult {
 	return { content: error instanceof Error ? error.message : String(error), isError: true };
 }
 
-export function createKlaudTools(home?: string): AgentTool[] {
+export function createKlaudTools(home?: string, cwd = process.cwd()): AgentTool[] {
+	const bound = toolsForCwd(cwd);
+	const shell = (["bash", "read", "write"] as const).map(name => {
+		const tool = bound.find(item => item.name === name);
+		if (!tool) throw new Error(`Missing rein tool: ${name}`);
+		return tool;
+	});
 	return [
+		...shell,
 		{
 			name: "klaud_get_shell",
 			description: "Read the current rein-klaʊd shell theme and chrome preferences.",

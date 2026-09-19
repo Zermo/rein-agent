@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("klaud", Object.freeze({
+  canStartLocal: true,
   status: () => ipcRenderer.invoke("klaud:status"),
   connect: options => ipcRenderer.invoke("klaud:connect", options),
   request: (operation, input) => ipcRenderer.invoke("klaud:request", operation, input),

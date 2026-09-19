@@ -23,9 +23,12 @@ from `apps/klaud` with `npm run dev`. Choose URL + token in its first window. Th
 server prints its loopback URL and the location of its private runtime token.
 See [the desktop README](../apps/klaud/README.md) for environment variables.
 
-The server binds only to `127.0.0.1`. The app keeps its bearer token in Electron's
-main process. Model connections still use Rein's existing provider setup; the
-desktop does not connect to a model directly. Shell preferences apply live.
+Default bind is `127.0.0.1`. `rein serve --host <private-ip> --port 4317` binds that
+interface only (no wildcards or public addresses) and serves the browser UI at `/`.
+`/health` and the UI are unauthenticated so a later reverse proxy can front them;
+every API route still requires `Authorization: Bearer`. The Electron app keeps its
+bearer token in the main process. Model connections still use Rein's existing
+provider setup; the desktop does not connect to a model directly. Shell preferences apply live.
 File writes, edits, and command execution ask for a decision in the desktop.
 Hidden model reasoning is excluded from the displayed transcript.
 

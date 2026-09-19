@@ -10,6 +10,9 @@ export interface KlaudBot {
 	name: string;
 	sessionId: string;
 	created: string;
+	computer: "local";
+	engine: "openai-compat";
+	cwd?: string;
 }
 
 const BOT_ID = /^klaud-bot-[0-9a-f]{8}$/;
@@ -54,21 +57,39 @@ function hasKeys(value: unknown, keys: string[]): value is Record<string, unknow
 		&& Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 }
 
+function parseBot(value: unknown): KlaudBot {
+	const current = hasKeys(value, ["id", "name", "sessionId", "created", "computer", "engine", "cwd"]);
+	if (!current && !hasKeys(value, ["id", "name", "sessionId", "created"])) throw new Error("Invalid rein-klaʊd bot registry entry.");
+	const raw = value as Record<string, unknown>;
+	if (typeof raw.id !== "string" || !BOT_ID.test(raw.id)
+		|| typeof raw.sessionId !== "string" || !SESSION_ID.test(raw.sessionId)
+		|| typeof raw.created !== "string" || !Number.isFinite(Date.parse(raw.created))
+		|| new Date(raw.created).toISOString() !== raw.created
+		|| botName(raw.name) !== raw.name) {
+		throw new Error("Invalid rein-klaʊd bot registry entry.");
+	}
+	let cwd: string | undefined;
+	if (current) {
+		if (raw.computer !== "local" || raw.engine !== "openai-compat"
+			|| typeof raw.cwd !== "string" || !raw.cwd.trim() || raw.cwd.length > 4096
+			|| /[\u0000-\u001f\u007f-\u009f]/u.test(raw.cwd)) {
+			throw new Error("Invalid rein-klaʊd bot registry entry.");
+		}
+		cwd = resolve(raw.cwd);
+	}
+	return { id: raw.id, name: raw.name as string, sessionId: raw.sessionId, created: raw.created, computer: "local", engine: "openai-compat", ...(cwd !== undefined ? { cwd } : {}) };
+}
+
 function validateRegistry(value: unknown): asserts value is { version: 1; bots: KlaudBot[] } {
 	if (!hasKeys(value, ["version", "bots"]) || value.version !== 1 || !Array.isArray(value.bots)) throw new Error("Invalid rein-klaʊd bot registry.");
 	const ids = new Set<string>();
 	const sessions = new Set<string>();
-	for (const bot of value.bots) {
-		if (!hasKeys(bot, ["id", "name", "sessionId", "created"])
-			|| typeof bot.id !== "string" || !BOT_ID.test(bot.id)
-			|| typeof bot.sessionId !== "string" || !SESSION_ID.test(bot.sessionId)
-			|| typeof bot.created !== "string" || !Number.isFinite(Date.parse(bot.created))
-			|| new Date(bot.created).toISOString() !== bot.created
-			|| botName(bot.name) !== bot.name || ids.has(bot.id) || sessions.has(bot.sessionId)) {
-			throw new Error("Invalid rein-klaʊd bot registry entry.");
-		}
+	for (const [index, raw] of value.bots.entries()) {
+		const bot = parseBot(raw);
+		if (ids.has(bot.id) || sessions.has(bot.sessionId)) throw new Error("Invalid rein-klaʊd bot registry entry.");
 		ids.add(bot.id);
 		sessions.add(bot.sessionId);
+		value.bots[index] = bot;
 	}
 }
 
@@ -157,7 +178,7 @@ export function createBot(name: string, home?: string, cwd = process.cwd()): Kla
 		const owned = checkPath(file, false)!;
 		try {
 			if (bots.some(bot => bot.sessionId === sessionId)) throw new Error("Bot session id collision.");
-			const bot = { id, name: normalizedName, sessionId, created: new Date().toISOString() };
+			const bot: KlaudBot = { id, name: normalizedName, sessionId, created: new Date().toISOString(), computer: "local", engine: "openai-compat", cwd: resolve(cwd) };
 			saveRegistry(root, [...bots, bot]);
 			return bot;
 		} catch (error) {

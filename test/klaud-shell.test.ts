@@ -153,15 +153,17 @@ test("persistence refuses symlink files, dangling links, and linked parent direc
 test("klaud tools return JSON strings and persist valid patches", async (t) => {
 	const home = fixture(t);
 	const tools = createKlaudTools(home);
-	assert.deepEqual(tools.map(tool => tool.name), ["klaud_get_shell", "klaud_patch_shell"]);
-	const read = await tools[0].execute("fixture-read", {});
+	assert.deepEqual(tools.map(tool => tool.name), ["bash", "read", "write", "klaud_get_shell", "klaud_patch_shell"]);
+	const get = tools.find(tool => tool.name === "klaud_get_shell")!;
+	const patch = tools.find(tool => tool.name === "klaud_patch_shell")!;
+	const read = await get.execute("fixture-read", {});
 	assert.deepEqual(JSON.parse(read.content), DEFAULT_KLAUD_SHELL);
 	assert.equal(existsSync(klaudShellPath(home)), false);
-	const write = await tools[1].execute("fixture-write", { patch: [{ op: "replace", path: "/chrome/tray", value: "quiet" }] });
+	const write = await patch.execute("fixture-write", { patch: [{ op: "replace", path: "/chrome/tray", value: "quiet" }] });
 	assert.notEqual(write.isError, true);
 	assert.deepEqual(JSON.parse(write.content), loadKlaudShell(home));
 	assert.equal(loadKlaudShell(home).chrome.tray, "quiet");
-	assert.equal((await tools[1].execute("fixture-invalid", {})).isError, true);
+	assert.equal((await patch.execute("fixture-invalid", {})).isError, true);
 });
 
 test("klaud prompt names the shell, every allowed pointer, and source approval under 1200 bytes", () => {

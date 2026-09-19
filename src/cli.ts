@@ -62,7 +62,8 @@ Usage:
   rein --visual                 split the terminal into chat and live activity (tmux)
   rein watch <activity-id>       inspect activity inside this terminal
   rein canvas <activity-id>      serve an optional node canvas; --browser opens it
-  rein serve [--port n]          serve the loopback rein-klaʊd AG-UI API
+  rein serve [--port n] [--host <private-ip>]
+                                serve rein-klaʊd (loopback default; LAN bind is opt-in)
   rein train <recipe.yaml>       run optional Automodel training
   rein meat [ref [ref]]          review a commit or range with the embedded Meat engine
                                 --staged or --working-tree selects uncommitted changes
@@ -228,13 +229,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 		return;
 	}
 	if (_[0] === "serve") {
-		if (_.length !== 1 || Object.keys(flags).some(key => key !== "port")) throw new Error("Usage: rein serve [--port n]");
+		if (_.length !== 1 || Object.keys(flags).some(key => key !== "port" && key !== "host")) throw new Error("Usage: rein serve [--port n] [--host <private-ip>]");
 		const port = numberFlag(flags, "port", 0);
 		if (port !== undefined && port > 65535) throw new Error("--port must be <= 65535");
+		const host = stringFlag(flags, "host");
 		const { startKlaudServe } = await import("./harness/klaud/serve.ts");
-		const handle = await startKlaudServe({ port });
+		const handle = await startKlaudServe({ port, ...(host ? { host } : {}) });
 		console.log(`rein-klaʊd is listening at ${handle.url}`);
-		console.log("The bearer token is in $REIN_HOME/klaud/serve-<port>.token, default ~/.rein.");
+		console.log("Open that URL in a browser. Bearer token: $REIN_HOME/klaud/serve-<port>.token (default ~/.rein). Append #token or paste it.");
 		await new Promise<void>((resolve, reject) => {
 			const stop = () => {
 				process.removeListener("SIGINT", stop);
