@@ -277,6 +277,15 @@ test("bind host refuses wildcards and public addresses; loopback still serves a 
 	const page = await fetch(server.url + "/");
 	assert.equal(page.status, 200);
 	assert.match(page.headers.get("content-type")!, /text\/html/);
+	const html = await page.text();
+	assert.match(html, /src="\.\/browser\.js"/);
+	assert.match(html, /src="\.\/renderer\.js"/);
+	assert.match(html, /connect-src 'self'/);
+	assert.doesNotMatch(html, /API on this origin/);
+	const transport = await (await fetch(server.url + "/browser.js")).text();
+	assert.match(transport, /canStartLocal:\s*false/);
+	assert.doesNotMatch(transport, /ipcRenderer|validateConnection/);
+	assert.equal((await fetch(server.url + "/renderer.js")).status, 200);
 	assert.equal((await fetch(server.url + "/state")).status, 401);
 	assert.equal((await fetch(server.url + "/health")).status, 200);
 });

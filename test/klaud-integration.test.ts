@@ -86,7 +86,7 @@ test("real runner patches live shell and resumes the same bot transcript after r
 	const toolNames = f.requests[0].tools.map((tool: any) => tool.function.name);
 	assert.equal(toolNames.filter((name: string) => name === "klaud_patch_shell").length, 1);
 	for (const name of ["bash", "web_search", "web_fetch", "skill", "klaud_get_shell", "klaud_patch_shell"]) assert.ok(toolNames.includes(name), name);
-	assert.match(f.requests[0].messages[0].content, /^You are Fixture bot \(klaud-bot-[0-9a-f]{8}\)\. This thread is yours/);
+	assert.match(f.requests[0].messages[0].content, /^You are Fixture bot \(klaud-bot-[0-9a-f]{8}\)\. OpenMaus-shaped klaud bot: computer=local engine=openai-compat cwd=/);
 	assert.ok(!f.requests[0].messages[0].content.includes("display data"));
 	assert.equal(f.requests[0].messages[0].content.split("You're in rein-klaʊd.").length - 1, 1);
 	assert.ok(Buffer.byteLength(klaudPrompt(DEFAULT_KLAUD_SHELL)) < 1200);

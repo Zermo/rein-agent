@@ -162,7 +162,7 @@ function App() {
   async function connect(event) {
     event.preventDefault(); setConnecting(true); setError("");
     try {
-      const status = await api.connect(mode === "local" ? { mode } : { mode, url, token });
+      const status = await api.connect(api.canStartLocal === false ? { token } : mode === "local" ? { mode } : { mode, url, token });
       recovering.current = false; setNotice("");
       setToken(""); setConnection(status.url); adopt(status.state);
       await loadMessages(selectedRef.current);
@@ -198,13 +198,15 @@ function App() {
     <form className="new-bot" onSubmit={createBot}><label htmlFor={view === "bots" ? "bot-name-page" : "bot-name-sidebar"}>New bot</label><div className="input-row"><input id={view === "bots" ? "bot-name-page" : "bot-name-sidebar"} value={botName} onChange={event => setBotName(event.target.value)} placeholder="Name" maxLength={64}/><button disabled={saving || !botName.trim()} type="submit">Add</button></div></form>
   </>;
   return <div className="app">
-    <header><div className="brand"><img src="./icon.svg" alt=""/><span>rein-klaʊd</span></div>{connection && <nav aria-label="Main"><button aria-current={view === "bots" ? "page" : undefined} onClick={() => setView("bots")}>Bots</button><button aria-current={view === "chat" ? "page" : undefined} onClick={() => setView("chat")}>Chat</button><button aria-current={view === "settings" ? "page" : undefined} onClick={() => setView("settings")}>Settings</button></nav>}<span className="connection-label">{connection ? "Local connection" : "Connect"}</span></header>
+    <header><div className="brand"><img src="./icon.svg" alt=""/><span>rein-klaʊd</span></div>{connection && <nav aria-label="Main"><button aria-current={view === "bots" ? "page" : undefined} onClick={() => setView("bots")}>Bots</button><button aria-current={view === "chat" ? "page" : undefined} onClick={() => setView("chat")}>Chat</button><button aria-current={view === "settings" ? "page" : undefined} onClick={() => setView("settings")}>Settings</button></nav>}<span className="connection-label">{connection ? (api.canStartLocal === false ? "This origin" : "Local connection") : "Connect"}</span></header>
     {error && <div className="error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {!connection ? <main className="welcome"><div><p className="eyebrow">Your agents, on your machine</p><h1>I’m ready when you are.</h1><p className="muted">{api.canStartLocal === false ? "Paste the bearer token from rein serve, or open this URL with #token." : "Start Rein here, or connect to a server already listening on loopback."}</p><form onSubmit={connect}>
-      <fieldset><legend>Connection</legend>{api.canStartLocal !== false && <label className="choice"><input type="radio" name="mode" value="local" checked={mode === "local"} onChange={() => setMode("local")}/>Start local <code>rein serve</code></label>}<label className="choice"><input type="radio" name="mode" value="remote" checked={mode === "remote"} onChange={() => setMode("remote")}/>URL + token</label></fieldset>
+      {api.canStartLocal === false ? <><label htmlFor="server-token">Bearer token</label><input id="server-token" type="password" required value={token} onChange={event => setToken(event.target.value)} autoComplete="off" spellCheck={false}/></> : <>
+      <fieldset><legend>Connection</legend><label className="choice"><input type="radio" name="mode" value="local" checked={mode === "local"} onChange={() => setMode("local")}/>Start local <code>rein serve</code></label><label className="choice"><input type="radio" name="mode" value="remote" checked={mode === "remote"} onChange={() => setMode("remote")}/>URL + token</label></fieldset>
       {mode === "remote" && <><label htmlFor="server-url">Server URL</label><input id="server-url" type="url" required value={url} onChange={event => setUrl(event.target.value)} spellCheck={false}/><label htmlFor="server-token">Bearer token</label><input id="server-token" type="password" required value={token} onChange={event => setToken(event.target.value)} autoComplete="off" spellCheck={false}/></>}
-      <button className="primary" disabled={connecting} type="submit">{connecting ? "Connecting…" : mode === "local" ? "Start local serve" : "Connect"}</button>
+      </>}
+      <button className="primary" disabled={connecting} type="submit">{connecting ? "Connecting…" : api.canStartLocal === false || mode === "remote" ? "Connect" : "Start local serve"}</button>
     </form></div></main> : <div className="workspace">
       {state?.shell.chrome.sidebar && view !== "bots" && <aside>{botList}</aside>}
       <main className={`content ${view}`}>
@@ -213,7 +215,7 @@ function App() {
           <label>Density<select value={state.shell.theme.density} disabled={saving} onChange={event => patch("/theme/density", event.target.value)}><option value="compact">Compact</option><option value="regular">Regular</option><option value="roomy">Roomy</option></select></label>
           <label>Tray<select value={state.shell.chrome.tray} disabled={saving} onChange={event => patch("/chrome/tray", event.target.value)}><option value="normal">Normal</option><option value="quiet">Quiet</option><option value="hidden">Hidden</option></select></label>
           {[["Dark appearance", "/theme/dark", state.shell.theme.dark], ["Show sidebar", "/chrome/sidebar", state.shell.chrome.sidebar], ["Show activity", "/chrome/showActivity", state.shell.chrome.showActivity]].map(([label, path, checked]) => <label className="toggle" key={path}><span>{label}</span><input type="checkbox" checked={checked} disabled={saving} onChange={event => patch(path, event.target.checked)}/></label>)}
-          <p className="muted small">With the tray hidden, click the Dock icon or launch the app again to reopen this window. Quit from the app menu.</p><p className="muted small">Connected to <code>{connection}</code></p>
+          {api.canStartLocal !== false && <p className="muted small">With the tray hidden, click the Dock icon or launch the app again to reopen this window. Quit from the app menu.</p>}<p className="muted small">Connected to <code>{connection}</code></p>
         </section> : <>
           <div className="chat-heading"><div><p className="eyebrow">Conversation</p><h1>{bot?.name || "Choose a bot"}</h1></div>{state?.shell.chrome.showActivity && <span className="activity">{busy ? "Working…" : "Ready"}</span>}</div>
           <div className="transcript" ref={transcript} aria-label="Conversation" aria-live="polite" aria-relevant="additions text">
