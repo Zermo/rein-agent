@@ -9,7 +9,7 @@ function toolError(error: unknown): AgentToolResult {
 
 export function createKlaudTools(home?: string, cwd = process.cwd()): AgentTool[] {
 	const bound = toolsForCwd(cwd);
-	const shell = (["bash", "read", "write"] as const).map(name => {
+	const shell = (["bash", "read", "write", "web_search", "web_fetch"] as const).map(name => {
 		const tool = bound.find(item => item.name === name);
 		if (!tool) throw new Error(`Missing rein tool: ${name}`);
 		return tool;
