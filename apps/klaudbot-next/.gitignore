@@ -1,0 +1,10 @@
+node_modules/
+.next/
+*.tsbuildinfo
+.env*
+*.token
+*.log
+*.pid
+test-results/
+test-failure.png
+.sandbox/*.err

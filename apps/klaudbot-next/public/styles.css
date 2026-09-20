@@ -1,0 +1,4 @@
+/* Legacy stylesheet URL compatibility. Main application CSS is bundled by
+   Next.js from app/globals.css; this file only forwards the original assets. */
+@import url("./tokens.css");
+@import url("./avatars.css");
