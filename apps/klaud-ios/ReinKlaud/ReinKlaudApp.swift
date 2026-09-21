@@ -1,6 +1,9 @@
 import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
+import Speech
+import AVFoundation
+import CoreHaptics
 
 @main
 struct ReinKlaudApp: App {
@@ -61,6 +64,8 @@ final class KlaudBridge: NSObject, ObservableObject {
     @Published var fault: String?
     @Published var shareItem: ShareItem?
     weak var webView: WKWebView?
+    let feel = KlaudKeyFeel()
+    let dictation = KlaudDictation()
 
     func reload() {
         fault = nil
@@ -79,6 +84,108 @@ final class KlaudBridge: NSObject, ObservableObject {
     }
 }
 
+final class KlaudKeyFeel {
+    private var engine: CHHapticEngine?
+    private var ready = false
+
+    func prepare() {
+        guard !ready else { return }
+        ready = true
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
+        engine = try? CHHapticEngine()
+        engine?.resetHandler = { [weak self] in try? self?.engine?.start() }
+        engine?.stoppedHandler = { [weak self] _ in try? self?.engine?.start() }
+        try? engine?.start()
+    }
+
+    func tap() {
+        prepare()
+        guard let engine else { return }
+        let travel = CHHapticEvent(eventType: .hapticContinuous, parameters: [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.34),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.18)
+        ], relativeTime: 0, duration: 0.026)
+        let seat = CHHapticEvent(eventType: .hapticTransient, parameters: [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: 1.0),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.95)
+        ], relativeTime: 0.01)
+        let bottom = CHHapticEvent(eventType: .hapticTransient, parameters: [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.58),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.22)
+        ], relativeTime: 0.022)
+        guard let pattern = try? CHHapticPattern(events: [travel, seat, bottom], parameters: []),
+              let player = try? engine.makePlayer(with: pattern) else { return }
+        try? player.start(atTime: 0)
+    }
+}
+
+final class KlaudDictation {
+    private let recognizer = SFSpeechRecognizer()
+    private let audio = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var hasTap = false
+    weak var webView: WKWebView?
+
+    func start() {
+        stop()
+        SFSpeechRecognizer.requestAuthorization { [weak self] status in
+            guard status == .authorized else {
+                self?.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'denied')")
+                return
+            }
+            DispatchQueue.main.async { self?.run() }
+        }
+    }
+
+    private func run() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+        try? session.setActive(true, options: .notifyOthersOnDeactivation)
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        self.request = request
+        let input = audio.inputNode
+        let format = input.outputFormat(forBus: 0)
+        if hasTap { input.removeTap(onBus: 0); hasTap = false }
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            self?.request?.append(buffer)
+        }
+        hasTap = true
+        audio.prepare()
+        try? audio.start()
+        task = recognizer?.recognitionTask(with: request) { [weak self] result, error in
+            guard let self else { return }
+            if let result {
+                self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate(\(Self.json(result.bestTranscription.formattedString)),\(result.isFinal),'')")
+                if result.isFinal { self.stop() }
+            } else if error != nil {
+                self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'error')")
+                self.stop()
+            }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        request?.endAudio()
+        request = nil
+        if hasTap { audio.inputNode.removeTap(onBus: 0); hasTap = false }
+        if audio.isRunning { audio.stop() }
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func js(_ source: String) {
+        DispatchQueue.main.async { self.webView?.evaluateJavaScript(source, completionHandler: nil) }
+    }
+
+    private static func json(_ value: String) -> String {
+        let data = (try? JSONEncoder().encode(value)) ?? Data("\"\"".utf8)
+        return String(data: data, encoding: .utf8) ?? "\"\""
+    }
+}
+
 struct KlaudWebView: UIViewRepresentable {
     @ObservedObject var bridge: KlaudBridge
     let start: URL
@@ -89,6 +196,7 @@ struct KlaudWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
         config.websiteDataStore = .default()
         let installed = UserDefaults.standard.object(forKey: "AppleKeyboards") as? [String] ?? []
         let thirdParty = installed.contains { id in
@@ -110,12 +218,14 @@ struct KlaudWebView: UIViewRepresentable {
         view.isOpaque = true
         view.backgroundColor = UIColor(red: 0.07, green: 0.06, blue: 0.05, alpha: 1)
         bridge.webView = view
+        bridge.dictation.webView = view
         view.load(URLRequest(url: start, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
         return view
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
         bridge.webView = view
+        bridge.dictation.webView = view
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
@@ -124,6 +234,19 @@ struct KlaudWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "klaud", let body = message.body as? [String: Any] else { return }
+            let kind = body["kind"] as? String ?? ""
+            if kind == "haptic" {
+                DispatchQueue.main.async { self.bridge.feel.tap() }
+                return
+            }
+            if kind == "dictate" {
+                let action = body["action"] as? String ?? "start"
+                DispatchQueue.main.async {
+                    self.bridge.dictation.webView = self.bridge.webView
+                    if action == "stop" { self.bridge.dictation.stop() } else { self.bridge.dictation.start() }
+                }
+                return
+            }
             guard body["bytes"] is String else { return }
             let action = body["action"] as? String ?? "share"
             let name = body["name"] as? String ?? "file"
@@ -167,6 +290,10 @@ struct KlaudWebView: UIViewRepresentable {
                 webView.load(URLRequest(url: url))
             }
             return nil
+        }
+
+        func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+            decisionHandler(.grant)
         }
     }
 }

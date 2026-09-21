@@ -33,6 +33,10 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>klaʊdbot finds and connects to a Rein gateway you choose on your local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>klaʊdbot uses the microphone for the keyboard dictation key.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>klaʊdbot turns speech into text from the keyboard dictation key.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>
