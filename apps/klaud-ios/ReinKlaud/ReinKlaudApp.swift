@@ -85,42 +85,77 @@ final class KlaudBridge: NSObject, ObservableObject {
 }
 
 final class KlaudKeyFeel {
+    private let rigid = UIImpactFeedbackGenerator(style: .rigid)
+    private let soft = UIImpactFeedbackGenerator(style: .soft)
+    private let heavy = UIImpactFeedbackGenerator(style: .heavy)
+    private let medium = UIImpactFeedbackGenerator(style: .medium)
     private var engine: CHHapticEngine?
     private var ready = false
 
     func prepare() {
+        rigid.prepare()
+        soft.prepare()
+        heavy.prepare()
+        medium.prepare()
         guard !ready else { return }
         ready = true
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
         engine = try? CHHapticEngine()
+        engine?.playsHapticsOnly = true
         engine?.resetHandler = { [weak self] in try? self?.engine?.start() }
         engine?.stoppedHandler = { [weak self] _ in try? self?.engine?.start() }
         try? engine?.start()
     }
 
-    func tap() {
+    func tap(_ key: String) {
         prepare()
+        switch key {
+        case "space":
+            soft.impactOccurred(intensity: 0.88)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+                self?.medium.impactOccurred(intensity: 0.62)
+            }
+            rumble(travel: 0.038, travelIntensity: 0.42, seat: 0.78, seatSharp: 0.28, bottom: 0.5)
+        case "delete":
+            rigid.impactOccurred(intensity: 1.0)
+            rumble(travel: 0.012, travelIntensity: 0.2, seat: 1.0, seatSharp: 0.95, bottom: 0.3)
+        case "return":
+            heavy.impactOccurred(intensity: 0.92)
+            rumble(travel: 0.03, travelIntensity: 0.38, seat: 0.9, seatSharp: 0.45, bottom: 0.7)
+        case "send":
+            heavy.impactOccurred(intensity: 1.0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+                self?.rigid.impactOccurred(intensity: 0.55)
+            }
+            rumble(travel: 0.028, travelIntensity: 0.4, seat: 1.0, seatSharp: 0.55, bottom: 0.65)
+        default:
+            rigid.impactOccurred(intensity: 0.78)
+            rumble(travel: 0.02, travelIntensity: 0.28, seat: 0.86, seatSharp: 0.7, bottom: 0.45)
+        }
+    }
+
+    private func rumble(travel: TimeInterval, travelIntensity: Float, seat: Float, seatSharp: Float, bottom: Float) {
         guard let engine else { return }
-        let travel = CHHapticEvent(eventType: .hapticContinuous, parameters: [
-            CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.34),
-            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.18)
-        ], relativeTime: 0, duration: 0.026)
-        let seat = CHHapticEvent(eventType: .hapticTransient, parameters: [
-            CHHapticEventParameter(parameterID: .hapticIntensity, value: 1.0),
-            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.95)
-        ], relativeTime: 0.01)
-        let bottom = CHHapticEvent(eventType: .hapticTransient, parameters: [
-            CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.58),
-            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.22)
-        ], relativeTime: 0.022)
-        guard let pattern = try? CHHapticPattern(events: [travel, seat, bottom], parameters: []),
+        let go = CHHapticEvent(eventType: .hapticContinuous, parameters: [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: travelIntensity),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.16)
+        ], relativeTime: 0, duration: travel)
+        let hit = CHHapticEvent(eventType: .hapticTransient, parameters: [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: seat),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: seatSharp)
+        ], relativeTime: travel * 0.45)
+        let stop = CHHapticEvent(eventType: .hapticTransient, parameters: [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: bottom),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.2)
+        ], relativeTime: travel)
+        guard let pattern = try? CHHapticPattern(events: [go, hit, stop], parameters: []),
               let player = try? engine.makePlayer(with: pattern) else { return }
         try? player.start(atTime: 0)
     }
 }
 
 final class KlaudDictation {
-    private let recognizer = SFSpeechRecognizer()
+    private let recognizer = SFSpeechRecognizer(locale: .current) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audio = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -129,21 +164,50 @@ final class KlaudDictation {
 
     func start() {
         stop()
-        SFSpeechRecognizer.requestAuthorization { [weak self] status in
-            guard status == .authorized else {
-                self?.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'denied')")
+        askMic { [weak self] mic in
+            guard let self else { return }
+            guard mic else {
+                self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'denied')")
                 return
             }
-            DispatchQueue.main.async { self?.run() }
+            SFSpeechRecognizer.requestAuthorization { status in
+                guard status == .authorized else {
+                    self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'denied')")
+                    return
+                }
+                DispatchQueue.main.async { self.run() }
+            }
+        }
+    }
+
+    private func askMic(_ done: @escaping (Bool) -> Void) {
+        if #available(iOS 17.0, *) {
+            AVAudioApplication.requestRecordPermission { granted in
+                DispatchQueue.main.async { done(granted) }
+            }
+        } else {
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                DispatchQueue.main.async { done(granted) }
+            }
         }
     }
 
     private func run() {
+        guard let recognizer, recognizer.isAvailable else {
+            js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'unavailable')")
+            return
+        }
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
-        try? session.setActive(true, options: .notifyOthersOnDeactivation)
+        do {
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'error')")
+            return
+        }
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = false
         self.request = request
         let input = audio.inputNode
         let format = input.outputFormat(forBus: 0)
@@ -153,12 +217,14 @@ final class KlaudDictation {
         }
         hasTap = true
         audio.prepare()
-        try? audio.start()
-        task = recognizer?.recognitionTask(with: request) { [weak self] result, error in
+        do { try audio.start() } catch {
+            js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'error')")
+            return
+        }
+        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
             if let result {
-                self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate(\(Self.json(result.bestTranscription.formattedString)),\(result.isFinal),'')")
-                if result.isFinal { self.stop() }
+                self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate(\(Self.json(result.bestTranscription.formattedString)),false,'')")
             } else if error != nil {
                 self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'error')")
                 self.stop()
@@ -167,13 +233,15 @@ final class KlaudDictation {
     }
 
     func stop() {
+        request?.endAudio()
         task?.cancel()
         task = nil
-        request?.endAudio()
         request = nil
         if hasTap { audio.inputNode.removeTap(onBus: 0); hasTap = false }
         if audio.isRunning { audio.stop() }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+        try? session.setActive(true, options: .notifyOthersOnDeactivation)
     }
 
     private func js(_ source: String) {
@@ -205,7 +273,11 @@ struct KlaudWebView: UIViewRepresentable {
             if lower.contains("emoji") { return false }
             return lower.contains("com.")
         }
-        let boot = "window.klaudNative=Object.assign(window.klaudNative||{},{inApp:true,systemKeyboard:\(thirdParty ? "true" : "false")});"
+        let boot = """
+        window.klaudNative=Object.assign(window.klaudNative||{},{inApp:true,systemKeyboard:\(thirdParty ? "true" : "false")});
+        window.klaudNative.feel=function(k){try{window.webkit.messageHandlers.klaud.postMessage({kind:'haptic',key:String(k||'letter')});}catch(e){}};
+        window.klaudNative.dictate=function(a){try{window.webkit.messageHandlers.klaud.postMessage({kind:'dictate',action:String(a||'start')});}catch(e){}};
+        """
         config.userContentController.addUserScript(WKUserScript(source: boot, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(context.coordinator, name: "klaud")
         let view = WKWebView(frame: .zero, configuration: config)
@@ -236,7 +308,8 @@ struct KlaudWebView: UIViewRepresentable {
             guard message.name == "klaud", let body = message.body as? [String: Any] else { return }
             let kind = body["kind"] as? String ?? ""
             if kind == "haptic" {
-                DispatchQueue.main.async { self.bridge.feel.tap() }
+                let key = body["key"] as? String ?? "letter"
+                DispatchQueue.main.async { self.bridge.feel.tap(key) }
                 return
             }
             if kind == "dictate" {
