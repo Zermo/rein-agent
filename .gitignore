@@ -21,3 +21,5 @@ apps/klaud-ios/.build/
 
 # Posthorse notes contain local working context
 .pi/notes/
+
+.tom-ok-ios

@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+GUARD="$(git rev-parse --show-toplevel)/apps/klaud-ios/scripts/ios-guard.sh"
+if git diff --cached --name-only | grep -q '^apps/klaud-ios/'; then
+  "$GUARD" require git || exit 1
+fi
+exit 0

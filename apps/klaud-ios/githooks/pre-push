@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+GUARD="$(git rev-parse --show-toplevel)/apps/klaud-ios/scripts/ios-guard.sh"
+need=0
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  [ -z "${remote_ref:-}" ] && continue
+  case "$remote_ref" in
+    refs/heads/ios|refs/heads/ios/*)
+      need=1
+      ;;
+  esac
+done
+if [ "$need" -eq 1 ]; then
+  "$GUARD" require git || exit 1
+  "$GUARD" consume git
+fi
+exit 0
