@@ -19,10 +19,11 @@ private let klaudOrigin = URL(string: "https://openbot.zermo.org/")!
 
 struct KlaudWebShell: View {
     @StateObject private var bridge = KlaudBridge()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
-            Color(red: 0.93, green: 0.89, blue: 0.82).ignoresSafeArea()
+            Color(red: 0.07, green: 0.06, blue: 0.05).ignoresSafeArea()
             KlaudWebView(bridge: bridge, start: klaudOrigin)
             if let message = bridge.fault {
                 VStack(spacing: 12) {
@@ -43,6 +44,9 @@ struct KlaudWebShell: View {
         }
         .sheet(item: $bridge.shareItem) { item in
             ShareSheet(url: item.url)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { bridge.rejoin() }
         }
     }
 }
@@ -70,6 +74,20 @@ final class KlaudBridge: NSObject, ObservableObject {
     func reload() {
         fault = nil
         webView?.load(URLRequest(url: klaudOrigin, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+    }
+
+    func rejoin() {
+        guard let webView else { return }
+        let host = webView.url?.host?.lowercased() ?? ""
+        if host == "auth.zermo.org" || host.isEmpty {
+            reload()
+            return
+        }
+        if host == "openbot.zermo.org" || host == "reinklaud.zermo.org" {
+            webView.evaluateJavaScript("document.dispatchEvent(new Event('visibilitychange'))")
+            return
+        }
+        reload()
     }
 
     func handoff(action: String, name: String, mime: String, bytes: Data) {
@@ -261,6 +279,7 @@ struct KlaudWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(bridge: bridge) }
 
     func makeUIView(context: Context) -> WKWebView {
+        if let existing = bridge.webView { return existing }
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.allowsInlineMediaPlayback = true
@@ -327,6 +346,10 @@ struct KlaudWebView: UIViewRepresentable {
             let b64 = body["bytes"] as? String ?? ""
             guard let data = Data(base64Encoded: b64) else { return }
             bridge.handoff(action: action, name: name, mime: mime, bytes: data)
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            webView.load(URLRequest(url: klaudOrigin, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
