@@ -8,7 +8,7 @@ Before external testing, replace the review note placeholder with a dedicated de
 
 ## Store metadata
 
-`metadata/app-info/en-US.json` and `metadata/version/0.1.0/en-US.json` use the canonical App Store Connect CLI 5 layout. Validate them before each release:
+`metadata/app-info/en-US.json` and `metadata/version/1.0.0/en-US.json` use the canonical App Store Connect CLI 5 layout. Validate them before each release:
 
 ```sh
 asc metadata validate \
@@ -23,13 +23,13 @@ After the app record and version exist, review the planned changes before applyi
 ```sh
 asc metadata plan \
   --app "$ASC_APP_ID" \
-  --version 0.1.0 \
+  --version 1.0.0 \
   --platform IOS \
   --dir apps/klaud-ios/AppStore/metadata
 
 asc metadata apply \
   --app "$ASC_APP_ID" \
-  --version 0.1.0 \
+  --version 1.0.0 \
   --platform IOS \
   --dir apps/klaud-ios/AppStore/metadata \
   --dry-run

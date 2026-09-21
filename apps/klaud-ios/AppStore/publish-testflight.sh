@@ -39,7 +39,7 @@ publish=(
     --app "$ASC_APP_ID"
     --project "$project"
     --scheme ReinKlaud
-    --version 0.1.0
+    --version 1.0.0
     --signing-style automatic
     --team-id "$REIN_APPLE_TEAM_ID"
     --archive-path "$build_root/ReinKlaud.xcarchive"

@@ -1,5 +1,8 @@
 {
   "name": "klaʊdbot",
-  "subtitle": "Your Rein agent, in hand",
-  "privacyPolicyUrl": "https://github.com/Zermo/rein-agent/wiki/Rein-klaud-privacy"
+  "subtitle": "Field console for your agents",
+  "privacyPolicyUrl": "https://openbot.zermo.org/privacy",
+  "primaryCategory": "PRODUCTIVITY",
+  "secondaryCategory": "DEVELOPER_TOOLS",
+  "copyright": "2026 Zermo"
 }
