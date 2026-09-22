@@ -1,7 +1,7 @@
-klaʊdbot 1.0.0 — live field console (WKWebView of openbot.zermo.org).
+klaʊdbot 1.1.0 — iOS 27 native composer over the authenticated live field console.
 
 Sign in at auth.zermo.org with the Demo Account listed in App Store Connect. Do not use a LAN gateway token.
 
-After sign-in: pick or spawn a unit, send a short message, confirm it appears in the ledger and a run starts. Swipe Units → Chat → Computer → Settings. Optional: dictation key (microphone prompt). Check Path thinking in the footer while a run is busy.
+After sign-in: pick or spawn a unit. In Chat, type a draft with the CRT keyboard, select text in the reply field, replace or delete the selection, insert a new line, and send. Confirm UIKit's caret and edit menu stay attached to the selected text, the message appears in the ledger, and a run starts. Optional: use the dictation key and Refine on Device. Check Path thinking while a run is busy, then swipe Units → Chat → Computer → Settings.
 
 Sounds and keyboard live on the console; force-quit to refresh. Demo credentials belong only in App Store Connect, never in review notes on GitHub.

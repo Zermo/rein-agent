@@ -22,6 +22,33 @@ body. Near matches remain ordinary text. Completion rows show only the model
 stop reason and reasoning-token count reported by the provider; private thought
 content is never requested or rendered.
 
+## Native composer and local intelligence
+
+The iOS 27 client keeps the authenticated klaʊdbot transcript, Path spine, and
+streaming agent session in `WKWebView`, but the reply path is native UIKit. A
+real `UITextView` owns draft text, selection ranges, caret and edit-menu geometry,
+dictation insertion, and hardware-keyboard input. The CRT keyboard is the text
+view's native `inputView`; the web bridge only mirrors the draft, submits the
+existing form, stops a run, and preserves the web client's filename-only
+attachment handoff.
+
+Apple's on-device Foundation Models framework can privately refine a bounded
+reply draft. The user starts each refinement explicitly, and
+`BGContinuedProcessingTask` may finish that bounded work after the app moves to
+the background. This is not a persistent phone daemon. Tool use, filesystem and
+computer control, long context, and full agent work remain on the Rein host.
+Third-party model weights are not bundled in the app.
+
+### Planned offline dictation
+
+`moondream/parakeet-redux` is the next local-speech candidate. Its pinned
+evaluation revision is `5b899707737bec61024edb53eabe3a7ac72da2f4`; the
+CC-BY-4.0 checkpoint is about 178 MB and supports 25 languages. It belongs
+behind a `LocalSpeechProvider` as an offline replacement for system dictation,
+not as the draft-rewriting model. Do not add the raw checkpoint to the IPA until
+an iOS-native packed-ternary runtime and its redistribution terms are verified.
+Apple Speech remains the fallback.
+
 ## Requirements
 
 - Xcode 27 with the iOS 27 SDK; install the iOS 27 simulator runtime to execute unit tests
@@ -137,9 +164,10 @@ needed:
 REIN_IOS_DESTINATION='platform=iOS Simulator,name=iPad Pro 13-inch (M5)' ./scripts/build.sh
 ```
 
-The tests cover the origin-scoped native composer bridge, UIKit selection and
-draft acknowledgement behavior, private/public URL policy, split and CRLF SSE frames, resumable
-mobile event envelopes and replay cursors, shell and transcript reduction,
+The tests cover the origin-scoped native composer bridge, scoped drafts and send
+acknowledgements, native selection-aware insertion, deletion, Return, and
+dictation-range replacement; private/public URL policy; split and CRLF SSE
+frames; resumable mobile event envelopes and replay cursors, shell and transcript reduction,
 explicit reply markers, reported completion metadata, the Keychain storage
 abstraction, account and endpoint validation, direct API protocols, fallback
 routing, protected direct transcripts, and the device-local sound preference.

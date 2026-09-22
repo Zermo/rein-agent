@@ -19,6 +19,16 @@ struct KlaudNativeComposer: View {
                 }
                 .disabled(!bridge.composerEnabled || bridge.composerBusy)
 
+                composerButton(symbol: "sparkles", label: "Refine on Device") {
+                    bridge.keyFeedback("letter")
+                    bridge.refineDraftOnDevice()
+                }
+                .disabled(
+                    !bridge.composerEnabled || bridge.composerBusy ||
+                    bridge.localInference.isRunning || bridge.localInference.availability != .ready ||
+                    bridge.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+
                 ZStack(alignment: .topLeading) {
                     if bridge.composerText.isEmpty {
                         Text(bridge.composerEnabled ? "Reply to your field unit…" : "Choose a field unit")
@@ -63,13 +73,26 @@ struct KlaudNativeComposer: View {
                 }
                 .buttonStyle(KlaudComposerButtonStyle(fill: rust, ink: paper))
                 .disabled(
-                    !bridge.composerBusy &&
-                    (!bridge.composerEnabled || bridge.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    !bridge.composerBusy && (
+                        !bridge.composerEnabled ||
+                        bridge.composerSubmitting ||
+                        bridge.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
                 )
                 .accessibilityLabel(bridge.composerBusy ? "Stop Run" : "Send Reply")
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 7)
+
+            if let status = localInferenceStatus {
+                Text(status)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(paper.opacity(0.72))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 9)
+                    .padding(.bottom, 7)
+                    .accessibilityLabel("On-device refinement status")
+            }
         }
         .background(glass)
         .overlay(alignment: .top) {
@@ -84,6 +107,15 @@ struct KlaudNativeComposer: View {
             bridge.appendAttachmentNames(urls)
             bridge.requestKeyboardPresentation()
         }
+    }
+
+    private var localInferenceStatus: String? {
+        let status = bridge.localInference.status.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !status.isEmpty { return status }
+        if bridge.localInference.availability != .ready {
+            return bridge.localInference.availability.label
+        }
+        return nil
     }
 
     private func composerButton(
@@ -131,6 +163,7 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
         let view = KlaudComposerTextView()
         view.delegate = context.coordinator
         context.coordinator.textView = view
+        bridge.composerTextView = view
         view.backgroundColor = .clear
         view.textColor = UIColor(red: 0.957, green: 0.918, blue: 0.831, alpha: 1)
         view.tintColor = UIColor(red: 0.769, green: 0.361, blue: 0.227, alpha: 1)
@@ -155,16 +188,20 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
 
     func updateUIView(_ view: KlaudComposerTextView, context: Context) {
         context.coordinator.bridge = bridge
+        bridge.composerTextView = view
         view.isEditable = bridge.composerEnabled && !bridge.composerBusy
         view.alpha = view.isEditable ? 1 : 0.6
+        view.setComposerState(busy: bridge.composerBusy, submitting: bridge.composerSubmitting)
 
         if view.text != bridge.composerText {
-            let selection = view.selectedRange
-            view.text = bridge.composerText
-            let length = (bridge.composerText as NSString).length
-            let location = min(selection.location, length)
-            let rangeLength = min(selection.length, length - location)
-            view.selectedRange = NSRange(location: location, length: rangeLength)
+            view.performProgrammaticUpdate {
+                let selection = view.selectedRange
+                view.text = bridge.composerText
+                let length = (bridge.composerText as NSString).length
+                let location = min(selection.location, length)
+                let rangeLength = min(selection.length, length - location)
+                view.selectedRange = NSRange(location: location, length: rangeLength)
+            }
         }
 
         if context.coordinator.lastDismissRequest != bridge.keyboardDismissRequest {
@@ -197,7 +234,16 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
         }
 
         func textViewDidChange(_ textView: UITextView) {
+            guard let editor = textView as? KlaudComposerTextView,
+                  !editor.isApplyingProgrammaticUpdate else { return }
+            bridge.stopDictationForManualEditing()
             bridge.setComposerDraft(textView.text)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard let editor = textView as? KlaudComposerTextView,
+                  !editor.isApplyingProgrammaticUpdate else { return }
+            bridge.stopDictationForManualEditing()
         }
 
         func textView(
@@ -215,18 +261,26 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
             guard let textView else { return }
             switch action {
             case .insert(let text):
+                bridge.stopDictationForManualEditing()
                 bridge.keyFeedback(text == " " ? "space" : "letter")
                 textView.insertText(text)
             case .delete:
+                bridge.stopDictationForManualEditing()
                 bridge.keyFeedback("delete")
                 textView.deleteBackward()
             case .returnKey:
+                bridge.stopDictationForManualEditing()
                 bridge.keyFeedback("return")
                 textView.insertText("\n")
             case .send:
+                bridge.stopDictationForManualEditing()
                 bridge.keyFeedback("send")
-                bridge.submitComposer()
+                if bridge.composerBusy { bridge.stopRun() } else { bridge.submitComposer() }
+            case .dictate:
+                bridge.keyFeedback("return")
+                bridge.toggleDictation()
             case .systemKeyboard:
+                bridge.stopDictationForManualEditing()
                 bridge.keyFeedback("letter")
                 textView.useSystemKeyboard()
             case .hide:
@@ -240,6 +294,7 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
 final class KlaudComposerTextView: UITextView {
     private var crtKeyboard: UIView?
     var onCommandSend: (() -> Void)?
+    private(set) var isApplyingProgrammaticUpdate = false
 
     override var canBecomeFirstResponder: Bool { isEditable }
 
@@ -256,6 +311,34 @@ final class KlaudComposerTextView: UITextView {
         crtKeyboard = keyboard
         inputView = keyboard
         inputAccessoryView = nil
+    }
+
+    func setComposerState(busy: Bool, submitting: Bool) {
+        (crtKeyboard as? KlaudKeyboardInputView)?.setComposerState(
+            busy: busy,
+            submitting: submitting
+        )
+    }
+
+    @discardableResult
+    func performProgrammaticUpdate<T>(_ update: () -> T) -> T {
+        isApplyingProgrammaticUpdate = true
+        defer { isApplyingProgrammaticUpdate = false }
+        return update()
+    }
+
+    @discardableResult
+    func replaceText(in proposedRange: NSRange, with replacement: String) -> NSRange {
+        let currentLength = (text as NSString).length
+        let location = min(proposedRange.location, currentLength)
+        let rangeLength = min(proposedRange.length, currentLength - location)
+        textStorage.replaceCharacters(
+            in: NSRange(location: location, length: rangeLength),
+            with: replacement
+        )
+        let insertedRange = NSRange(location: location, length: (replacement as NSString).length)
+        selectedRange = NSRange(location: NSMaxRange(insertedRange), length: 0)
+        return insertedRange
     }
 
     func useSystemKeyboard() {
@@ -280,6 +363,7 @@ enum KlaudKeyboardAction {
     case delete
     case returnKey
     case send
+    case dictate
     case systemKeyboard
     case hide
 }
@@ -320,6 +404,8 @@ final class KlaudKeyboardInputView: UIInputView {
     private let column = UIStackView()
     private var shifted = false
     private var symbols = false
+    private var composerBusy = false
+    private var composerSubmitting = false
 
     init(action: @escaping (KlaudKeyboardAction) -> Void) {
         self.action = action
@@ -336,6 +422,13 @@ final class KlaudKeyboardInputView: UIInputView {
 
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: 314)
+    }
+
+    func setComposerState(busy: Bool, submitting: Bool) {
+        guard busy != composerBusy || submitting != composerSubmitting else { return }
+        composerBusy = busy
+        composerSubmitting = submitting
+        rebuild()
     }
 
     private func configureColumn() {
@@ -393,10 +486,16 @@ final class KlaudKeyboardInputView: UIInputView {
         column.addArrangedSubview(variableRow([mode, comma, space, period, quote], weights: [1.15, 0.8, 3.3, 0.8, 0.8]))
 
         let system = keyButton(title: "🌐", kind: .modifier, label: "System Keyboard") { [weak self] in self?.action(.systemKeyboard) }
+        let dictate = keyButton(title: "◉", kind: .modifier, label: "Dictate") { [weak self] in self?.action(.dictate) }
         let newline = keyButton(title: "↵", kind: .modifier, label: "New Line") { [weak self] in self?.action(.returnKey) }
         let hide = keyButton(title: "⌄", kind: .modifier, label: "Hide Keyboard") { [weak self] in self?.action(.hide) }
-        let send = keyButton(title: "send", kind: .send, label: "Send Reply") { [weak self] in self?.action(.send) }
-        column.addArrangedSubview(variableRow([system, newline, hide, send], weights: [1, 1, 1, 2.4]))
+        let send = keyButton(
+            title: composerBusy ? "stop" : "send",
+            kind: .send,
+            label: composerBusy ? "Stop Reply" : "Send Reply"
+        ) { [weak self] in self?.action(.send) }
+        send.isEnabled = composerBusy || !composerSubmitting
+        column.addArrangedSubview(variableRow([system, dictate, newline, hide, send], weights: [1, 1, 1, 1, 2.2]))
     }
 
     private func insertLetter(_ letter: String) {
@@ -482,7 +581,7 @@ final class KlaudKeyboardInputView: UIInputView {
         button.layer.borderWidth = 1
         button.layer.masksToBounds = true
         button.accessibilityLabel = label ?? title
-        button.addAction(UIAction { _ in onPress() }, for: .touchDown)
+        button.addAction(UIAction { _ in onPress() }, for: .primaryActionTriggered)
         apply(kind: kind, to: button, pressed: false)
         button.configurationUpdateHandler = { [weak self] button in
             self?.apply(kind: kind, to: button, pressed: button.isHighlighted)

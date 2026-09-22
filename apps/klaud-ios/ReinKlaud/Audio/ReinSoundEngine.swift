@@ -20,10 +20,11 @@ enum ReinSoundCue: String, CaseIterable, Sendable { case hover, click, key, send
 final class ReinSoundEngine: ObservableObject {
     @Published var enabled: Bool
     private let preference: SoundPreferenceStore
-    private var players: [ReinSoundCue: AVAudioPlayer] = [:]
+    private var players: [ReinSoundCue: [AVAudioPlayer]] = [:]
+    private var nextPlayer: [ReinSoundCue: Int] = [:]
     private var lastPlayed: [ReinSoundCue: TimeInterval] = [:]
     private var configuredSession = false
-    private let cooldown: [ReinSoundCue: TimeInterval] = [.hover: 0.07, .click: 0.045, .key: 0.028, .send: 0.14, .tool: 0.26, .reply: 0.3, .error: 0.5, .ready: 0.4]
+    private let cooldown: [ReinSoundCue: TimeInterval] = [.hover: 0.05, .click: 0.025, .key: 0.012, .send: 0.1, .tool: 0.26, .reply: 0.3, .error: 0.5, .ready: 0.4]
 
     init(preference: SoundPreferenceStore = DefaultsSoundPreferenceStore()) {
         self.preference = preference
@@ -32,7 +33,7 @@ final class ReinSoundEngine: ObservableObject {
 
     func setEnabled(_ value: Bool) {
         enabled = value; preference.setEnabled(value)
-        if !value { players.values.forEach { $0.stop() } }
+        if !value { players.values.flatMap { $0 }.forEach { $0.stop() } }
     }
 
     func play(_ cue: ReinSoundCue) {
@@ -40,19 +41,35 @@ final class ReinSoundEngine: ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         if let previous = lastPlayed[cue], now - previous < (cooldown[cue] ?? 0) { return }
         do {
+            let session = AVAudioSession.sharedInstance()
             if !configuredSession {
-                try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-                try AVAudioSession.sharedInstance().setActive(true)
+                try session.setCategory(.ambient, options: [.mixWithOthers])
                 configuredSession = true
             }
-            let player: AVAudioPlayer
-            if let cached = players[cue] { player = cached }
-            else {
+            // App switching and dictation can deactivate the shared session. Reactivate
+            // for every cue; AVAudioSession makes an already-active call cheap.
+            try session.setActive(true)
+
+            var bank = players[cue] ?? []
+            if bank.isEmpty {
                 guard let url = Bundle.main.url(forResource: cue.rawValue, withExtension: "wav") else { return }
-                player = try AVAudioPlayer(contentsOf: url); player.volume = 0.72; player.prepareToPlay(); players[cue] = player
+                bank = try (0..<4).map { _ in
+                    let player = try AVAudioPlayer(contentsOf: url)
+                    player.volume = 0.94
+                    player.prepareToPlay()
+                    return player
+                }
+                players[cue] = bank
             }
+            let index = (nextPlayer[cue] ?? 0) % bank.count
+            nextPlayer[cue] = index + 1
+            let player = bank[index]
             lastPlayed[cue] = now
-            player.currentTime = 0; player.play()
-        } catch { /* Sounds are enhancement-only. */ }
+            player.currentTime = 0
+            player.prepareToPlay()
+            player.play()
+        } catch {
+            configuredSession = false
+        }
     }
 }

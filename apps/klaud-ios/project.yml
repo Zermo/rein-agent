@@ -12,8 +12,8 @@ settings:
     DEVELOPMENT_TEAM: "$(REIN_APPLE_TEAM_ID)"
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    CURRENT_PROJECT_VERSION: 13
-    MARKETING_VERSION: 1.0.3
+    CURRENT_PROJECT_VERSION: 15
+    MARKETING_VERSION: 1.1.0
 targets:
   ReinKlaud:
     type: application
@@ -35,6 +35,10 @@ targets:
         NSLocalNetworkUsageDescription: klaʊdbot finds and connects to a Rein gateway you choose on your local network.
         NSMicrophoneUsageDescription: klaʊdbot uses the microphone for the keyboard dictation key.
         NSSpeechRecognitionUsageDescription: klaʊdbot turns speech into text from the keyboard dictation key.
+        BGTaskSchedulerPermittedIdentifiers:
+          - org.zermo.rein-klaud.ios.local-inference.*
+        UIBackgroundModes:
+          - processing
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -54,6 +58,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+        CODE_SIGN_ENTITLEMENTS: ReinKlaud/ReinKlaud.entitlements
     scheme:
       testTargets:
         - ReinKlaudTests

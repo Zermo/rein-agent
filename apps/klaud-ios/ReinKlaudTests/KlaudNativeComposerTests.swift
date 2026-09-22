@@ -96,6 +96,41 @@ final class KlaudNativeComposerTests: XCTestCase {
         XCTAssertEqual(commands.last?["text"] as? String, "")
     }
 
+    func testDuplicateSubmitIsLatchedUntilAcknowledgement() {
+        let bridge = makeReadyBridge(draft: "send once")
+        var commands: [[String: Any]] = []
+        bridge.commandSink = { commands.append($0) }
+
+        bridge.submitComposer()
+        bridge.submitComposer()
+
+        XCTAssertTrue(bridge.composerSubmitting)
+        XCTAssertEqual(commands.filter { $0["action"] as? String == "send" }.count, 1)
+    }
+
+    func testRejectedAcknowledgementReleasesSubmitLatch() throws {
+        let bridge = makeReadyBridge(draft: "retry me")
+        var commands: [[String: Any]] = []
+        bridge.commandSink = { commands.append($0) }
+        bridge.submitComposer()
+        let send = try XCTUnwrap(commands.last)
+
+        bridge.receiveComposerMessage([
+            "kind": "composer",
+            "protocolVersion": 1,
+            "action": "sendAck",
+            "botId": "bot-1",
+            "sessionId": "session-1",
+            "requestId": try XCTUnwrap(send["requestId"] as? String),
+            "revision": try XCTUnwrap(send["revision"] as? Int),
+            "accepted": false,
+        ])
+
+        XCTAssertFalse(bridge.composerSubmitting)
+        bridge.submitComposer()
+        XCTAssertEqual(commands.filter { $0["action"] as? String == "send" }.count, 2)
+    }
+
     func testBotSwitchRestoresEachScopedDraft() {
         let bridge = makeReadyBridge(draft: "one")
         bridge.commandSink = { _ in }
@@ -105,6 +140,112 @@ final class KlaudNativeComposerTests: XCTestCase {
         bridge.receiveComposerMessage(state(bot: "bot-1", session: "session-1", draft: ""))
 
         XCTAssertEqual(bridge.composerText, "bot one draft")
+    }
+
+    func testComposerScopeChangeStopsActiveDictationTracking() {
+        let bridge = makeReadyBridge(draft: "bot one")
+        let editor = KlaudComposerTextView()
+        editor.text = bridge.composerText
+        editor.selectedRange = NSRange(location: 7, length: 0)
+        bridge.beginDictationTracking(in: editor)
+        XCTAssertTrue(bridge.dictationActive)
+
+        bridge.receiveComposerMessage(state(bot: "bot-2", session: "session-2", draft: "bot two"))
+
+        XCTAssertFalse(bridge.dictationActive)
+        XCTAssertEqual(bridge.composerText, "bot two")
+    }
+
+    func testBusyStateStopsActiveDictationTracking() {
+        let bridge = makeReadyBridge(draft: "draft")
+        let editor = KlaudComposerTextView()
+        editor.text = bridge.composerText
+        bridge.beginDictationTracking(in: editor)
+        var busyState = state(bot: "bot-1", session: "session-1", draft: "draft")
+        busyState["busy"] = true
+        busyState["enabled"] = false
+
+        bridge.receiveComposerMessage(busyState)
+
+        XCTAssertFalse(bridge.dictationActive)
+    }
+
+
+    @MainActor
+    func testSelectedTextIsReplacedAtNativeSelection() {
+        let editor = KlaudComposerTextView()
+        editor.text = "hello world"
+        editor.selectedRange = NSRange(location: 6, length: 5)
+
+        let inserted = editor.replaceText(in: editor.selectedRange, with: "there")
+
+        XCTAssertEqual(editor.text, "hello there")
+        XCTAssertEqual(inserted, NSRange(location: 6, length: 5))
+        XCTAssertEqual(editor.selectedRange, NSRange(location: 11, length: 0))
+    }
+
+    @MainActor
+    func testDictationPartialReplacementUsesUTF16Ranges() {
+        let editor = KlaudComposerTextView()
+        editor.text = "a🙂z"
+        editor.selectedRange = NSRange(location: 1, length: 2)
+
+        let inserted = editor.replaceText(in: editor.selectedRange, with: "word")
+
+        XCTAssertEqual(editor.text, "awordz")
+        XCTAssertEqual(inserted, NSRange(location: 1, length: 4))
+        XCTAssertEqual(editor.selectedRange, NSRange(location: 5, length: 0))
+    }
+
+    func testProgrammaticEditorUpdateDoesNotRemainLatched() {
+        let editor = KlaudComposerTextView()
+
+        editor.performProgrammaticUpdate {
+            XCTAssertTrue(editor.isApplyingProgrammaticUpdate)
+            editor.text = "updated"
+        }
+
+        XCTAssertFalse(editor.isApplyingProgrammaticUpdate)
+        XCTAssertEqual(editor.text, "updated")
+    }
+
+    func testRefinedDraftIsRejectedAfterManualEdit() {
+        let bridge = makeReadyBridge(draft: "original")
+        let snapshot = bridge.currentDraftSnapshot()
+
+        bridge.setComposerDraft("operator edit")
+        bridge.applyRefinedDraft("model edit", from: snapshot)
+
+        XCTAssertEqual(bridge.composerText, "operator edit")
+        XCTAssertEqual(bridge.localInference.status, "Draft changed; refinement was not applied")
+    }
+
+    func testRefinedDraftIsRejectedAfterScopeChange() {
+        let bridge = makeReadyBridge(draft: "one")
+        let snapshot = bridge.currentDraftSnapshot()
+
+        bridge.receiveComposerMessage(state(bot: "bot-2", session: "session-2", draft: "two"))
+        bridge.applyRefinedDraft("stale", from: snapshot)
+
+        XCTAssertEqual(bridge.composerText, "two")
+        XCTAssertEqual(bridge.localInference.status, "Draft changed; refinement was not applied")
+    }
+
+    func testLocalInferenceRejectsEmptyAndOversizedDrafts() {
+        XCTAssertThrowsError(try KlaudLocalInference.preparedDraft("  \n ")) { error in
+            XCTAssertEqual(error as? KlaudLocalInference.LocalError, .emptyDraft)
+        }
+        let oversized = String(repeating: "x", count: KlaudLocalInference.maximumDraftBytes + 1)
+        XCTAssertThrowsError(try KlaudLocalInference.preparedDraft(oversized)) { error in
+            XCTAssertEqual(
+                error as? KlaudLocalInference.LocalError,
+                .draftTooLong(maximumBytes: KlaudLocalInference.maximumDraftBytes)
+            )
+        }
+    }
+
+    func testLocalInferenceTrimsPreparedDraft() throws {
+        XCTAssertEqual(try KlaudLocalInference.preparedDraft("  keep this  \n"), "keep this")
     }
 
     private func makeReadyBridge(draft: String) -> KlaudBridge {

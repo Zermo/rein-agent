@@ -39,22 +39,25 @@ publish=(
     --app "$ASC_APP_ID"
     --project "$project"
     --scheme ReinKlaud
-    --version 1.0.0
+    --version 1.1.0
     --signing-style automatic
     --team-id "$REIN_APPLE_TEAM_ID"
     --archive-path "$build_root/ReinKlaud.xcarchive"
     --ipa-path "$build_root/ReinKlaud.ipa"
-    --test-notes "$(cat "$notes_file")"
-    --locale en-US
     --clean
     --wait
     --output json
 )
 
 if [[ -n "${TESTFLIGHT_GROUP:-}" ]]; then
-    publish+=(--group "$TESTFLIGHT_GROUP")
+    publish+=(
+        --group "$TESTFLIGHT_GROUP"
+        --test-notes "$(cat "$notes_file")"
+        --locale en-US
+    )
     [[ "${TESTFLIGHT_NOTIFY:-0}" == 1 ]] && publish+=(--notify)
 else
+    # asc 5.x rejects test-note localization flags in upload-only mode.
     publish+=(--upload-only)
 fi
 

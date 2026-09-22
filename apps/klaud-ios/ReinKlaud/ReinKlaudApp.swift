@@ -80,24 +80,57 @@ final class KlaudBridge: NSObject, ObservableObject {
     @Published private(set) var composerEnabled = false
     @Published private(set) var composerBusy = false
     @Published private(set) var composerRevision = 0
+    @Published private(set) var composerSubmitting = false
     @Published var keyboardVisible = false
     @Published var keyboardDismissRequest = 0
     @Published var keyboardShowRequest = 0
 
     weak var webView: WKWebView?
+    weak var composerTextView: KlaudComposerTextView?
     let feel = KlaudKeyFeel()
     let dictation = KlaudDictation()
     let sounds = ReinSoundEngine()
+    let localInference = KlaudLocalInference()
     var commandSink: (([String: Any]) -> Void)?
+
+    struct DraftSnapshot {
+        let scope: KlaudComposerScope?
+        let text: String
+        let revision: Int
+    }
 
     private struct DraftRecord {
         var text: String
         var revision: Int
     }
 
+    private struct SubmitLatch {
+        let requestID: String
+        let scope: KlaudComposerScope
+        let revision: Int
+    }
+
+    private enum ComposerTransport {
+        case none
+        case scoped
+    }
+
     private var composerScope: KlaudComposerScope?
     private var drafts: [KlaudComposerScope: DraftRecord] = [:]
     private var pendingSends: [String: KlaudPendingComposerSend] = [:]
+    private var submitLatch: SubmitLatch?
+    private var transport: ComposerTransport = .none
+    private(set) var dictationActive = false
+    private var dictationRange: NSRange?
+    private var dictationScope: KlaudComposerScope?
+    private var dictationExpectedRevision: Int?
+
+    override init() {
+        super.init()
+        dictation.onResult = { [weak self] text, isFinal, error in
+            self?.applyDictation(text: text, isFinal: isFinal, error: error)
+        }
+    }
 
     func reload() {
         fault = nil
@@ -106,9 +139,16 @@ final class KlaudBridge: NSObject, ObservableObject {
     }
 
     func rejoin() {
+        localInference.refreshAvailability()
         guard let webView else { return }
         let host = webView.url?.host?.lowercased() ?? ""
-        if host == "auth.zermo.org" || host.isEmpty {
+        if host == "auth.zermo.org" {
+            // Preserve Authelia's in-progress MFA/passkey document when the
+            // user returns from another app.
+            webView.evaluateJavaScript("document.dispatchEvent(new Event('visibilitychange'))")
+            return
+        }
+        if host.isEmpty {
             reload()
             return
         }
@@ -120,8 +160,12 @@ final class KlaudBridge: NSObject, ObservableObject {
     }
 
     func resetComposerTransport() {
+        stopDictation()
         persistCurrentDraft()
         pendingSends.removeAll()
+        releaseSubmitLatch()
+        transport = .none
+        composerScope = nil
         composerVisible = false
         composerEnabled = false
         composerBusy = false
@@ -134,9 +178,12 @@ final class KlaudBridge: NSObject, ObservableObject {
               let action = body["action"] as? String else { return }
         switch action {
         case "state":
+            transport = .scoped
             updateComposerState(body)
         case "sendAck":
             receiveSendAcknowledgement(body)
+        case "dismiss":
+            requestKeyboardDismissal()
         default:
             break
         }
@@ -156,9 +203,12 @@ final class KlaudBridge: NSObject, ObservableObject {
     }
 
     func submitComposer() {
-        guard composerEnabled, !composerBusy, let composerScope,
+        guard composerEnabled, !composerBusy, !composerSubmitting, let composerScope,
               !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        stopDictationForManualEditing()
         let requestID = UUID().uuidString.lowercased()
+        submitLatch = SubmitLatch(requestID: requestID, scope: composerScope, revision: composerRevision)
+        composerSubmitting = true
         pendingSends[requestID] = KlaudPendingComposerSend(
             requestID: requestID,
             scope: composerScope,
@@ -200,6 +250,100 @@ final class KlaudBridge: NSObject, ObservableObject {
         keyboardShowRequest &+= 1
     }
 
+    func toggleDictation() {
+        if dictationActive { stopDictation() } else { startDictation() }
+    }
+
+    func startDictation() {
+        guard !dictationActive, composerEnabled, !composerBusy,
+              let editor = composerTextView else { return }
+        beginDictationTracking(in: editor)
+        dictation.start()
+    }
+
+    func beginDictationTracking(in editor: KlaudComposerTextView) {
+        let length = (editor.text as NSString).length
+        let location = min(editor.selectedRange.location, length)
+        let rangeLength = min(editor.selectedRange.length, length - location)
+        dictationRange = NSRange(location: location, length: rangeLength)
+        dictationScope = composerScope
+        dictationExpectedRevision = composerRevision
+        dictationActive = true
+    }
+
+    func stopDictation() {
+        guard dictationActive else {
+            dictationScope = nil
+            dictationExpectedRevision = nil
+            dictationRange = nil
+            return
+        }
+        dictation.stop()
+        dictationActive = false
+        dictationRange = nil
+        dictationScope = nil
+        dictationExpectedRevision = nil
+    }
+
+    func stopDictationForManualEditing() {
+        if dictationActive { stopDictation() }
+    }
+
+    private func applyDictation(text: String, isFinal: Bool, error: String?) {
+        guard error == nil else {
+            stopDictation()
+            return
+        }
+        guard dictationActive,
+              let editor = composerTextView,
+              composerScope == dictationScope,
+              composerRevision == dictationExpectedRevision else {
+            stopDictation()
+            return
+        }
+        let proposed = dictationRange ?? editor.selectedRange
+        let current = editor.text as NSString
+        let location = min(proposed.location, current.length)
+        let rangeLength = min(proposed.length, current.length - location)
+        let clamped = NSRange(location: location, length: rangeLength)
+        let candidate = current.replacingCharacters(in: clamped, with: text)
+        guard candidate.utf8.count <= KlaudComposerContract.maximumUTF8Count else {
+            stopDictation()
+            return
+        }
+        dictationRange = editor.performProgrammaticUpdate {
+            editor.replaceText(in: clamped, with: text)
+        }
+        setComposerDraft(editor.text)
+        dictationExpectedRevision = composerRevision
+        if isFinal {
+            stopDictation()
+        }
+    }
+
+    func refineDraftOnDevice() {
+        let snapshot = currentDraftSnapshot()
+        localInference.refine(snapshot.text) { [weak self] result in
+            guard let self, case .success(let revised) = result else { return }
+            self.applyRefinedDraft(revised, from: snapshot)
+        }
+    }
+
+    func currentDraftSnapshot() -> DraftSnapshot {
+        DraftSnapshot(scope: composerScope, text: composerText, revision: composerRevision)
+    }
+
+    func applyRefinedDraft(_ revised: String, from snapshot: DraftSnapshot) {
+        guard composerScope == snapshot.scope,
+              composerRevision == snapshot.revision,
+              composerText == snapshot.text else {
+            localInference.markDraftChanged()
+            return
+        }
+        setComposerDraft(revised)
+        requestKeyboardPresentation()
+    }
+
     func keyFeedback(_ key: String) {
         feel.tap(key)
         sounds.play(key == "send" ? .send : .key)
@@ -224,7 +368,12 @@ final class KlaudBridge: NSObject, ObservableObject {
         }
 
         let remoteDraft = (body["draft"] as? String) ?? ""
+        let nextEnabled = body["enabled"] as? Bool ?? false
+        let nextBusy = body["busy"] as? Bool ?? false
         if composerScope != nextScope {
+            stopDictation()
+            releaseSubmitLatch()
+            pendingSends.removeAll()
             persistCurrentDraft()
             composerScope = nextScope
             let record = drafts[nextScope] ?? DraftRecord(
@@ -235,10 +384,12 @@ final class KlaudBridge: NSObject, ObservableObject {
             composerText = record.text
             composerRevision = record.revision
         }
+        if !nextEnabled || nextBusy { stopDictation() }
+        if nextBusy, submitLatch?.scope == nextScope { releaseSubmitLatch() }
 
         composerVisible = true
-        composerEnabled = body["enabled"] as? Bool ?? false
-        composerBusy = body["busy"] as? Bool ?? false
+        composerEnabled = nextEnabled
+        composerBusy = nextBusy
         if remoteDraft != composerText {
             emitComposerCommand([
                 "action": "draft",
@@ -250,15 +401,22 @@ final class KlaudBridge: NSObject, ObservableObject {
 
     private func receiveSendAcknowledgement(_ body: [String: Any]) {
         guard let requestID = body["requestId"] as? String,
-              let pending = pendingSends.removeValue(forKey: requestID),
-              body["accepted"] as? Bool == true,
+              let pending = pendingSends[requestID],
               KlaudComposerContract.scope(from: body) == pending.scope,
               (body["revision"] as? NSNumber)?.intValue == pending.revision else { return }
 
-        guard composerScope == pending.scope,
+        pendingSends.removeValue(forKey: requestID)
+        if submitLatch?.requestID == requestID { releaseSubmitLatch() }
+        guard body["accepted"] as? Bool == true,
+              composerScope == pending.scope,
               composerRevision == pending.revision,
               composerText == pending.text else { return }
         setComposerDraft("")
+    }
+
+    private func releaseSubmitLatch() {
+        submitLatch = nil
+        composerSubmitting = false
     }
 
     private func persistCurrentDraft() {
@@ -267,7 +425,7 @@ final class KlaudBridge: NSObject, ObservableObject {
     }
 
     private func emitComposerCommand(_ values: [String: Any]) {
-        guard let composerScope else { return }
+        guard transport == .scoped, let composerScope else { return }
         var payload = values
         payload["protocolVersion"] = KlaudComposerContract.version
         payload["botId"] = composerScope.botID
@@ -282,6 +440,7 @@ final class KlaudBridge: NSObject, ObservableObject {
         let source = "window.dispatchEvent(new CustomEvent('\(KlaudComposerContract.eventName)',{detail:\(json)}))"
         webView?.evaluateJavaScript(source, completionHandler: nil)
     }
+
 }
 
 final class KlaudKeyFeel {
@@ -354,47 +513,49 @@ final class KlaudKeyFeel {
     }
 }
 
+@MainActor
 final class KlaudDictation {
     private let recognizer = SFSpeechRecognizer(locale: .current) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audio = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var hasTap = false
-    weak var webView: WKWebView?
+    private var generation = 0
+    var onResult: ((String, Bool, String?) -> Void)?
 
     func start() {
         stop()
+        generation &+= 1
+        let token = generation
         askMic { [weak self] mic in
-            guard let self else { return }
+            guard let self, token == self.generation else { return }
             guard mic else {
-                self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'denied')")
+                self.onResult?("", true, "denied")
                 return
             }
-            SFSpeechRecognizer.requestAuthorization { status in
-                guard status == .authorized else {
-                    self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'denied')")
-                    return
+            SFSpeechRecognizer.requestAuthorization { [weak self] status in
+                Task { @MainActor in
+                    guard let self, token == self.generation else { return }
+                    guard status == .authorized else {
+                        self.onResult?("", true, "denied")
+                        return
+                    }
+                    self.run(token: token)
                 }
-                DispatchQueue.main.async { self.run() }
             }
         }
     }
 
-    private func askMic(_ done: @escaping (Bool) -> Void) {
-        if #available(iOS 17.0, *) {
-            AVAudioApplication.requestRecordPermission { granted in
-                DispatchQueue.main.async { done(granted) }
-            }
-        } else {
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                DispatchQueue.main.async { done(granted) }
-            }
+    private func askMic(_ done: @escaping @MainActor (Bool) -> Void) {
+        AVAudioApplication.requestRecordPermission { granted in
+            Task { @MainActor in done(granted) }
         }
     }
 
-    private func run() {
+    private func run(token: Int) {
+        guard token == generation else { return }
         guard let recognizer, recognizer.isAvailable else {
-            js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'unavailable')")
+            onResult?("", true, "unavailable")
             return
         }
         let session = AVAudioSession.sharedInstance()
@@ -402,37 +563,78 @@ final class KlaudDictation {
             try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
-            js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'error')")
+            onResult?("", true, "error")
             return
         }
+
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = false
         self.request = request
+
         let input = audio.inputNode
         let format = input.outputFormat(forBus: 0)
         if hasTap { input.removeTap(onBus: 0); hasTap = false }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
-        }
-        hasTap = true
-        audio.prepare()
-        do { try audio.start() } catch {
-            js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'error')")
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            self.request = nil
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            onResult?("", true, "unavailable")
             return
         }
+        if #available(iOS 27.0, *) {
+            do {
+                try input.installAudioTap(
+                    onBus: 0,
+                    bufferSize: 1024,
+                    format: format
+                ) { [weak request] buffer, _ in
+                    request?.append(AVAudioPCMBuffer(copying: buffer))
+                }
+            } catch {
+                self.request = nil
+                try? session.setActive(false, options: .notifyOthersOnDeactivation)
+                onResult?("", true, "error")
+                return
+            }
+        } else {
+            input.installTap(
+                onBus: 0,
+                bufferSize: 1024,
+                format: format
+            ) { [weak request] buffer, _ in
+                request?.append(buffer)
+            }
+        }
+
+        hasTap = true
+        audio.prepare()
+        do {
+            try audio.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            hasTap = false
+            self.request = nil
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            onResult?("", true, "error")
+            return
+        }
+
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate(\(Self.json(result.bestTranscription.formattedString)),false,'')")
-            } else if error != nil {
-                self.js("window.klaudNative&&window.klaudNative.onDictate&&window.klaudNative.onDictate('',true,'error')")
-                self.stop()
+            Task { @MainActor in
+                guard let self, token == self.generation else { return }
+                if let result {
+                    self.onResult?(result.bestTranscription.formattedString, result.isFinal, nil)
+                    if result.isFinal { self.stop() }
+                } else if error != nil {
+                    self.onResult?("", true, "error")
+                    self.stop()
+                }
             }
         }
     }
 
     func stop() {
+        generation &+= 1
         request?.endAudio()
         task?.cancel()
         task = nil
@@ -440,17 +642,8 @@ final class KlaudDictation {
         if hasTap { audio.inputNode.removeTap(onBus: 0); hasTap = false }
         if audio.isRunning { audio.stop() }
         let session = AVAudioSession.sharedInstance()
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
         try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
-        try? session.setActive(true, options: .notifyOthersOnDeactivation)
-    }
-
-    private func js(_ source: String) {
-        DispatchQueue.main.async { self.webView?.evaluateJavaScript(source, completionHandler: nil) }
-    }
-
-    private static func json(_ value: String) -> String {
-        let data = (try? JSONEncoder().encode(value)) ?? Data("\"\"".utf8)
-        return String(data: data, encoding: .utf8) ?? "\"\""
     }
 }
 
@@ -523,18 +716,20 @@ struct KlaudWebView: UIViewRepresentable {
         view.isOpaque = true
         view.backgroundColor = UIColor(red: 0.07, green: 0.06, blue: 0.05, alpha: 1)
         bridge.webView = view
-        bridge.dictation.webView = view
         view.load(URLRequest(url: start, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
         return view
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
         bridge.webView = view
-        bridge.dictation.webView = view
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         let bridge: KlaudBridge
+        private var navigationEpoch = 0
+        private var navigationInProgress = true
+        private var activeNavigation: WKNavigation?
+        private var pendingComposerMessage: (epoch: Int, body: [String: Any])?
         init(bridge: KlaudBridge) { self.bridge = bridge }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -542,21 +737,33 @@ struct KlaudWebView: UIViewRepresentable {
                   KlaudComposerContract.trusts(message),
                   let body = message.body as? [String: Any] else { return }
             let kind = body["kind"] as? String ?? ""
+            let messageEpoch = navigationEpoch
             if kind == "haptic" {
                 let key = body["key"] as? String ?? "letter"
-                DispatchQueue.main.async { self.bridge.feel.tap(key) }
+                DispatchQueue.main.async {
+                    guard self.navigationEpoch == messageEpoch else { return }
+                    self.bridge.feel.tap(key)
+                }
                 return
             }
             if kind == "dictate" {
                 let action = body["action"] as? String ?? "start"
                 DispatchQueue.main.async {
-                    self.bridge.dictation.webView = self.bridge.webView
-                    if action == "stop" { self.bridge.dictation.stop() } else { self.bridge.dictation.start() }
+                    guard self.navigationEpoch == messageEpoch,
+                          !self.navigationInProgress else { return }
+                    if action == "stop" { self.bridge.stopDictation() } else { self.bridge.startDictation() }
                 }
                 return
             }
             if kind == "composer" {
-                DispatchQueue.main.async { self.bridge.receiveComposerMessage(body) }
+                DispatchQueue.main.async {
+                    guard self.navigationEpoch == messageEpoch else { return }
+                    if self.navigationInProgress {
+                        self.pendingComposerMessage = (messageEpoch, body)
+                    } else {
+                        self.bridge.receiveComposerMessage(body)
+                    }
+                }
                 return
             }
             if kind == "setup" {
@@ -579,30 +786,55 @@ struct KlaudWebView: UIViewRepresentable {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            navigationEpoch &+= 1
+            navigationInProgress = true
+            activeNavigation = nil
+            pendingComposerMessage = nil
             bridge.resetComposerTransport()
             webView.load(URLRequest(url: klaudOrigin, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            navigationEpoch &+= 1
+            navigationInProgress = true
+            activeNavigation = navigation
+            pendingComposerMessage = nil
             bridge.resetComposerTransport()
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            guard navigation === activeNavigation else { return }
+            navigationInProgress = false
+            activeNavigation = nil
+            pendingComposerMessage = nil
             bridge.fault = error.localizedDescription
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            guard navigation === activeNavigation else { return }
+            navigationInProgress = false
+            activeNavigation = nil
+            pendingComposerMessage = nil
             let code = (error as NSError).code
             if code == NSURLErrorCancelled { return }
             bridge.fault = error.localizedDescription
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard navigation === activeNavigation else { return }
             bridge.fault = nil
+            navigationInProgress = false
+            activeNavigation = nil
             let host = webView.url?.host?.lowercased() ?? ""
             if host == "openbot.zermo.org" || host == "reinklaud.zermo.org" {
                 UserDefaults.standard.set(true, forKey: "rein.klaud.account-ready")
+                if let pending = pendingComposerMessage,
+                   pending.epoch == navigationEpoch {
+                    bridge.receiveComposerMessage(pending.body)
+                }
+                pendingComposerMessage = nil
             } else {
+                pendingComposerMessage = nil
                 bridge.resetComposerTransport()
             }
         }

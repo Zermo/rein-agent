@@ -50,6 +50,7 @@
 		C9C1466B0B02E5BC5D60DBF9 /* SSEDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A553FEF39B76575EE6B4E9BF /* SSEDecoderTests.swift */; };
 		D05D0BB73C2AA70A3B3B97AD /* click.wav in Resources */ = {isa = PBXBuildFile; fileRef = 4F2688954B448F51686BD397 /* click.wav */; };
 		D64DFF49DE8D52A3C71C0DBD /* KlaudNativeComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75AC0CBBB3FE04A73D3E5CB /* KlaudNativeComposer.swift */; };
+		E02208918664693E31418FE2 /* KlaudLocalInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED83FAEE6061E0E8D86245F1 /* KlaudLocalInference.swift */; };
 		EA094922E53896FBD9164C2A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9B2D19BD6D109D5AD5B6276A /* PrivacyInfo.xcprivacy */; };
 		ED27F23F1C48B32B3C41FC96 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B14F5A6DE3A7553C2B2469 /* RootView.swift */; };
 		ED618EE35951E638C11D0B8C /* CloudAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD7ACBEDFBC13A313B925EF3 /* CloudAccountStore.swift */; };
@@ -80,6 +81,7 @@
 		29543BDC7398C036AA7672D0 /* StateReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateReducerTests.swift; sourceTree = "<group>"; };
 		2B8BD2ECF721EC336B6E8C1B /* ReplyPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplyPresentationTests.swift; sourceTree = "<group>"; };
 		2FDF20D19EC580D22DBFB7AB /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
+		338BB9144D5C636C9113809A /* ReinKlaud.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ReinKlaud.entitlements; sourceTree = "<group>"; };
 		344401B71F2DC82F41CDF6B7 /* GatewayAccountsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayAccountsClient.swift; sourceTree = "<group>"; };
 		360D779C03151E033049A834 /* CloudWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudWorkspaceView.swift; sourceTree = "<group>"; };
 		3794FC1A55484B39C4229CDC /* PendingRunRequestStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingRunRequestStore.swift; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 		E307C681D36B1E39760805D4 /* CloudWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudWorkspace.swift; sourceTree = "<group>"; };
 		E5693241E912D9278376E267 /* reply.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = reply.wav; sourceTree = "<group>"; };
 		EBCD637233F46AFD6121D7A5 /* ReinGatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReinGatewayClient.swift; sourceTree = "<group>"; };
+		ED83FAEE6061E0E8D86245F1 /* KlaudLocalInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KlaudLocalInference.swift; sourceTree = "<group>"; };
 		EF24A6087314A19619339275 /* ReinAppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReinAppStore.swift; sourceTree = "<group>"; };
 		F3AFC8E179C28F3C5E3904F0 /* ReinSoundEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReinSoundEngine.swift; sourceTree = "<group>"; };
 		F75AC0CBBB3FE04A73D3E5CB /* KlaudNativeComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KlaudNativeComposer.swift; sourceTree = "<group>"; };
@@ -152,6 +155,7 @@
 				928B5DB3AC0CE3C2C3728AAB /* Audio */,
 				5ECC9D40D9E82DDB95165517 /* Cloud */,
 				EEC7E8388C02DA934BCB80A7 /* Design */,
+				AC8C2A3F7752532760F80A14 /* LocalAI */,
 				5319A00B7DFB4766E8E8CDEC /* Models */,
 				FEDF6693D83A3CB0300E4E0F /* Native */,
 				291AC641C5F3C212FF0485BB /* Networking */,
@@ -162,6 +166,7 @@
 				928AF3FAA2035742E82EAF00 /* Assets.xcassets */,
 				9EF074850B6A067894D91986 /* Info.plist */,
 				9B2D19BD6D109D5AD5B6276A /* PrivacyInfo.xcprivacy */,
+				338BB9144D5C636C9113809A /* ReinKlaud.entitlements */,
 				B19B14278E637A23E4740849 /* ReinKlaudApp.swift */,
 			);
 			path = ReinKlaud;
@@ -259,6 +264,14 @@
 				8F54C2737FC112022CFFBF22 /* ReinKlaudTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		AC8C2A3F7752532760F80A14 /* LocalAI */ = {
+			isa = PBXGroup;
+			children = (
+				ED83FAEE6061E0E8D86245F1 /* KlaudLocalInference.swift */,
+			);
+			path = LocalAI;
 			sourceTree = "<group>";
 		};
 		B92E54181E823FC9F3C66506 /* Store */ = {
@@ -424,6 +437,7 @@
 				9748912CAB95AC8A23B0BED2 /* JSONValue.swift in Sources */,
 				C1CA75D4EA0124EC17914C6C /* KeychainStore.swift in Sources */,
 				0329B2B14C41A8E9362E524E /* KlaudComposerContract.swift in Sources */,
+				E02208918664693E31418FE2 /* KlaudLocalInference.swift in Sources */,
 				D64DFF49DE8D52A3C71C0DBD /* KlaudNativeComposer.swift in Sources */,
 				89E5A8ACA12A593649F98F0E /* OnboardingView.swift in Sources */,
 				2D8AB31A28C3510A07F94397 /* PendingRunRequestStore.swift in Sources */,
@@ -474,6 +488,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ReinKlaud/ReinKlaud.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = ReinKlaud/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -524,7 +539,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 15;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "$(REIN_APPLE_TEAM_ID)";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -539,7 +554,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -603,7 +618,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 15;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "$(REIN_APPLE_TEAM_ID)";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -624,7 +639,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -640,6 +655,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ReinKlaud/ReinKlaud.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = ReinKlaud/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
