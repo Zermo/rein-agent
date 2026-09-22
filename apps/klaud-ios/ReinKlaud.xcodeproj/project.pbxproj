@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0329B2B14C41A8E9362E524E /* KlaudComposerContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A50AE6901BA3A66CF616C35 /* KlaudComposerContract.swift */; };
 		07F85CC2A010526162761CEF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 928AF3FAA2035742E82EAF00 /* Assets.xcassets */; };
 		0BBE8236E131846FD83130BD /* GatewayAccountsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 344401B71F2DC82F41CDF6B7 /* GatewayAccountsClient.swift */; };
 		0CB9B215B5CBE8BC53316050 /* RunEventCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B707BA9C9B483081FD83A136 /* RunEventCursor.swift */; };
@@ -14,6 +15,7 @@
 		1A2F15819FF92445A0DB5C0C /* ConnectionValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271B41D5D969667BF205B785 /* ConnectionValidatorTests.swift */; };
 		1A46DBD4485B0C78F20E5CBA /* ReinAppStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98E6F00D9BA38FD6A13C2F4F /* ReinAppStoreTests.swift */; };
 		25EA17F29A3864AD953E6032 /* ReplyPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B88B718F7D6DEE340366D37 /* ReplyPresentation.swift */; };
+		2A9F076C00D6E3FCC41BCC13 /* KlaudNativeComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71EA7B8EB07EB6978409B39 /* KlaudNativeComposerTests.swift */; };
 		2D8AB31A28C3510A07F94397 /* PendingRunRequestStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3794FC1A55484B39C4229CDC /* PendingRunRequestStore.swift */; };
 		2F9BD5A515A046363BA3C970 /* send.wav in Resources */ = {isa = PBXBuildFile; fileRef = 28468B22B69D6524BE09E96A /* send.wav */; };
 		3480E34955C750E0BBA38529 /* CloudWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E307C681D36B1E39760805D4 /* CloudWorkspace.swift */; };
@@ -47,6 +49,7 @@
 		C7F405F94EBEC686E922E50D /* BotListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC420EBD582B68C126F7DDC /* BotListView.swift */; };
 		C9C1466B0B02E5BC5D60DBF9 /* SSEDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A553FEF39B76575EE6B4E9BF /* SSEDecoderTests.swift */; };
 		D05D0BB73C2AA70A3B3B97AD /* click.wav in Resources */ = {isa = PBXBuildFile; fileRef = 4F2688954B448F51686BD397 /* click.wav */; };
+		D64DFF49DE8D52A3C71C0DBD /* KlaudNativeComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75AC0CBBB3FE04A73D3E5CB /* KlaudNativeComposer.swift */; };
 		EA094922E53896FBD9164C2A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9B2D19BD6D109D5AD5B6276A /* PrivacyInfo.xcprivacy */; };
 		ED27F23F1C48B32B3C41FC96 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B14F5A6DE3A7553C2B2469 /* RootView.swift */; };
 		ED618EE35951E638C11D0B8C /* CloudAccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD7ACBEDFBC13A313B925EF3 /* CloudAccountStore.swift */; };
@@ -85,6 +88,7 @@
 		52F65A4FA3E7D65310AE651F /* ready.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ready.wav; sourceTree = "<group>"; };
 		53E1CCFD47C662F0902459D8 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		543BAD4BC2202D5EB58744E4 /* tool.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = tool.wav; sourceTree = "<group>"; };
+		6A50AE6901BA3A66CF616C35 /* KlaudComposerContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KlaudComposerContract.swift; sourceTree = "<group>"; };
 		6B0576BB6A8E6D5484C7DB64 /* DirectModelClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectModelClient.swift; sourceTree = "<group>"; };
 		787687BD160EE11B29001511 /* DirectModelClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectModelClientTests.swift; sourceTree = "<group>"; };
 		85147D53210494215BB5F8B3 /* ReinKlaud.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ReinKlaud.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -105,6 +109,7 @@
 		B1C646CE3D71A83A6F05F480 /* key.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = key.wav; sourceTree = "<group>"; };
 		B5612826AB3E223B823E136B /* error.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = error.wav; sourceTree = "<group>"; };
 		B707BA9C9B483081FD83A136 /* RunEventCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunEventCursor.swift; sourceTree = "<group>"; };
+		B71EA7B8EB07EB6978409B39 /* KlaudNativeComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KlaudNativeComposerTests.swift; sourceTree = "<group>"; };
 		BBC1409D3BB66821853758DE /* ReinDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReinDiscovery.swift; sourceTree = "<group>"; };
 		C8CF266111807CBFD3E9BF9F /* BotAvatarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotAvatarTests.swift; sourceTree = "<group>"; };
 		C8D1438FE07AC90610B8B608 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
@@ -116,6 +121,7 @@
 		EBCD637233F46AFD6121D7A5 /* ReinGatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReinGatewayClient.swift; sourceTree = "<group>"; };
 		EF24A6087314A19619339275 /* ReinAppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReinAppStore.swift; sourceTree = "<group>"; };
 		F3AFC8E179C28F3C5E3904F0 /* ReinSoundEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReinSoundEngine.swift; sourceTree = "<group>"; };
+		F75AC0CBBB3FE04A73D3E5CB /* KlaudNativeComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KlaudNativeComposer.swift; sourceTree = "<group>"; };
 		FC3442C74684918DB8493848 /* hover.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = hover.wav; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -147,6 +153,7 @@
 				5ECC9D40D9E82DDB95165517 /* Cloud */,
 				EEC7E8388C02DA934BCB80A7 /* Design */,
 				5319A00B7DFB4766E8E8CDEC /* Models */,
+				FEDF6693D83A3CB0300E4E0F /* Native */,
 				291AC641C5F3C212FF0485BB /* Networking */,
 				7391BF72A93B9757D3462968 /* Security */,
 				3D79A225607F89F92E0A5B95 /* Sounds */,
@@ -168,6 +175,7 @@
 				192EC1BA42B2A043410DDCDA /* CloudWorkspaceTests.swift */,
 				271B41D5D969667BF205B785 /* ConnectionValidatorTests.swift */,
 				787687BD160EE11B29001511 /* DirectModelClientTests.swift */,
+				B71EA7B8EB07EB6978409B39 /* KlaudNativeComposerTests.swift */,
 				98E6F00D9BA38FD6A13C2F4F /* ReinAppStoreTests.swift */,
 				2B8BD2ECF721EC336B6E8C1B /* ReplyPresentationTests.swift */,
 				A553FEF39B76575EE6B4E9BF /* SSEDecoderTests.swift */,
@@ -272,6 +280,15 @@
 			path = Design;
 			sourceTree = "<group>";
 		};
+		FEDF6693D83A3CB0300E4E0F /* Native */ = {
+			isa = PBXGroup;
+			children = (
+				6A50AE6901BA3A66CF616C35 /* KlaudComposerContract.swift */,
+				F75AC0CBBB3FE04A73D3E5CB /* KlaudNativeComposer.swift */,
+			);
+			path = Native;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -318,7 +335,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2600;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					985EECC15BCABED85EECC531 = {
 						DevelopmentTeam = "$(REIN_APPLE_TEAM_ID)";
@@ -380,6 +397,7 @@
 				9B5F837F51D2EA81ED6130E4 /* CloudWorkspaceTests.swift in Sources */,
 				1A2F15819FF92445A0DB5C0C /* ConnectionValidatorTests.swift in Sources */,
 				A8389B927F0BC9F4CE1F3480 /* DirectModelClientTests.swift in Sources */,
+				2A9F076C00D6E3FCC41BCC13 /* KlaudNativeComposerTests.swift in Sources */,
 				1A46DBD4485B0C78F20E5CBA /* ReinAppStoreTests.swift in Sources */,
 				503BE20D31D493541F78B221 /* ReplyPresentationTests.swift in Sources */,
 				C9C1466B0B02E5BC5D60DBF9 /* SSEDecoderTests.swift in Sources */,
@@ -405,6 +423,8 @@
 				0BBE8236E131846FD83130BD /* GatewayAccountsClient.swift in Sources */,
 				9748912CAB95AC8A23B0BED2 /* JSONValue.swift in Sources */,
 				C1CA75D4EA0124EC17914C6C /* KeychainStore.swift in Sources */,
+				0329B2B14C41A8E9362E524E /* KlaudComposerContract.swift in Sources */,
+				D64DFF49DE8D52A3C71C0DBD /* KlaudNativeComposer.swift in Sources */,
 				89E5A8ACA12A593649F98F0E /* OnboardingView.swift in Sources */,
 				2D8AB31A28C3510A07F94397 /* PendingRunRequestStore.swift in Sources */,
 				BE0EEC72CE158C47A99A4CD7 /* ReinAppStore.swift in Sources */,
@@ -518,7 +538,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.0.3;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -603,7 +623,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.0.3;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;

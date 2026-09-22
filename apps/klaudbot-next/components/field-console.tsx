@@ -10,7 +10,13 @@ import { SplitPanes } from "./split-panes";
 import type { SetupProfile } from "./field-ui";
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : "Console request failed.";
-interface ActiveRun { botId: string; id?: string; controller: AbortController; cancelRequested: boolean }
+interface ActiveRun {
+  botId: string;
+  id?: string;
+  controller: AbortController;
+  cancelRequested: boolean;
+  accept?: (accepted: boolean) => void;
+}
 
 export default function FieldConsole() {
   const [api] = useState(() => new KlaudApi());
@@ -259,6 +265,7 @@ export default function FieldConsole() {
     if (active.current !== run) return;
     if (event.type === "RUN_STARTED") {
       run.id = String(event.runId); log("working · run started");
+      run.accept?.(true); run.accept = undefined;
       if (run.cancelRequested) void api.cancel(run.id).catch(error => setFault(errorText(error)));
     } else if (event.type === "STATE_SNAPSHOT") {
       streamStateVersion.current++;
@@ -290,11 +297,29 @@ export default function FieldConsole() {
       log(run.cancelRequested ? "run stopped" : "run failed");
     } else if (event.type === "RUN_FINISHED") { log("ready · run complete"); sound.current?.play("reply"); }
   }
-  async function submit() {
-    if (!bot || active.current || !draft.trim()) return;
-    const message = draft.trim();
-    if (new TextEncoder().encode(message).byteLength > 128 * 1024) { setFault("Operator input exceeds 128 KiB."); return; }
-    const run: ActiveRun = { botId: bot.id, controller: new AbortController(), cancelRequested: false };
+  function submit(override?: string): Promise<boolean> {
+    const source = override ?? draft;
+    if (!bot || active.current || !source.trim()) return Promise.resolve(false);
+    const message = source.trim();
+    if (new TextEncoder().encode(message).byteLength > 128 * 1024) {
+      setFault("Operator input exceeds 128 KiB.");
+      return Promise.resolve(false);
+    }
+
+    let resolveAcceptance: (accepted: boolean) => void = () => {};
+    let acceptanceSettled = false;
+    const acceptance = new Promise<boolean>(resolve => { resolveAcceptance = resolve; });
+    const settleAcceptance = (accepted: boolean) => {
+      if (acceptanceSettled) return;
+      acceptanceSettled = true;
+      resolveAcceptance(accepted);
+    };
+    const run: ActiveRun = {
+      botId: bot.id,
+      controller: new AbortController(),
+      cancelRequested: false,
+      accept: settleAcceptance,
+    };
     active.current = run; processed.current.clear();
     setBusy(true); setPhase("working"); setDraft(""); setFault(""); setPending([]); setRailTab("path"); sound.current?.play("send");
     const userId = `local-user-${crypto.randomUUID()}`;
@@ -306,19 +331,29 @@ export default function FieldConsole() {
         if (hint.pane === "crt" || hint.pane === "path") setRailTab(hint.pane);
       })
       .catch(() => { /* Jev is advisory; the run continues. */ });
-    try { await api.run(bot, message, run.controller.signal, event => onEvent(event, run)); }
-    catch (error) {
-      if (!run.id) { setDraft(previous => previous || message); setChats(previous => ({ ...previous, [run.botId]: (previous[run.botId] ?? []).map(item => item.id === userId ? { ...item, isError: true } : item) })); }
-      if (!run.cancelRequested && !run.controller.signal.aborted) { setFault(errorText(error)); sound.current?.play("error"); }
-    }
-    finally {
-      if (active.current === run) {
-        active.current = null; setBusy(false); setPhase("ready"); setPending([]);
-        setChats(previous => ({ ...previous, [run.botId]: (previous[run.botId] ?? []).filter(item => !(item.id.startsWith("local-reply-") && !item.content)).map(item => item.pending ? { ...item, pending: false } : item) }));
-        await loadMessages(run.botId).catch(error => setFault(errorText(error)));
-        if (run.botId === selectedRef.current) void refreshFiles();
+
+    void (async () => {
+      try { await api.run(bot, message, run.controller.signal, event => onEvent(event, run)); }
+      catch (error) {
+        if (!run.id) {
+          settleAcceptance(false);
+          setDraft(previous => previous || message);
+          setChats(previous => ({ ...previous, [run.botId]: (previous[run.botId] ?? []).map(item => item.id === userId ? { ...item, isError: true } : item) }));
+        }
+        if (!run.cancelRequested && !run.controller.signal.aborted) { setFault(errorText(error)); sound.current?.play("error"); }
       }
-    }
+      finally {
+        settleAcceptance(Boolean(run.id));
+        run.accept = undefined;
+        if (active.current === run) {
+          active.current = null; setBusy(false); setPhase("ready"); setPending([]);
+          setChats(previous => ({ ...previous, [run.botId]: (previous[run.botId] ?? []).filter(item => !(item.id.startsWith("local-reply-") && !item.content)).map(item => item.pending ? { ...item, pending: false } : item) }));
+          await loadMessages(run.botId).catch(error => setFault(errorText(error)));
+          if (run.botId === selectedRef.current) void refreshFiles();
+        }
+      }
+    })();
+    return acceptance;
   }
   async function stop() {
     const run = active.current;
@@ -377,7 +412,7 @@ export default function FieldConsole() {
     <SplitPanes showLeft={Boolean(shell.chrome.sidebar && view !== "bots")} railOpen={railOpen} onRailOpen={changeRail}
       left={<BotRoster bots={snapshot?.bots ?? []} selectedId={selected} onSelect={id => { void chooseBot(id).catch(error => setBotError(errorText(error))); }} onAdd={addBot} busy={busy} saving={saving} runningBotId={active.current?.botId} phase={currentPhase} error={botError}/>}
       center={<main className="content">
-        {view === "bots" ? <BotRoster bots={snapshot?.bots ?? []} selectedId={selected} onSelect={id => { void chooseBot(id).catch(error => setBotError(errorText(error))); }} onAdd={addBot} onAvatar={avatar => { void changeAvatar(avatar); }} busy={busy} saving={saving} page runningBotId={active.current?.botId} phase={currentPhase} error={botError}/> : view === "settings" ? <SettingsPanel shell={shell} runSettings={settings} onShellPatch={(path, value) => { void patchShell(path, value); }} onRunSettings={patch => { void saveSettings(patch).catch(() => {}); }} rainEnabled={rainEnabled} onRain={changeRain} soundEnabled={soundEnabled} onSound={changeSound} onSetup={() => setSetupOpen(true)} saving={saving} error={settingsError} connectionLabel={connection === "connected" ? `Connected to ${origin}` : `Not connected · ${origin}`} reasoningDescription="Provider-dependent. This control persists the requested effort; the existing backend determines support."/> : <ChatPane bot={bot} messages={messages} phase={currentPhase} busy={busy && active.current?.botId === selected} draft={draft} onDraft={setDraft} onSubmit={() => { void submit(); }} onStop={() => { void stop(); }} onPath={path => { setNodes(path); setSelectedNode(path.at(-1)?.id ?? null); setRailTab("path"); setRailOpen(true); }} pending={pending} onDecision={(id, choice) => { void decision(id, choice); }} decisionBusy={decisionBusy} disabled={connection !== "connected" || busy && active.current?.botId !== selected} hasEarlier={before[selected] != null} loadingEarlier={loadingEarlier} onEarlier={() => { setLoadingEarlier(true); void loadMessages(selected, before[selected] ?? undefined).catch(error => setFault(errorText(error))).finally(() => setLoadingEarlier(false)); }} onOpenBots={() => setView("bots")} toolName={toolName} lines={lines} railOpen={railOpen} onToggleComputer={computer}/>}
+        {view === "bots" ? <BotRoster bots={snapshot?.bots ?? []} selectedId={selected} onSelect={id => { void chooseBot(id).catch(error => setBotError(errorText(error))); }} onAdd={addBot} onAvatar={avatar => { void changeAvatar(avatar); }} busy={busy} saving={saving} page runningBotId={active.current?.botId} phase={currentPhase} error={botError}/> : view === "settings" ? <SettingsPanel shell={shell} runSettings={settings} onShellPatch={(path, value) => { void patchShell(path, value); }} onRunSettings={patch => { void saveSettings(patch).catch(() => {}); }} rainEnabled={rainEnabled} onRain={changeRain} soundEnabled={soundEnabled} onSound={changeSound} onSetup={() => setSetupOpen(true)} saving={saving} error={settingsError} connectionLabel={connection === "connected" ? `Connected to ${origin}` : `Not connected · ${origin}`} reasoningDescription="Provider-dependent. This control persists the requested effort; the existing backend determines support."/> : <ChatPane bot={bot} messages={messages} phase={currentPhase} busy={busy && active.current?.botId === selected} draft={draft} onDraft={setDraft} onSubmit={submit} onStop={() => { void stop(); }} onPath={path => { setNodes(path); setSelectedNode(path.at(-1)?.id ?? null); setRailTab("path"); setRailOpen(true); }} pending={pending} onDecision={(id, choice) => { void decision(id, choice); }} decisionBusy={decisionBusy} disabled={connection !== "connected" || busy && active.current?.botId !== selected} hasEarlier={before[selected] != null} loadingEarlier={loadingEarlier} onEarlier={() => { setLoadingEarlier(true); void loadMessages(selected, before[selected] ?? undefined).catch(error => setFault(errorText(error))).finally(() => setLoadingEarlier(false)); }} onOpenBots={() => setView("bots")} toolName={toolName} lines={lines} railOpen={railOpen} onToggleComputer={computer}/>}
       </main>}
       right={<ContextRail tab={railTab} onTab={tab => { setRailTab(tab); if (tab === "crt") void refreshFiles(); }} nodes={nodes} selectedNodeId={selectedNode} onSelectNode={setSelectedNode} liveNodeId={liveNodeId} bot={bot} busy={busy && active.current?.botId === selected} held={held} onHold={setHeld} files={files} filesLoading={filesLoading} doc={doc} inspectLoading={inspectLoading} onInspect={path => { if (held) void openInspect(path); }} onCloseInspect={() => { inspectRequest.current?.abort(); setInspectLoading(false); replaceDoc(null); }} onRefresh={() => { void refreshFiles(); }}/>}
     />

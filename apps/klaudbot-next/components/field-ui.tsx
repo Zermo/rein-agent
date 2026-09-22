@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Bot, Phase, Message, PathNode, Shell, RunSettings, InspectFile, InspectDoc, PendingAction, RailTab } from "../lib/types";
 import { AvatarPicker, BotAvatar } from "./avatars";
 import { AvatarScene } from "./avatar-scene";
 import { groupTurns } from "../lib/model";
 import { avatarForBot } from "../lib/avatar-catalog";
+import {
+  NATIVE_COMPOSER_EVENT,
+  NATIVE_COMPOSER_READY_EVENT,
+  parseNativeComposerCommand,
+  postNativeComposerMessage,
+  supportsNativeComposer,
+  type NativeComposerHost,
+} from "../lib/native-composer";
 
 export type ConsoleView = "bots" | "chat" | "settings";
 export type ApprovalDecision = "deny" | "allow" | "whitelist" | "always";
@@ -23,7 +31,7 @@ export interface BotRosterProps {
 }
 export interface ChatPaneProps {
   bot: Bot | null; messages: Message[]; phase: Phase; busy: boolean;
-  draft: string; onDraft: (value: string) => void; onSubmit: () => void; onStop: () => void;
+  draft: string; onDraft: (value: string) => void; onSubmit: (message?: string) => Promise<boolean>; onStop: () => void;
   onPath: (nodes: PathNode[]) => void; pending?: PendingAction[];
   onDecision?: (id: string, decision: ApprovalDecision) => void; decisionBusy?: boolean;
   lines?: string[]; showActivity?: boolean; hasEarlier?: boolean; loadingEarlier?: boolean;
@@ -75,6 +83,100 @@ function usePageVisible() {
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
   return visible;
+}
+
+interface NativeComposerOptions {
+  bot: Bot | null;
+  draft: string;
+  busy: boolean;
+  disabled: boolean;
+  onDraft: (value: string) => void;
+  onSubmit: (message?: string) => Promise<boolean>;
+  onStop: () => void;
+}
+
+function useNativeComposer({ bot, draft, busy, disabled, onDraft, onSubmit, onStop }: NativeComposerOptions) {
+  const [active, setActive] = useState(false);
+  const host = useCallback(() => (window as Window & { klaudNative?: NativeComposerHost }).klaudNative, []);
+
+  useEffect(() => {
+    const detect = () => setActive(supportsNativeComposer(host()));
+    detect();
+    window.addEventListener(NATIVE_COMPOSER_READY_EVENT, detect);
+    return () => window.removeEventListener(NATIVE_COMPOSER_READY_EVENT, detect);
+  }, [host]);
+
+  useEffect(() => {
+    if (!active) return;
+    postNativeComposerMessage({
+      action: "state",
+      visible: Boolean(bot),
+      botId: bot?.id ?? "",
+      sessionId: bot?.sessionId ?? "",
+      enabled: Boolean(bot) && !disabled && !busy,
+      busy,
+      draft,
+    });
+  }, [active, bot, busy, disabled, draft]);
+
+  useEffect(() => {
+    if (!active) return;
+    const receive = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const command = parseNativeComposerCommand(event.detail);
+      if (!command) return;
+      const sameScope = command.botId === bot?.id && command.sessionId === bot?.sessionId;
+      if (!sameScope) {
+        postNativeComposerMessage({
+          action: command.action === "send" ? "sendAck" : "commandAck",
+          requestId: "requestId" in command ? command.requestId : "",
+          botId: command.botId,
+          sessionId: command.sessionId,
+          revision: "revision" in command ? command.revision : 0,
+          accepted: false,
+          reason: "scope-changed",
+        });
+        return;
+      }
+      if (command.action === "draft") {
+        const accepted = !disabled && !busy;
+        if (accepted) onDraft(command.text);
+        postNativeComposerMessage({
+          action: "draftAck",
+          botId: command.botId,
+          sessionId: command.sessionId,
+          revision: command.revision,
+          accepted,
+        });
+        return;
+      }
+      if (command.action === "stop") {
+        if (busy) onStop();
+        postNativeComposerMessage({
+          action: "stopAck",
+          requestId: command.requestId,
+          botId: command.botId,
+          sessionId: command.sessionId,
+          accepted: busy,
+        });
+        return;
+      }
+      void onSubmit(command.text).then(accepted => {
+        postNativeComposerMessage({
+          action: "sendAck",
+          requestId: command.requestId,
+          botId: command.botId,
+          sessionId: command.sessionId,
+          revision: command.revision,
+          accepted,
+        });
+      });
+    };
+    window.addEventListener(NATIVE_COMPOSER_EVENT, receive);
+    return () => window.removeEventListener(NATIVE_COMPOSER_EVENT, receive);
+  }, [active, bot, busy, disabled, onDraft, onStop, onSubmit]);
+
+  return active;
 }
 
 export function RainPane({ enabled }: { enabled: boolean }) {
@@ -333,6 +435,7 @@ export function ChatPane({ bot, messages, phase, busy, draft, onDraft, onSubmit,
   const fileRef = useRef<HTMLInputElement>(null);
   const prevHeight = useRef(0);
   const visible = usePageVisible();
+  const nativeComposer = useNativeComposer({ bot, draft, busy, disabled, onDraft, onSubmit, onStop });
   const inputId = useId();
   const rows = ledgerRows(messages);
   const lastAssistant = rows.findLastIndex(row => row.role === "assistant");
@@ -343,7 +446,7 @@ export function ChatPane({ bot, messages, phase, busy, draft, onDraft, onSubmit,
     else el.scrollTop = el.scrollHeight;
   }, [messages, bot?.id]);
   function submit(event?: FormEvent) {
-    event?.preventDefault(); if (!bot || busy || disabled || !draft.trim()) return; onSubmit();
+    event?.preventDefault(); if (!bot || busy || disabled || !draft.trim()) return; void onSubmit();
   }
   function attach(event: FormEvent<HTMLInputElement>) {
     const files = event.currentTarget.files;
@@ -389,7 +492,7 @@ export function ChatPane({ bot, messages, phase, busy, draft, onDraft, onSubmit,
           onClick={() => onDecision?.(action.id, decision)}>{decision === "always" ? "Always allow" : decision[0].toUpperCase() + decision.slice(1)}</button>)}</div>
         {action.kind === "approval" && <p className="approval-policy-note">Whitelist automatically allows new mutating tools as they are created; Always allow skips future approval waits.</p>}
       </section>)}</div>}
-    <div className="crt-prompt-dock">
+    {!nativeComposer && <div className="crt-prompt-dock">
       <div className="crt-prompt-row">
         <input ref={fileRef} className="sr-only" type="file" multiple onChange={attach} tabIndex={-1} aria-hidden="true"/>
         <button type="button" className="crt-attach" disabled={!bot || disabled || busy} aria-label="Add attachment" title="Add attachment" onClick={() => fileRef.current?.click()}>+</button>
@@ -397,7 +500,7 @@ export function ChatPane({ bot, messages, phase, busy, draft, onDraft, onSubmit,
           onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }}/>
         {busy ? <button type="button" className="stop-run" onClick={onStop}>stop</button> : null}
       </div>
-    </div>
+    </div>}
     <div className="chat-footer" data-busy={busy ? "true" : "false"} data-paused={!visible} aria-live="polite">
       <span className="activity-signal" aria-hidden="true"><i/><i/><i/></span>
       <div className="thought-stream">

@@ -24,7 +24,14 @@ struct KlaudWebShell: View {
     var body: some View {
         ZStack {
             Color(red: 0.07, green: 0.06, blue: 0.05).ignoresSafeArea()
-            KlaudWebView(bridge: bridge, start: klaudOrigin)
+            VStack(spacing: 0) {
+                KlaudWebView(bridge: bridge, start: klaudOrigin)
+                if bridge.composerVisible {
+                    KlaudNativeComposer(bridge: bridge)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeOut(duration: 0.18), value: bridge.composerVisible)
             if let message = bridge.fault {
                 VStack(spacing: 12) {
                     Text("klaʊdbot")
@@ -64,15 +71,37 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
+@MainActor
 final class KlaudBridge: NSObject, ObservableObject {
     @Published var fault: String?
     @Published var shareItem: ShareItem?
+    @Published private(set) var composerVisible = false
+    @Published private(set) var composerText = ""
+    @Published private(set) var composerEnabled = false
+    @Published private(set) var composerBusy = false
+    @Published private(set) var composerRevision = 0
+    @Published var keyboardVisible = false
+    @Published var keyboardDismissRequest = 0
+    @Published var keyboardShowRequest = 0
+
     weak var webView: WKWebView?
     let feel = KlaudKeyFeel()
     let dictation = KlaudDictation()
+    let sounds = ReinSoundEngine()
+    var commandSink: (([String: Any]) -> Void)?
+
+    private struct DraftRecord {
+        var text: String
+        var revision: Int
+    }
+
+    private var composerScope: KlaudComposerScope?
+    private var drafts: [KlaudComposerScope: DraftRecord] = [:]
+    private var pendingSends: [String: KlaudPendingComposerSend] = [:]
 
     func reload() {
         fault = nil
+        resetComposerTransport()
         webView?.load(URLRequest(url: klaudOrigin, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
     }
 
@@ -90,15 +119,168 @@ final class KlaudBridge: NSObject, ObservableObject {
         reload()
     }
 
+    func resetComposerTransport() {
+        persistCurrentDraft()
+        pendingSends.removeAll()
+        composerVisible = false
+        composerEnabled = false
+        composerBusy = false
+        requestKeyboardDismissal()
+    }
+
+    func receiveComposerMessage(_ body: [String: Any]) {
+        let version = (body["protocolVersion"] as? NSNumber)?.intValue
+        guard version == KlaudComposerContract.version,
+              let action = body["action"] as? String else { return }
+        switch action {
+        case "state":
+            updateComposerState(body)
+        case "sendAck":
+            receiveSendAcknowledgement(body)
+        default:
+            break
+        }
+    }
+
+    func setComposerDraft(_ text: String) {
+        guard text != composerText,
+              text.utf8.count <= KlaudComposerContract.maximumUTF8Count else { return }
+        composerText = text
+        composerRevision &+= 1
+        persistCurrentDraft()
+        emitComposerCommand([
+            "action": "draft",
+            "revision": composerRevision,
+            "text": text
+        ])
+    }
+
+    func submitComposer() {
+        guard composerEnabled, !composerBusy, let composerScope,
+              !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let requestID = UUID().uuidString.lowercased()
+        pendingSends[requestID] = KlaudPendingComposerSend(
+            requestID: requestID,
+            scope: composerScope,
+            revision: composerRevision,
+            text: composerText
+        )
+        emitComposerCommand([
+            "action": "send",
+            "requestId": requestID,
+            "revision": composerRevision,
+            "text": composerText
+        ])
+    }
+
+    func stopRun() {
+        guard composerBusy, composerScope != nil else { return }
+        emitComposerCommand([
+            "action": "stop",
+            "requestId": UUID().uuidString.lowercased()
+        ])
+    }
+
+    func appendAttachmentNames(_ urls: [URL]) {
+        let names = urls.prefix(8).map(\.lastPathComponent).filter { !$0.isEmpty }
+        guard !names.isEmpty else { return }
+        let suffix = "+ \(names.joined(separator: ", "))"
+        let next = composerText.isEmpty
+            ? suffix
+            : "\(composerText)\(composerText.hasSuffix("\n") ? "" : "\n")\(suffix)"
+        setComposerDraft(next)
+    }
+
+    func requestKeyboardDismissal() {
+        keyboardDismissRequest &+= 1
+        keyboardVisible = false
+    }
+
+    func requestKeyboardPresentation() {
+        keyboardShowRequest &+= 1
+    }
+
+    func keyFeedback(_ key: String) {
+        feel.tap(key)
+        sounds.play(key == "send" ? .send : .key)
+    }
+
     func handoff(action: String, name: String, mime: String, bytes: Data) {
         let safe = (name as NSString).lastPathComponent
             .replacingOccurrences(of: "/", with: "")
             .replacingOccurrences(of: ":", with: "")
         let file = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(safe.isEmpty ? "klaudbot.bin" : safe)
         try? bytes.write(to: file, options: .atomic)
-        DispatchQueue.main.async { self.shareItem = ShareItem(url: file) }
+        shareItem = ShareItem(url: file)
         _ = action
         _ = mime
+    }
+
+    private func updateComposerState(_ body: [String: Any]) {
+        guard body["visible"] as? Bool == true,
+              let nextScope = KlaudComposerContract.scope(from: body) else {
+            resetComposerTransport()
+            return
+        }
+
+        let remoteDraft = (body["draft"] as? String) ?? ""
+        if composerScope != nextScope {
+            persistCurrentDraft()
+            composerScope = nextScope
+            let record = drafts[nextScope] ?? DraftRecord(
+                text: remoteDraft.utf8.count <= KlaudComposerContract.maximumUTF8Count ? remoteDraft : "",
+                revision: 0
+            )
+            drafts[nextScope] = record
+            composerText = record.text
+            composerRevision = record.revision
+        }
+
+        composerVisible = true
+        composerEnabled = body["enabled"] as? Bool ?? false
+        composerBusy = body["busy"] as? Bool ?? false
+        if remoteDraft != composerText {
+            emitComposerCommand([
+                "action": "draft",
+                "revision": composerRevision,
+                "text": composerText
+            ])
+        }
+    }
+
+    private func receiveSendAcknowledgement(_ body: [String: Any]) {
+        guard let requestID = body["requestId"] as? String,
+              let pending = pendingSends.removeValue(forKey: requestID),
+              body["accepted"] as? Bool == true,
+              KlaudComposerContract.scope(from: body) == pending.scope,
+              (body["revision"] as? NSNumber)?.intValue == pending.revision else { return }
+
+        guard composerScope == pending.scope,
+              composerRevision == pending.revision,
+              composerText == pending.text else { return }
+        setComposerDraft("")
+    }
+
+    private func persistCurrentDraft() {
+        guard let composerScope else { return }
+        drafts[composerScope] = DraftRecord(text: composerText, revision: composerRevision)
+    }
+
+    private func emitComposerCommand(_ values: [String: Any]) {
+        guard let composerScope else { return }
+        var payload = values
+        payload["protocolVersion"] = KlaudComposerContract.version
+        payload["botId"] = composerScope.botID
+        payload["sessionId"] = composerScope.sessionID
+        if let commandSink {
+            commandSink(payload)
+            return
+        }
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else { return }
+        let source = "window.dispatchEvent(new CustomEvent('\(KlaudComposerContract.eventName)',{detail:\(json)}))"
+        webView?.evaluateJavaScript(source, completionHandler: nil)
     }
 }
 
@@ -295,21 +477,38 @@ struct KlaudWebView: UIViewRepresentable {
         let ready = UserDefaults.standard.bool(forKey: "rein.klaud.account-ready")
         let seen = UserDefaults.standard.bool(forKey: "rein.klaud.setup-seen") || ready
         let boot = """
-        window.klaudNative=Object.assign(window.klaudNative||{},{inApp:true,systemKeyboard:\(thirdParty ? "true" : "false")});
-        window.klaudNative.feel=function(k){try{window.webkit.messageHandlers.klaud.postMessage({kind:'haptic',key:String(k||'letter')});}catch(e){}};
-        window.klaudNative.dictate=function(a){try{window.webkit.messageHandlers.klaud.postMessage({kind:'dictate',action:String(a||'start')});}catch(e){}};
         (function(){
+          var trusted = location.protocol === 'https:' &&
+            (location.hostname === 'openbot.zermo.org' || location.hostname === 'reinklaud.zermo.org') &&
+            (!location.port || location.port === '443');
+          if (!trusted) return;
+          var native = window.klaudNative || {};
+          var capabilities = Array.isArray(native.capabilities) ? native.capabilities.slice() : [];
+          if (!capabilities.includes('composer.v1')) capabilities.push('composer.v1');
+          window.klaudNative = Object.assign(native, {
+            inApp: true,
+            protocolVersion: 1,
+            capabilities: capabilities,
+            systemKeyboard: \(thirdParty ? "true" : "false")
+          });
+          window.klaudNative.feel = function(k){
+            try { window.webkit.messageHandlers.klaud.postMessage({kind:'haptic',key:String(k||'letter')}); } catch(e) {}
+          };
+          window.klaudNative.dictate = function(a){
+            try { window.webkit.messageHandlers.klaud.postMessage({kind:'dictate',action:String(a||'start')}); } catch(e) {}
+          };
           try {
             if (\(ready ? "true" : "false")) localStorage.setItem('rein.klaud.account-ready','1');
             if (\(seen ? "true" : "false")) localStorage.setItem('rein.klaud.setup-seen','1');
-          } catch (e) {}
-          var orig = Storage.prototype.setItem;
+          } catch(e) {}
+          var originalSetItem = Storage.prototype.setItem;
           Storage.prototype.setItem = function(k, v) {
-            orig.call(this, k, v);
+            originalSetItem.call(this, k, v);
             if (k === 'rein.klaud.account-ready' || k === 'rein.klaud.setup-seen' || k === 'rein.klaud.setup-profile') {
-              try { window.webkit.messageHandlers.klaud.postMessage({kind:'setup',key:String(k),value:String(v||'')}); } catch (e) {}
+              try { window.webkit.messageHandlers.klaud.postMessage({kind:'setup',key:String(k),value:String(v||'')}); } catch(e) {}
             }
           };
+          window.dispatchEvent(new CustomEvent('klaud-native-ready', {detail:{protocolVersion:1}}));
         })();
         """
         config.userContentController.addUserScript(WKUserScript(source: boot, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -339,7 +538,9 @@ struct KlaudWebView: UIViewRepresentable {
         init(bridge: KlaudBridge) { self.bridge = bridge }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == "klaud", let body = message.body as? [String: Any] else { return }
+            guard message.name == "klaud",
+                  KlaudComposerContract.trusts(message),
+                  let body = message.body as? [String: Any] else { return }
             let kind = body["kind"] as? String ?? ""
             if kind == "haptic" {
                 let key = body["key"] as? String ?? "letter"
@@ -352,6 +553,10 @@ struct KlaudWebView: UIViewRepresentable {
                     self.bridge.dictation.webView = self.bridge.webView
                     if action == "stop" { self.bridge.dictation.stop() } else { self.bridge.dictation.start() }
                 }
+                return
+            }
+            if kind == "composer" {
+                DispatchQueue.main.async { self.bridge.receiveComposerMessage(body) }
                 return
             }
             if kind == "setup" {
@@ -374,7 +579,12 @@ struct KlaudWebView: UIViewRepresentable {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            bridge.resetComposerTransport()
             webView.load(URLRequest(url: klaudOrigin, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            bridge.resetComposerTransport()
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -392,6 +602,8 @@ struct KlaudWebView: UIViewRepresentable {
             let host = webView.url?.host?.lowercased() ?? ""
             if host == "openbot.zermo.org" || host == "reinklaud.zermo.org" {
                 UserDefaults.standard.set(true, forKey: "rein.klaud.account-ready")
+            } else {
+                bridge.resetComposerTransport()
             }
         }
 
@@ -418,7 +630,13 @@ struct KlaudWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-            decisionHandler(.grant)
+            let trusted = KlaudComposerContract.trusts(
+                scheme: origin.protocol,
+                host: origin.host,
+                port: origin.port,
+                isMainFrame: frame.isMainFrame
+            )
+            decisionHandler(trusted ? .grant : .deny)
         }
     }
 }

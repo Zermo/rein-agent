@@ -24,7 +24,7 @@ content is never requested or rendered.
 
 ## Requirements
 
-- Xcode 26 with the iOS 26 simulator runtime
+- Xcode 27 with the iOS 27 SDK; install the iOS 27 simulator runtime to execute unit tests
 - XcodeGen (`brew install xcodegen`)
 - For host tools and CLI subscriptions, a Rein host reachable from the device
   through the same LAN, a private mesh, or an HTTPS gateway
@@ -137,7 +137,8 @@ needed:
 REIN_IOS_DESTINATION='platform=iOS Simulator,name=iPad Pro 13-inch (M5)' ./scripts/build.sh
 ```
 
-The tests cover private/public URL policy, split and CRLF SSE frames, resumable
+The tests cover the origin-scoped native composer bridge, UIKit selection and
+draft acknowledgement behavior, private/public URL policy, split and CRLF SSE frames, resumable
 mobile event envelopes and replay cursors, shell and transcript reduction,
 explicit reply markers, reported completion metadata, the Keychain storage
 abstraction, account and endpoint validation, direct API protocols, fallback
