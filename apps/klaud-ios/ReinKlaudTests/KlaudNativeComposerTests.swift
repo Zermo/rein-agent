@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import ReinKlaud
 
 @MainActor
@@ -28,6 +29,27 @@ final class KlaudNativeComposerTests: XCTestCase {
         editor.deleteBackward()
         XCTAssertEqual(editor.text, "senddraft")
         XCTAssertEqual(editor.selectedRange, NSRange(location: 4, length: 0))
+    }
+
+    func testNativeComposerUsesSingleRowAndVintageCaretMetrics() {
+        XCTAssertEqual(KlaudNativeComposerStyle.editorHeight, 44)
+        XCTAssertEqual(KlaudNativeComposerStyle.caretWidth, 7)
+
+        let editor = KlaudComposerTextView(frame: CGRect(x: 0, y: 0, width: 240, height: 44))
+        editor.isEditable = true
+        editor.text = "field note"
+        editor.selectedRange = NSRange(location: (editor.text as NSString).length, length: 0)
+        editor.layoutIfNeeded()
+
+        XCTAssertEqual(editor.caretRect(for: editor.endOfDocument).width, 7)
+    }
+
+    func testCRTKeyboardOmitsTheSystemKeyboardSwitcher() {
+        let keyboard = KlaudKeyboardInputView { _ in }
+        let labels = buttons(in: keyboard).compactMap { $0.accessibilityLabel }
+
+        XCTAssertFalse(labels.contains("System Keyboard"))
+        XCTAssertFalse(labels.contains("🌐"))
     }
 
     func testBridgeRequiresTrustedHTTPSMainFrame() {
@@ -397,6 +419,11 @@ final class KlaudNativeComposerTests: XCTestCase {
             "draft": draft,
             "webRevision": 1,
         ]
+    }
+
+    private func buttons(in view: UIView) -> [UIButton] {
+        let own = view as? UIButton
+        return (own.map { [$0] } ?? []) + view.subviews.flatMap { buttons(in: $0) }
     }
 
 }

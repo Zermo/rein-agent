@@ -2,6 +2,11 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+enum KlaudNativeComposerStyle {
+    static let editorHeight: CGFloat = 44
+    static let caretWidth: CGFloat = 7
+}
+
 struct KlaudNativeComposer: View {
     @ObservedObject var bridge: KlaudBridge
     @State private var choosingAttachment = false
@@ -45,16 +50,6 @@ struct KlaudNativeComposer: View {
                 }
                 .disabled(!bridge.composerEnabled || bridge.composerBusy)
 
-                composerButton(symbol: "sparkles", label: "Refine on Device") {
-                    bridge.keyFeedback("letter")
-                    bridge.refineDraftOnDevice()
-                }
-                .disabled(
-                    !bridge.composerEnabled || bridge.composerBusy || !bridge.composerWithinLimit ||
-                    bridge.localInference.isRunning || bridge.localInference.availability != .ready ||
-                    bridge.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
-
                 ZStack(alignment: .topLeading) {
                     if bridge.composerText.isEmpty {
                         Text(bridge.composerEnabled ? "Reply to your field unit…" : "Choose a field unit")
@@ -66,7 +61,7 @@ struct KlaudNativeComposer: View {
                     }
                     KlaudComposerTextEditor(bridge: bridge)
                 }
-                .frame(minHeight: 44, maxHeight: 86)
+                .frame(height: KlaudNativeComposerStyle.editorHeight)
                 .overlay {
                     RoundedRectangle(cornerRadius: 5)
                         .stroke(paper.opacity(0.58), lineWidth: 1)
@@ -288,10 +283,6 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
             case .dictate:
                 bridge.keyFeedback("return")
                 bridge.toggleDictation()
-            case .systemKeyboard:
-                bridge.stopDictationForManualEditing()
-                bridge.keyFeedback("letter")
-                textView.useSystemKeyboard()
             case .hide:
                 bridge.keyFeedback("letter")
                 bridge.requestKeyboardDismissal()
@@ -306,6 +297,13 @@ final class KlaudComposerTextView: UITextView {
     private(set) var isApplyingProgrammaticUpdate = false
 
     override var canBecomeFirstResponder: Bool { isEditable }
+
+    override func caretRect(for position: UITextPosition) -> CGRect {
+        var rect = super.caretRect(for: position)
+        guard !rect.isNull, !rect.isInfinite else { return rect }
+        rect.size.width = KlaudNativeComposerStyle.caretWidth
+        return rect
+    }
 
     override var keyCommands: [UIKeyCommand]? {
         [UIKeyCommand(
@@ -350,18 +348,6 @@ final class KlaudComposerTextView: UITextView {
         return insertedRange
     }
 
-    func useSystemKeyboard() {
-        inputView = nil
-        inputAccessoryView = KlaudKeyboardAccessory { [weak self] in self?.useCRTKeyboard() }
-        reloadInputViews()
-    }
-
-    func useCRTKeyboard() {
-        inputView = crtKeyboard
-        inputAccessoryView = nil
-        reloadInputViews()
-    }
-
     @objc private func sendFromHardwareKeyboard() {
         onCommandSend?()
     }
@@ -373,37 +359,7 @@ enum KlaudKeyboardAction {
     case returnKey
     case send
     case dictate
-    case systemKeyboard
     case hide
-}
-
-final class KlaudKeyboardAccessory: UIInputView {
-    init(onCRT: @escaping () -> Void) {
-        super.init(frame: CGRect(x: 0, y: 0, width: 390, height: 44), inputViewStyle: .keyboard)
-        allowsSelfSizing = true
-        backgroundColor = UIColor(red: 0.071, green: 0.063, blue: 0.055, alpha: 1)
-        let button = UIButton(type: .system)
-        button.setTitle("CRT keyboard", for: .normal)
-        button.titleLabel?.font = .monospacedSystemFont(ofSize: 14, weight: .semibold)
-        button.tintColor = UIColor(red: 0.957, green: 0.918, blue: 0.831, alpha: 1)
-        button.accessibilityLabel = "Return to CRT keyboard"
-        button.addAction(UIAction { _ in onCRT() }, for: .touchUpInside)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(button)
-        NSLayoutConstraint.activate([
-            button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            button.topAnchor.constraint(equalTo: topAnchor),
-            button.bottomAnchor.constraint(equalTo: bottomAnchor),
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 132)
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { nil }
-
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: 44)
-    }
 }
 
 final class KlaudKeyboardInputView: UIInputView {
@@ -494,7 +450,6 @@ final class KlaudKeyboardInputView: UIInputView {
         let quote = keyButton(title: "'", kind: .key) { [weak self] in self?.action(.insert("'")) }
         column.addArrangedSubview(variableRow([mode, comma, space, period, quote], weights: [1.15, 0.8, 3.3, 0.8, 0.8]))
 
-        let system = keyButton(title: "🌐", kind: .modifier, label: "System Keyboard") { [weak self] in self?.action(.systemKeyboard) }
         let dictate = keyButton(title: "◉", kind: .modifier, label: "Dictate") { [weak self] in self?.action(.dictate) }
         let newline = keyButton(title: "↵", kind: .modifier, label: "New Line") { [weak self] in self?.action(.returnKey) }
         let hide = keyButton(title: "⌄", kind: .modifier, label: "Hide Keyboard") { [weak self] in self?.action(.hide) }
@@ -504,7 +459,7 @@ final class KlaudKeyboardInputView: UIInputView {
             label: composerBusy ? "Stop Reply" : "Send Reply"
         ) { [weak self] in self?.action(.send) }
         send.isEnabled = composerBusy || !composerSubmitting
-        column.addArrangedSubview(variableRow([system, dictate, newline, hide, send], weights: [1, 1, 1, 1, 2.2]))
+        column.addArrangedSubview(variableRow([dictate, newline, hide, send], weights: [1, 1, 1, 2.2]))
     }
 
     private func insertLetter(_ letter: String) {
