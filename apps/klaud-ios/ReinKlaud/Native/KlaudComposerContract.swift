@@ -13,6 +13,67 @@ struct KlaudPendingComposerSend: Equatable {
     let text: String
 }
 
+struct KlaudDocumentBridgeGate {
+    private static let maximumBufferedMessages = 64
+    private(set) var epoch = 0
+    private(set) var navigationInProgress = true
+    private(set) var committedNonce: String?
+    private var pendingComposerMessages: [String: [[String: Any]]] = [:]
+
+    mutating func beginNavigation() {
+        epoch &+= 1
+        navigationInProgress = true
+        committedNonce = nil
+        pendingComposerMessages.removeAll()
+    }
+
+    mutating func failNavigation() {
+        navigationInProgress = false
+        committedNonce = nil
+        pendingComposerMessages.removeAll()
+    }
+
+    func accepts(_ body: [String: Any], capturedEpoch: Int) -> Bool {
+        guard capturedEpoch == epoch,
+              !navigationInProgress,
+              let nonce = body["documentNonce"] as? String else { return false }
+        return !nonce.isEmpty && nonce == committedNonce
+    }
+
+    mutating func receiveComposer(
+        _ body: [String: Any],
+        capturedEpoch: Int
+    ) -> [[String: Any]] {
+        guard capturedEpoch == epoch,
+              let nonce = body["documentNonce"] as? String,
+              !nonce.isEmpty else { return [] }
+        if navigationInProgress {
+            var messages = pendingComposerMessages[nonce, default: []]
+            if messages.count == Self.maximumBufferedMessages {
+                messages.removeFirst()
+            }
+            messages.append(body)
+            pendingComposerMessages[nonce] = messages
+            return []
+        }
+        return nonce == committedNonce ? [body] : []
+    }
+
+    mutating func commit(
+        nonce: String,
+        capturedEpoch: Int
+    ) -> [[String: Any]] {
+        guard capturedEpoch == epoch,
+              navigationInProgress,
+              !nonce.isEmpty else { return [] }
+        committedNonce = nonce
+        navigationInProgress = false
+        let pending = pendingComposerMessages[nonce] ?? []
+        pendingComposerMessages.removeAll()
+        return pending
+    }
+}
+
 enum KlaudComposerContract {
     static let version = 1
     static let capability = "composer.v1"

@@ -4,6 +4,7 @@ import {
   NATIVE_COMPOSER_CAPABILITY,
   NATIVE_COMPOSER_VERSION,
   parseNativeComposerCommand,
+  postNativeComposerMessage,
   supportsNativeComposer,
 } from "../lib/native-composer.ts";
 
@@ -45,4 +46,31 @@ test("send commands preserve request identity", () => {
   if (!parsed || parsed.action !== "send") throw new Error("Expected a send command");
   assert.equal(parsed.requestId, "request-9");
   assert.equal(parsed.revision, 9);
+});
+
+test("native composer messages carry the injected document nonce", () => {
+  const messages: unknown[] = [];
+  const target = {
+    klaudNative: { documentNonce: "document-27" },
+    webkit: { messageHandlers: { klaud: { postMessage: (message: unknown) => messages.push(message) } } },
+  };
+
+  assert.equal(postNativeComposerMessage({ action: "state" }, target as never), true);
+  assert.deepEqual(messages, [{
+    kind: "composer",
+    protocolVersion: NATIVE_COMPOSER_VERSION,
+    documentNonce: "document-27",
+    action: "state",
+  }]);
+});
+
+test("native composer refuses messages without a document nonce", () => {
+  const messages: unknown[] = [];
+  const target = {
+    klaudNative: {},
+    webkit: { messageHandlers: { klaud: { postMessage: (message: unknown) => messages.push(message) } } },
+  };
+
+  assert.equal(postNativeComposerMessage({ action: "state" }, target as never), false);
+  assert.deepEqual(messages, []);
 });

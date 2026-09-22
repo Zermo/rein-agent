@@ -6,6 +6,7 @@ export const NATIVE_COMPOSER_READY_EVENT = "klaud-native-ready";
 export interface NativeComposerHost {
   protocolVersion?: unknown;
   capabilities?: unknown;
+  documentNonce?: unknown;
 }
 
 export interface NativeComposerScope {
@@ -67,7 +68,8 @@ export function parseNativeComposerCommand(value: unknown): NativeComposerComman
 
 export function postNativeComposerMessage(message: Record<string, unknown>, target: NativeComposerWindow = window as NativeComposerWindow): boolean {
   const handler = target.webkit?.messageHandlers?.klaud;
-  if (!handler) return false;
-  handler.postMessage({ kind: "composer", protocolVersion: NATIVE_COMPOSER_VERSION, ...message });
+  const documentNonce = target.klaudNative?.documentNonce;
+  if (!handler || typeof documentNonce !== "string" || !documentNonce) return false;
+  handler.postMessage({ kind: "composer", protocolVersion: NATIVE_COMPOSER_VERSION, documentNonce, ...message });
   return true;
 }

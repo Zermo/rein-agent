@@ -12,6 +12,25 @@ struct KlaudNativeComposer: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if bridge.composerDeliveryUncertain {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("Send status unknown after reconnect.")
+                        .lineLimit(2)
+                    Spacer(minLength: 4)
+                    Button("allow retry") {
+                        bridge.keyFeedback("letter")
+                        bridge.allowRetryAfterUnknownDelivery()
+                    }
+                    .fontWeight(.bold)
+                }
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(paper)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(rust.opacity(0.72))
+            }
+
             HStack(alignment: .bottom, spacing: 6) {
                 composerButton(symbol: "plus", label: "Add Attachment") {
                     bridge.keyFeedback("letter")
@@ -83,16 +102,6 @@ struct KlaudNativeComposer: View {
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 7)
-
-            if let status = localInferenceStatus {
-                Text(status)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(paper.opacity(0.72))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 9)
-                    .padding(.bottom, 7)
-                    .accessibilityLabel("On-device refinement status")
-            }
         }
         .background(glass)
         .overlay(alignment: .top) {
@@ -107,15 +116,6 @@ struct KlaudNativeComposer: View {
             bridge.appendAttachmentNames(urls)
             bridge.requestKeyboardPresentation()
         }
-    }
-
-    private var localInferenceStatus: String? {
-        let status = bridge.localInference.status.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !status.isEmpty { return status }
-        if bridge.localInference.availability != .ready {
-            return bridge.localInference.availability.label
-        }
-        return nil
     }
 
     private func composerButton(
