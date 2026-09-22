@@ -13,6 +13,10 @@
 .bot-avatar-brow-left, .bot-avatar-brow-right { transform-box: view-box; }
 .bot-avatar-portrait { transform-origin: 64px 64px; }
 .bot-avatar-glasses { transform-origin: 64px 80px; }
+.bot-avatar-sclera { fill: #f4ead4; stroke: #12100e; }
+.bot-avatar-iris { fill: #c45c3a; stroke: #12100e; }
+.bot-avatar-pupil { fill: #12100e; }
+.bot-avatar-glint { fill: #f4ead4; }
 .bot-avatar-brow-left { transform-origin: 48px 63px; }
 .bot-avatar-brow-right { transform-origin: 80px 63px; }
 .bot-avatar[data-animated="true"] .bot-avatar-portrait { will-change: transform; }

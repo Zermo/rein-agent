@@ -13,10 +13,16 @@
 .bot-avatar-brow-left, .bot-avatar-brow-right { transform-box: view-box; }
 .bot-avatar-portrait { transform-origin: 64px 64px; }
 .bot-avatar-glasses { transform-origin: 64px 80px; }
+.bot-avatar-sclera { fill: #f4ead4; stroke: #12100e; }
+.bot-avatar-iris { fill: var(--avatar-rust, #c45c3a); stroke: #12100e; }
+.bot-avatar-pupil { fill: #12100e; }
+.bot-avatar-glint { fill: #f4ead4; }
+.bot-avatar[data-theme="night"] { --avatar-paper: #2a201c; --avatar-ink: #f4ead4; --avatar-gold: var(--avatar-rust, #c45c3a); }
+.bot-avatar[data-theme="paper"] { --avatar-paper: #f4ead4; --avatar-ink: #12100e; }
 .bot-avatar-brow-left { transform-origin: 48px 63px; }
 .bot-avatar-brow-right { transform-origin: 80px 63px; }
 .bot-avatar[data-animated="true"] .bot-avatar-portrait { will-change: transform; }
-.avatar-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: var(--space-xs); }
+.avatar-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: var(--space-xs); padding: 4px 2px 8px; width: 100%; max-width: 100%; min-width: 0; }
 .avatar-choice {
   position: relative;
   display: flex;

@@ -1,5 +1,5 @@
 export const SOUND_STORAGE_KEY = "rein-klaud:sound-effects:v1";
-export const SOUND_CUES = Object.freeze(["hover", "click", "key", "send", "tool", "reply", "error", "ready"] as const);
+export const SOUND_CUES = Object.freeze(["hover", "click", "key", "send", "tool", "reply", "error", "ready", "approval", "present"] as const);
 export type SoundCue = (typeof SOUND_CUES)[number];
 export type SoundEvent = Pick<Event, "isTrusted"> | null | undefined;
 export type SoundStorage = Pick<Storage, "getItem" | "setItem">;
@@ -57,18 +57,20 @@ interface Voice {
 }
 
 const SILENCE = 0.0001;
-const MASTER_LEVEL = 0.72;
+const MASTER_LEVEL = 1;
 
 const tone = (wave: OscillatorType, from: number, to: number, delay: number, duration: number, gain: number): Tone => ({ wave, from, to, delay, duration, gain });
 const cues: Readonly<Record<SoundCue, CueDefinition>> = Object.freeze({
   hover: { cooldown: 70, tones: [tone("sine", 1380, 1120, 0, 0.018, 0.0045)] },
   click: { cooldown: 45, tones: [tone("triangle", 220, 145, 0, 0.028, 0.010)], noise: { duration: 0.012, gain: 0.004, frequency: 1700, q: 0.8 } },
   key: { cooldown: 28, tones: [tone("triangle", 185, 132, 0, 0.019, 0.007)], noise: { duration: 0.009, gain: 0.0035, frequency: 2100, q: 0.9 } },
-  send: { cooldown: 140, tones: [tone("triangle", 480, 525, 0, 0.045, 0.011), tone("sine", 640, 690, 0.038, 0.055, 0.009)] },
+  send: { cooldown: 140, tones: [tone("triangle", 210, 135, 0, 0.028, 0.016)], noise: { duration: 0.016, gain: 0.015, frequency: 1280, q: 1.2 } },
   tool: { cooldown: 260, tones: [tone("triangle", 340, 430, 0, 0.035, 0.007), tone("sine", 510, 560, 0.027, 0.040, 0.006)] },
-  reply: { cooldown: 300, tones: [tone("sine", 660, 680, 0, 0.060, 0.010), tone("sine", 880, 910, 0.052, 0.070, 0.011)] },
+  reply: { cooldown: 220, tones: [tone("triangle", 255, 175, 0, 0.022, 0.014), tone("triangle", 390, 250, 0.014, 0.018, 0.009)], noise: { duration: 0.012, gain: 0.011, frequency: 1500, q: 1.05 } },
   error: { cooldown: 500, tones: [tone("triangle", 135, 105, 0, 0.080, 0.013), tone("triangle", 105, 82, 0.065, 0.075, 0.011)] },
   ready: { cooldown: 400, tones: [tone("sine", 520, 565, 0, 0.050, 0.008), tone("sine", 780, 830, 0.045, 0.070, 0.009)] },
+  approval: { cooldown: 420, tones: [tone("triangle", 360, 420, 0, 0.032, 0.014), tone("triangle", 520, 470, 0.036, 0.04, 0.012)], noise: { duration: 0.018, gain: 0.01, frequency: 880, q: 0.85 } },
+  present: { cooldown: 280, tones: [tone("triangle", 480, 540, 0, 0.03, 0.01)], noise: { duration: 0.014, gain: 0.009, frequency: 1100, q: 0.9 } },
 });
 
 function defaultStorage(): SoundStorage | undefined {
@@ -297,7 +299,11 @@ export function createSoundEngine(options: SoundEngineOptions = {}): SoundEngine
     catch {}
   }
 
-  function onVisibilityChange() { if (!visible(page)) void suspend(); }
+  function onVisibilityChange() {
+    if (!visible(page)) { void suspend(); return; }
+    if (!enabled || !context || context.state === "closed") return;
+    void context.resume().then(() => { if (enabled) setMaster(MASTER_LEVEL); }).catch(() => {});
+  }
   try { page?.addEventListener?.("visibilitychange", onVisibilityChange); }
   catch {}
 

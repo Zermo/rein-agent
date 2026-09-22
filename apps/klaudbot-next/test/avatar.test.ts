@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AVATAR_BROWS, AVATAR_STATES, AVATAR_STYLES, avatarForBot, isAvatarPhase } from "../lib/avatar-catalog.ts";
+import { AVATAR_BROWS, AVATAR_STATES, AVATAR_STYLES, CORE_AVATAR_COUNT, avatarForBot, isAvatarPhase, kitForSeed } from "../lib/avatar-catalog.ts";
 import { activeAvatarPhase, attachAvatarMotion, dampAvatarPose, poseForAvatar, seedForAvatar, type AvatarPose } from "../lib/avatar-motion.ts";
 
 const neutral: AvatarPose = {
@@ -23,10 +23,11 @@ const sourcePoses = {
 };
 
 test("catalog preserves original six styles, labels, deterministic IDs and hash bounds", () => {
-  assert.deepEqual(AVATAR_STYLES.map(({ id, label }) => [id, label]), [
+  assert.deepEqual(AVATAR_STYLES.slice(0, CORE_AVATAR_COUNT).map(({ id, label }) => [id, label]), [
     ["aviator", "Aviator"], ["motorcycle", "Rider"], ["builder", "Builder"],
     ["baseball", "Slugger"], ["medic", "Medic"], ["explorer", "Explorer"],
   ]);
+  assert.deepEqual(AVATAR_STYLES.slice(CORE_AVATAR_COUNT).map(style => style.id), ["radio", "ranger", "welder", "sailor", "courier", "watch", "clerk", "open"]);
   assert.ok(Object.isFrozen(AVATAR_STYLES));
   assert.ok(AVATAR_STYLES.every(Object.isFrozen));
   for (const [id, seed, avatar] of [
@@ -43,8 +44,11 @@ test("catalog preserves original six styles, labels, deterministic IDs and hash 
   assert.deepEqual(Object.keys(AVATAR_BROWS), Object.keys(AVATAR_STATES));
   assert.equal(AVATAR_STATES.responding, "Replying");
   assert.equal(AVATAR_STATES.approval, "Waiting for approval");
-  assert.deepEqual(AVATAR_BROWS.thinking, ["M39 64 L56 65", "M72 59 Q81 55 89 58"]);
+  assert.deepEqual(AVATAR_BROWS.thinking, ["M39 63 L56 65", "M72 58 Q81 54 89 57"]);
   assert.equal(isAvatarPhase("__proto__"), false);
+  assert.equal(kitForSeed(1).extra, "none");
+  assert.equal(kitForSeed(0).extra, "badge");
+  assert.notEqual(kitForSeed(seedForAvatar("bot-1")).band, undefined);
 });
 
 test("all seven active phases match authoritative source motion", () => {

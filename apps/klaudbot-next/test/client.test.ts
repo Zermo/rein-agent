@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ApiError, isPublicHost, KlaudApi, protectedHtml, safeInspectPath, sseEvents } from "../lib/api.ts";
-import { DEFAULT_SHELL, groupTurns, latestPresentation, mergeHistory, updateTranscript } from "../lib/model.ts";
+import { DEFAULT_SHELL, groupTurns, inspectablePaths, inspectableSpans, latestPresentation, mergeHistory, updateTranscript } from "../lib/model.ts";
 import type { AgEvent, Bot, Message } from "../lib/types.ts";
 
 const bot: Bot = { id: "klaud-bot-1234abcd", name: "Fixture", created: "2026-01-01T00:00:00.000Z", sessionId: "fixture-session", computer: "local", engine: "openai-compat", avatar: "aviator" };
@@ -66,7 +66,7 @@ test("inspect rejects traversal, secrets, keys, unknown extensions and >5MiB", a
   await assert.rejects(api.inspect(bot.id, "large.png"), /5 MiB/);
 });
 test("only exact public hostname hides bearer; auth errors are distinct from network errors", async () => {
-  assert(isPublicHost("openbot.zermo.org")); assert(!isPublicHost("openbot.zermo.org.attacker.test"));
+  assert(isPublicHost("openbot.zermo.org")); assert(isPublicHost("reinklaud.zermo.org")); assert(!isPublicHost("openbot.zermo.org.attacker.test"));
   const api = new KlaudApi("", (async () => Response.json({ error: "auth_required" }, { status: 401 })) as typeof fetch);
   await assert.rejects(api.state(), error => error instanceof ApiError && error.authRequired);
 });
@@ -114,14 +114,43 @@ test("blob HTML carries an early restrictive network CSP", () => {
   const html = protectedHtml('<img src="https://example.invalid/beacon"><script>bad()</script>');
   assert(html.startsWith('<meta http-equiv="Content-Security-Policy"')); assert(html.includes("default-src 'none'")); assert(html.includes("base-uri 'none'"));
 });
-test("Path is You → paired tools → Reply; snippets capped, chat untouched", () => {
-  const messages: Message[] = [{ id: "u", role: "user", content: "Build" }, { id: "a", role: "assistant", content: "answer".repeat(300), toolCalls: [{ id: "t", function: { name: "bash", arguments: "ls" } }] }, { id: "r", role: "tool", toolCallId: "t", content: "done" }];
+test("Path is You → Think → tools → Reply; thinking lives on the Think node", () => {
+  const messages: Message[] = [{ id: "u", role: "user", content: "Build" }, { id: "a", role: "assistant", content: "answer".repeat(300), thinking: "plan the work", toolCalls: [{ id: "t", function: { name: "bash", arguments: "ls" } }] }, { id: "r", role: "tool", toolCallId: "t", content: "done" }];
   const turns = groupTurns(messages);
-  assert.deepEqual(turns[0].nodes.map(item => item.label), ["You", "bash", "Reply"]);
-  assert.equal(turns[0].nodes[2].text.length, 500); assert.equal(messages[1].content.length, 1800);
+  assert.deepEqual(turns[0].nodes.map(item => item.label), ["You", "Think", "bash", "Reply"]);
+  assert.equal(turns[0].nodes[1].kind, "think");
+  assert.equal(turns[0].nodes[1].text, "plan the work");
+  assert.equal(turns[0].nodes[3].text.length, 1800);
+  assert.equal(messages[1].content.length, 1800);
+});
+test("THINKING stream attaches to the assistant Path node without entering the reply", () => {
+  let rows: Message[] = [{ id: "u", role: "user", content: "Go" }];
+  rows = updateTranscript(rows, { type: "THINKING_START", messageId: "run:0:think" });
+  rows = updateTranscript(rows, { type: "THINKING_CONTENT", messageId: "run:0:think", delta: "consider the cwd" });
+  rows = updateTranscript(rows, { type: "THINKING_END", messageId: "run:0:think", content: "consider the cwd" });
+  rows = updateTranscript(rows, { type: "TEXT_MESSAGE_START", messageId: "run:0:0" });
+  rows = updateTranscript(rows, { type: "TEXT_MESSAGE_CONTENT", messageId: "run:0:0", delta: "Ready." });
+  rows = updateTranscript(rows, { type: "TEXT_MESSAGE_END", messageId: "run:0:0" });
+  assert.equal(rows.filter(item => item.role === "assistant").length, 1);
+  assert.equal(rows.at(-1)?.content, "Ready.");
+  assert.equal(rows.at(-1)?.thinking, "consider the cwd");
 });
 test("auto-open one newest png/svg/html only, never user md/json references", () => {
   const messages: Message[] = [{ id: "1", role: "user", content: "open private.png" }, { id: "2", role: "assistant", content: "Saved `older.svg`, then `report with spaces.html` and `notes.md`." }];
   assert.equal(latestPresentation(messages), "report with spaces.html");
   assert.equal(latestPresentation([{ id: "a", role: "assistant", content: "Only data.json and notes.md" }]), undefined);
+});
+test("chat ledger can open inspectable paths including md/json, skipping secrets", () => {
+  assert.deepEqual(inspectablePaths("See `report.md` and sketch.png plus secret.env"), ["report.md", "sketch.png"]);
+  assert.equal(inspectableSpans("See `report.md` here")[0]?.path, "report.md");
+});
+test("phone sections are exclusive Units → Chat → CRT → Settings", async () => {
+  const { phoneSection, phoneNeighbor, applyPhoneSection } = await import("../lib/phone-nav.ts");
+  assert.equal(phoneSection("chat", false), "chat");
+  assert.equal(phoneSection("chat", true), "crt");
+  assert.equal(phoneNeighbor("chat", 1), "crt");
+  assert.equal(phoneNeighbor("chat", -1), "bots");
+  assert.equal(phoneNeighbor("bots", -1), "bots");
+  assert.deepEqual(applyPhoneSection("crt"), { view: "chat", railOpen: true, railTab: "crt" });
+  assert.deepEqual(applyPhoneSection("chat"), { view: "chat", railOpen: false });
 });

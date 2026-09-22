@@ -1,19 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import type { Bot, Phase, Message, PathNode, Shell, RunSettings, InspectFile, InspectDoc, PendingAction, RailTab } from "../lib/types";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent } from "react";
+import type { Bot, Phase, Message, PathNode, Shell, RunSettings, InspectFile, InspectDoc, InspectFrame, PendingAction, RailTab } from "../lib/types";
 import { AvatarPicker, BotAvatar } from "./avatars";
 import { AvatarScene } from "./avatar-scene";
-import { groupTurns } from "../lib/model";
+import { groupTurns, inspectableSpans } from "../lib/model";
 import { avatarForBot } from "../lib/avatar-catalog";
-import {
-  NATIVE_COMPOSER_EVENT,
-  NATIVE_COMPOSER_READY_EVENT,
-  parseNativeComposerCommand,
-  postNativeComposerMessage,
-  supportsNativeComposer,
-  type NativeComposerHost,
-} from "../lib/native-composer";
+import { NATIVE_COMPOSER_EVENT, NATIVE_COMPOSER_READY_EVENT, NATIVE_COMPOSER_MAX_UTF8, parseNativeComposerCommand, postNativeComposerMessage, supportsNativeComposer, type NativeComposerHost } from "../lib/native-composer";
+import { saveInspectDoc, shareInspectDoc } from "../lib/device-export";
+import { playKeyHaptic, playVintageKey, startDictate } from "../lib/key-feel";
+import { accentHex, newRoutine, UNIT_ACCENTS, type UnitAccent, type UnitProfile, type UnitTheme } from "../lib/unit-profile";
 
 export type ConsoleView = "bots" | "chat" | "settings";
 export type ApprovalDecision = "deny" | "allow" | "whitelist" | "always";
@@ -23,15 +19,20 @@ export interface MastheadProps {
   soundEnabled: boolean; onToggleSound: () => void; rainEnabled?: boolean;
   phase?: Phase; autonomyLabel?: string; lines?: string[]; toolName?: string; showActivity?: boolean;
 }
+export interface UnitLaw {
+  skills: string[];
+}
 export interface BotRosterProps {
   bots: Bot[]; selectedId: string | null; onSelect: (id: string) => void;
   onAdd: (name: string, avatar: string) => void | Promise<void>; onAvatar?: (avatar: string) => void;
+  profiles?: Record<string, UnitProfile>; onProfile?: (id: string, patch: Partial<UnitProfile>) => void;
+  laws?: Record<string, UnitLaw>;
   busy?: boolean; saving?: boolean; page?: boolean; phase?: Phase;
   runningBotId?: string | null; error?: string;
 }
 export interface ChatPaneProps {
   bot: Bot | null; messages: Message[]; phase: Phase; busy: boolean;
-  draft: string; onDraft: (value: string) => void; onSubmit: (message?: string) => Promise<boolean>; onStop: () => void;
+  draft: string; webRevision: number; onDraft: (value: string, native?: boolean) => void; onSubmit: (message?: string) => Promise<boolean>; onStop: () => void;
   onPath: (nodes: PathNode[]) => void; pending?: PendingAction[];
   onDecision?: (id: string, decision: ApprovalDecision) => void; decisionBusy?: boolean;
   lines?: string[]; showActivity?: boolean; hasEarlier?: boolean; loadingEarlier?: boolean;
@@ -39,6 +40,11 @@ export interface ChatPaneProps {
   toolName?: string;
   railOpen?: boolean;
   onToggleComputer?: () => void;
+  swapLabel?: string;
+  phone?: boolean;
+  onOpenFile?: (path: string) => void;
+  unitAccent?: string;
+  unitTheme?: "field" | "night" | "paper";
 }
 export interface ContextRailProps {
   tab: RailTab; onTab: (tab: RailTab) => void;
@@ -47,6 +53,7 @@ export interface ContextRailProps {
   bot: Bot | null; busy: boolean; held: boolean; onHold: (held: boolean) => void;
   files: InspectFile[]; filesLoading?: boolean; doc: InspectDoc | null; inspectLoading?: boolean;
   onInspect: (path: string) => void; onCloseInspect: () => void; onRefresh?: () => void;
+  onPopOut?: (doc: InspectDoc, x: number, y: number) => void;
 }
 export interface SettingsPanelProps {
   shell: Shell; runSettings: RunSettings | null;
@@ -88,22 +95,54 @@ function usePageVisible() {
 interface NativeComposerOptions {
   bot: Bot | null;
   draft: string;
+  webRevision: number;
   busy: boolean;
   disabled: boolean;
-  onDraft: (value: string) => void;
+  onDraft: (value: string, native?: boolean) => void;
   onSubmit: (message?: string) => Promise<boolean>;
   onStop: () => void;
 }
 
-function useNativeComposer({ bot, draft, busy, disabled, onDraft, onSubmit, onStop }: NativeComposerOptions) {
-  const [active, setActive] = useState(false);
+function useNativeComposer({ bot, draft, webRevision, busy, disabled, onDraft, onSubmit, onStop }: NativeComposerOptions) {
+  const [activeBot, setActiveBot] = useState<Bot | null>(null);
+  const nativeRevisions = useRef<Record<string, number>>({});
+  const draftFits = new TextEncoder().encode(draft).byteLength <= NATIVE_COMPOSER_MAX_UTF8;
+  const latestDraftFits = useRef(draftFits);
+  latestDraftFits.current = draftFits;
+  // Readiness belongs to this mounted document; commands/state remain bot/session scoped.
+  const active = Boolean(activeBot);
   const host = useCallback(() => (window as Window & { klaudNative?: NativeComposerHost }).klaudNative, []);
 
   useEffect(() => {
-    const detect = () => setActive(supportsNativeComposer(host()));
-    detect();
+    if (!draftFits) {
+      setActiveBot(null);
+      postNativeComposerMessage({ action: "state", visible: false });
+      return;
+    }
+    let requestId = "";
+    const ready = (event: Event) => {
+      const command = event instanceof CustomEvent ? parseNativeComposerCommand(event.detail) : null;
+      if (command?.action !== "ready" || command.requestId !== requestId ||
+          command.botId !== bot?.id || command.sessionId !== bot?.sessionId || command.documentNonce !== host()?.documentNonce || !latestDraftFits.current) return;
+      setActiveBot(bot);
+    };
+    const detect = () => {
+      setActiveBot(null);
+      if (!bot || !supportsNativeComposer(host()) || typeof crypto.randomUUID !== "function") return;
+      requestId = crypto.randomUUID();
+      postNativeComposerMessage({ action: "hello", requestId, botId: bot.id, sessionId: bot.sessionId });
+    };
+    window.addEventListener(NATIVE_COMPOSER_EVENT, ready);
+    if (!activeBot) detect();
     window.addEventListener(NATIVE_COMPOSER_READY_EVENT, detect);
-    return () => window.removeEventListener(NATIVE_COMPOSER_READY_EVENT, detect);
+    return () => {
+      window.removeEventListener(NATIVE_COMPOSER_EVENT, ready);
+      window.removeEventListener(NATIVE_COMPOSER_READY_EVENT, detect);
+    };
+  }, [host, bot?.id, bot?.sessionId, activeBot, draftFits]);
+
+  useEffect(() => () => {
+    if (supportsNativeComposer(host())) postNativeComposerMessage({ action: "state", visible: false });
   }, [host]);
 
   useEffect(() => {
@@ -116,15 +155,16 @@ function useNativeComposer({ bot, draft, busy, disabled, onDraft, onSubmit, onSt
       enabled: Boolean(bot) && !disabled && !busy,
       busy,
       draft,
+      webRevision,
     });
-  }, [active, bot, busy, disabled, draft]);
+  }, [active, bot, busy, disabled, draft, webRevision]);
 
   useEffect(() => {
     if (!active) return;
     const receive = (event: Event) => {
       if (!(event instanceof CustomEvent)) return;
       const command = parseNativeComposerCommand(event.detail);
-      if (!command) return;
+      if (!command || command.action === "ready" || command.documentNonce !== host()?.documentNonce) return;
       const sameScope = command.botId === bot?.id && command.sessionId === bot?.sessionId;
       if (!sameScope) {
         postNativeComposerMessage({
@@ -138,9 +178,14 @@ function useNativeComposer({ bot, draft, busy, disabled, onDraft, onSubmit, onSt
         });
         return;
       }
+      const scope = JSON.stringify([command.documentNonce, command.botId, command.sessionId]);
+      const previousRevision = nativeRevisions.current[scope] ?? -1;
       if (command.action === "draft") {
-        const accepted = !disabled && !busy;
-        if (accepted) onDraft(command.text);
+        const accepted = !disabled && !busy && command.revision >= previousRevision;
+        if (accepted) {
+          nativeRevisions.current[scope] = command.revision;
+          onDraft(command.text, true);
+        }
         postNativeComposerMessage({
           action: "draftAck",
           botId: command.botId,
@@ -161,7 +206,9 @@ function useNativeComposer({ bot, draft, busy, disabled, onDraft, onSubmit, onSt
         });
         return;
       }
-      void onSubmit(command.text).then(accepted => {
+      const allowed = !disabled && !busy && command.revision >= previousRevision;
+      if (allowed) nativeRevisions.current[scope] = command.revision;
+      void Promise.resolve().then(() => allowed ? onSubmit(command.text) : false).catch(() => false).then(accepted => {
         postNativeComposerMessage({
           action: "sendAck",
           requestId: command.requestId,
@@ -174,7 +221,7 @@ function useNativeComposer({ bot, draft, busy, disabled, onDraft, onSubmit, onSt
     };
     window.addEventListener(NATIVE_COMPOSER_EVENT, receive);
     return () => window.removeEventListener(NATIVE_COMPOSER_EVENT, receive);
-  }, [active, bot, busy, disabled, onDraft, onStop, onSubmit]);
+  }, [active, bot, busy, disabled, host, onDraft, onStop, onSubmit]);
 
   return active;
 }
@@ -351,7 +398,46 @@ export function Masthead({ view, onNavigate, connected,
   </header>;
 }
 
-export function BotRoster({ bots, selectedId, onSelect, onAdd, onAvatar, busy = false,
+function UnitDossier({ bot, profile, law, saving, busy, onAvatar, onProfile }: {
+  bot: Bot; profile: UnitProfile; law?: UnitLaw; saving: boolean; busy: boolean;
+  onAvatar?: (avatar: string) => void; onProfile: (id: string, patch: Partial<UnitProfile>) => void;
+}) {
+  const locked = saving || busy;
+  return <section className="unit-dossier" aria-label={`${bot.name} dossier`}>
+    <p className="eyebrow">Established unit / {bot.id.slice(-4).toUpperCase()}</p>
+    <h2>{bot.name}</h2>
+    <p className="small muted">Soul and directive are the identity the harness loads on every run. Skills stay on the unit cwd.</p>
+    {!!law?.skills?.length && <div className="skill-row" aria-label="Skills">{law.skills.map(name => <span className="skill-chip" key={name}>{name}</span>)}</div>}
+    <label className="field-label">Persona color
+      <span className="swatch-row">{(Object.keys(UNIT_ACCENTS) as UnitAccent[]).map(key => <button type="button" key={key} className="swatch" data-on={profile.accent === key} style={{ background: UNIT_ACCENTS[key] }} aria-label={key} disabled={locked} onClick={() => onProfile(bot.id, { accent: key })}/>)}</span>
+    </label>
+    <label className="field-label">Avatar theme
+      <select value={profile.theme} disabled={locked} onChange={event => onProfile(bot.id, { theme: event.target.value as UnitTheme })}>
+        <option value="field">Field rust</option>
+        <option value="night">Night leather</option>
+        <option value="paper">Paper cream</option>
+      </select>
+    </label>
+    {onAvatar && <div className="dossier-headwear"><p className="field-label">Headwear</p><AvatarPicker value={avatarForBot(bot.id, bot.avatar)} onChange={onAvatar} disabled={locked} accent={accentHex(profile.accent)} theme={profile.theme}/></div>}
+    <label className="field-label">Soul<textarea rows={12} value={profile.soul} maxLength={8000} disabled={locked} placeholder="Who this unit is. Voice, limits, what it protects." onChange={event => onProfile(bot.id, { soul: event.target.value })}/></label>
+    <label className="field-label">Directive<textarea rows={6} value={profile.directive} maxLength={2000} disabled={locked} placeholder="Standing order for this unit." onChange={event => onProfile(bot.id, { directive: event.target.value })}/></label>
+    <div className="routine-block">
+      <div className="section-heading"><h3>Routines / loops</h3><button type="button" disabled={locked || profile.routines.length >= 12} onClick={() => onProfile(bot.id, { routines: [...profile.routines, newRoutine()] })}>+ Loop</button></div>
+      {!profile.routines.length && <p className="small muted">No loops yet. Add a scan, journal, idle or watch pass.</p>}
+      {profile.routines.map((row, index) => <div className="routine-row" key={row.id}>
+        <input aria-label="Loop title" value={row.title} maxLength={80} disabled={locked} onChange={event => onProfile(bot.id, { routines: profile.routines.map((item, i) => i === index ? { ...item, title: event.target.value } : item) })}/>
+        <input aria-label="When" placeholder="03:30 daily or every 30m" value={row.when} maxLength={80} disabled={locked} onChange={event => onProfile(bot.id, { routines: profile.routines.map((item, i) => i === index ? { ...item, when: event.target.value } : item) })}/>
+        <select aria-label="Loop kind" value={row.loop} disabled={locked} onChange={event => onProfile(bot.id, { routines: profile.routines.map((item, i) => i === index ? { ...item, loop: event.target.value as UnitProfile["routines"][number]["loop"] } : item) })}>
+          <option value="scan">Scan</option><option value="journal">Journal</option><option value="idle">Idle</option><option value="watch">Watch</option>
+        </select>
+        <label className="routine-on"><input type="checkbox" checked={row.enabled} disabled={locked} onChange={event => onProfile(bot.id, { routines: profile.routines.map((item, i) => i === index ? { ...item, enabled: event.target.checked } : item) })}/> On</label>
+        <button type="button" aria-label="Remove loop" disabled={locked} onClick={() => onProfile(bot.id, { routines: profile.routines.filter((_, i) => i !== index) })}>×</button>
+      </div>)}
+    </div>
+  </section>;
+}
+
+export function BotRoster({ bots, selectedId, onSelect, onAdd, onAvatar, profiles = {}, onProfile, laws = {}, busy = false,
   saving = false, page = false, phase = "ready", runningBotId, error }: BotRosterProps) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -374,13 +460,13 @@ export function BotRoster({ bots, selectedId, onSelect, onAdd, onAvatar, busy = 
     <div className="bot-list">{bots.map((bot, index) => <button className={`bot${bot.id === selectedId ? " active" : ""}`}
       type="button" key={bot.id} onClick={() => onSelect(bot.id)} aria-pressed={bot.id === selectedId} title={`${bot.name} · ${bot.engine}`}>
       <span className="bot-number">{String(index + 1).padStart(2, "0")}</span>
-      <BotAvatar botId={bot.id} avatar={bot.avatar} state="ready" size={52} decorative paused/>
+      <BotAvatar botId={bot.id} avatar={bot.avatar} state="ready" size={page ? 88 : 56} decorative paused accent={accentHex(profiles[bot.id]?.accent)} theme={profiles[bot.id]?.theme}/>
       <span className="bot-name">{bot.name}<small>{bot.id === runningBotId ? phaseLabels[phase] : "Local / ready"}</small></span>
       {bot.id === runningBotId && <span className="running-dot" aria-label={phaseLabels[phase]}/>}
     </button>)}</div>
     {!bots.length && <p className="roster-empty">No field units yet.<br/>Give your first bot a name.</p>}
     {error && !adding && <p className="inline-error" role="alert">{error}</p>}
-    {page && selected && onAvatar && <details className="bot-dressing"><summary>Dress {selected.name}</summary><AvatarPicker value={avatarForBot(selected.id, selected.avatar)} onChange={onAvatar} disabled={saving || busy}/></details>}
+    {page && selected && onProfile && <UnitDossier bot={selected} profile={profiles[selected.id] ?? { version: 1, accent: "rain", theme: "field", soul: "", directive: "", routines: [] }} law={laws[selected.id]} saving={saving} busy={busy} onAvatar={onAvatar} onProfile={onProfile}/>}
     <div className="roster-foot"><span>Rein field systems</span><span>Plate 01 / klaʊdbot</span></div>
     <Modal open={adding} onClose={() => { if (!working) setAdding(false); }} titleId={titleId} className="add-bot-dialog">
       <form onSubmit={event => void add(event)}>
@@ -395,9 +481,21 @@ export function BotRoster({ bots, selectedId, onSelect, onAdd, onAvatar, busy = 
   </aside>;
 }
 
+function toolChip(name: string): string {
+  const raw = name.replace(/\s*·\s*failed$/i, "").trim().toLowerCase();
+  const last = raw.split(/[./:]/).pop() ?? raw;
+  if (last === "bash" || last === "shell") return "bash";
+  if (last === "write" || last === "edit") return "write";
+  if (last === "read") return "read";
+  if (last.includes("search") || last.includes("fetch") || last === "web_search" || last === "web_fetch") return "query";
+  if (last.includes("patch")) return "patch";
+  return last.replace(/^klaud_/, "").replace(/_/g, "-").slice(0, 24) || "tool";
+}
+
 function PathNodeButton({ node, index, selected, live, onSelect }: { node: PathNode; index: number; selected: boolean; live: boolean; onSelect: (id: string) => void }) {
+  const chip = node.kind === "tool" ? toolChip(node.label) : node.kind === "think" ? "think" : node.kind;
   return <button type="button" className={`turn-node ${node.kind}${selected ? " on" : ""}${live ? " live" : ""}`} aria-pressed={selected} onClick={() => onSelect(node.id)}>
-    <span className="node-index">{String(index + 1).padStart(2, "0")} / {node.kind}</span><strong>{node.label}</strong>
+    <span className="node-index">{String(index + 1).padStart(2, "0")} / {chip}</span>{node.kind !== "tool" ? <strong>{node.label}</strong> : null}
   </button>;
 }
 
@@ -414,36 +512,156 @@ function ledgerRows(messages: Message[]): LedgerRow[] {
   });
 }
 
-function ReplyBody({ text, live }: { text: string; live: boolean }) {
+function ReplyBody({ text, live, cwd, onOpenFile }: { text: string; live: boolean; cwd?: string; onOpenFile?: (path: string) => void }) {
   const shown = text
     .replace(/^\s*\[(?:reply|result|output|response|answer)\]\s*/i, "")
     .replace(/\n\s*\[(?:reply|result|output|response|answer)\]\s*/gi, "\n")
     .replace(/^\s+/, "");
   if (!shown && !live) return null;
-  const body = <div className="message-text">{shown}{live && <i className="crt-caret" data-who="agent" aria-hidden="true"/>}</div>;
+  const spans = onOpenFile ? inspectableSpans(shown, cwd) : [];
+  const bits: ReactNode[] = [];
+  let cursor = 0;
+  spans.forEach((span, index) => {
+    if (span.start > cursor) bits.push(shown.slice(cursor, span.start));
+    bits.push(<button type="button" className="ledger-file" key={`${span.path}-${index}`} title={`Open ${span.path}`} onClick={event => { event.preventDefault(); event.stopPropagation(); onOpenFile?.(span.path); }}>{span.path.split("/").pop()}</button>);
+    cursor = span.end;
+  });
+  if (cursor < shown.length) bits.push(shown.slice(cursor));
+  const body = <div className="message-text">{bits.length ? bits : shown}{live && <i className="crt-caret" data-who="agent" aria-hidden="true"/>}</div>;
   const folded = shown.length > 900 || shown.split("\n").length > 14;
   return folded
     ? <details className="reply-fold" open><summary className="sr-only">{live ? "Streaming" : "More"}</summary>{body}</details>
     : body;
 }
 
-export function ChatPane({ bot, messages, phase, busy, draft, onDraft, onSubmit, onStop, onPath,
+function FieldKeyboard({ disabled, draft, onDraft, onType, onSend, onHide }: {
+  disabled?: boolean; draft: string; onDraft: (value: string) => void; onType: (key: string) => void; onSend: () => void; onHide?: () => void;
+}) {
+  const [shift, setShift] = useState(false);
+  const [alt, setAlt] = useState(false);
+  const [listen, setListen] = useState(false);
+  const [micNote, setMicNote] = useState("");
+  const [hold, setHold] = useState<string[] | null>(null);
+  const prefix = useRef(draft);
+  const stopRef = useRef<(() => void) | null>(null);
+  const repeat = useRef(0);
+  const letterRows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+  const numberRow = "1234567890";
+  const symbolRows = ["-/:;()$&@\"", ".,?!'" ];
+  useEffect(() => () => { stopRef.current?.(); window.clearTimeout(repeat.current); window.clearInterval(repeat.current); }, []);
+  function feel(event: ReactPointerEvent<HTMLButtonElement>, kind: "letter" | "space" | "delete" | "return" | "send" = "letter") {
+    event.preventDefault();
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* desktop */ }
+    event.currentTarget.classList.add("is-down");
+    playVintageKey(kind, event);
+    playKeyHaptic(kind);
+  }
+  function lift(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.currentTarget.classList.remove("is-down");
+    window.clearTimeout(repeat.current);
+    window.clearInterval(repeat.current);
+  }
+  function press(raw: string) {
+    if (disabled) return;
+    onType(shift && /^[a-z]$/.test(raw) ? raw.toUpperCase() : raw);
+    if (shift) setShift(false);
+  }
+  function dictate() {
+    if (disabled) return;
+    if (listen) {
+      stopRef.current?.();
+      stopRef.current = null;
+      setListen(false);
+      return;
+    }
+    prefix.current = draft;
+    setMicNote("");
+    setListen(true);
+    stopRef.current = startDictate((text, done, error) => {
+      if (error && error !== "") {
+        setListen(false);
+        stopRef.current = null;
+        setMicNote(error === "denied" ? "Allow microphone for klaʊdbot in Settings" : "Dictation unavailable");
+        return;
+      }
+      const glue = prefix.current && text && !/\s$/.test(prefix.current) ? " " : "";
+      if (text) onDraft(prefix.current + glue + text);
+      if (done) { setListen(false); stopRef.current = null; }
+    });
+  }
+  const bind = (action: () => void, kind: "letter" | "space" | "delete" | "return" | "send" = "letter") => ({
+    onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (disabled) return;
+      setHold(null);
+      feel(event, kind);
+      action();
+      if (kind === "delete") {
+        window.clearInterval(repeat.current);
+        repeat.current = window.setTimeout(() => {
+          repeat.current = window.setInterval(() => action(), 55);
+        }, 380);
+      }
+    },
+    onPointerUp: lift, onPointerCancel: lift, onPointerLeave: lift,
+  });
+  const mic = <button type="button" className="field-kb-mic" disabled={disabled} aria-pressed={listen} aria-label={micNote || "Dictation"} title={micNote || "Dictation"} {...bind(dictate)}>
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M3.5 8.5c0 2.4 1.9 4.2 4.5 4.2s4.5-1.8 4.5-4.2" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M8 12.7v1.8M5.5 14.5h5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="square"/></svg>
+  </button>;
+  const hide = <button type="button" className="field-kb-hide" aria-label="Hide keyboard" {...bind(() => onHide?.())}>⌄</button>;
+  const send = <button type="button" className="field-kb-send" disabled={disabled} {...bind(onSend, "send")}>send</button>;
+  return <div className="field-kb" aria-label="klaʊdbot keyboard">
+    {hold && <div className="field-kb-hold" role="listbox" aria-label="More characters">
+      {hold.map(key => <button type="button" key={key} disabled={disabled} {...bind(() => { press(key); setHold(null); })}>{key}</button>)}
+    </div>}
+    {alt ? <>
+      <div className="field-kb-row field-kb-nums">{[...numberRow].map(key => <button type="button" key={key} disabled={disabled} {...bind(() => press(key))}>{key}</button>)}</div>
+      {symbolRows.map(row => <div className="field-kb-row" key={row}>{[...row].map(key => <button type="button" key={key} disabled={disabled} {...bind(() => press(key))}>{key}</button>)}</div>)}
+      <div className="field-kb-row">
+        <button type="button" className="field-kb-mod" disabled={disabled} aria-pressed={alt} {...bind(() => { setAlt(false); setHold(null); })}>abc</button>
+        <button type="button" className="field-kb-del" disabled={disabled} aria-label="Backspace" {...bind(() => onType("del"), "delete")}>⌫</button>
+      </div>
+    </> : <>
+      <div className="field-kb-row">{[...letterRows[0]].map(key => <button type="button" key={key} disabled={disabled} {...bind(() => press(key))}>{shift ? key.toUpperCase() : key}</button>)}</div>
+      <div className="field-kb-row field-kb-mid"><i className="field-kb-pad" aria-hidden="true"/><i className="field-kb-pad" aria-hidden="true"/>{[...letterRows[1]].map(key => <button type="button" key={key} disabled={disabled} {...bind(() => press(key))}>{shift ? key.toUpperCase() : key}</button>)}<i className="field-kb-pad" aria-hidden="true"/><i className="field-kb-pad" aria-hidden="true"/></div>
+      <div className="field-kb-row">
+        <button type="button" className="field-kb-mod" disabled={disabled} aria-pressed={shift} {...bind(() => setShift(on => !on))}>⇧</button>
+        {[...letterRows[2]].map(key => <button type="button" key={key} disabled={disabled} {...bind(() => press(key))}>{shift ? key.toUpperCase() : key}</button>)}
+        <button type="button" className="field-kb-del" disabled={disabled} aria-label="Backspace" {...bind(() => onType("del"), "delete")}>⌫</button>
+      </div>
+    </>}
+    <div className="field-kb-row field-kb-actions">
+      <button type="button" className="field-kb-mod" disabled={disabled} aria-pressed={alt} {...bind(() => { setAlt(on => !on); setHold(null); })}>{alt ? "abc" : "123"}</button>
+      {mic}
+      <button type="button" className="field-kb-space" disabled={disabled} {...bind(() => onType(" "), "space")}>space</button>
+      {send}
+      {hide}
+    </div>
+  </div>;
+}
+
+export function ChatPane({ bot, messages, phase, busy, draft, webRevision, onDraft, onSubmit, onStop, onPath,
   pending = [], onDecision, decisionBusy = false, lines = [], hasEarlier,
   loadingEarlier, onEarlier, onOpenBots, notice, disabled = false, toolName,
-  railOpen = false, onToggleComputer }: ChatPaneProps) {
+  railOpen = false, onToggleComputer, onOpenFile, swapLabel, phone = false, unitAccent, unitTheme }: ChatPaneProps) {
   const ledger = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const prevHeight = useRef(0);
+  const ignoreScroll = useRef(false);
+  const lastScroll = useRef(0);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const visible = usePageVisible();
-  const nativeComposer = useNativeComposer({ bot, draft, busy, disabled, onDraft, onSubmit, onStop });
+  const nativeComposer = useNativeComposer({ bot, draft, webRevision, busy, disabled, onDraft, onSubmit, onStop });
   const inputId = useId();
   const rows = ledgerRows(messages);
   const lastAssistant = rows.findLastIndex(row => row.role === "assistant");
   useEffect(() => { prevHeight.current = 0; }, [bot?.id]);
   useEffect(() => {
     const el = ledger.current; if (!el) return;
+    ignoreScroll.current = true;
     if (prevHeight.current) { el.scrollTop += el.scrollHeight - prevHeight.current; prevHeight.current = 0; }
     else el.scrollTop = el.scrollHeight;
+    requestAnimationFrame(() => { ignoreScroll.current = false; lastScroll.current = el.scrollTop; });
   }, [messages, bot?.id]);
   function submit(event?: FormEvent) {
     event?.preventDefault(); if (!bot || busy || disabled || !draft.trim()) return; void onSubmit();
@@ -455,18 +673,41 @@ export function ChatPane({ bot, messages, phase, busy, draft, onDraft, onSubmit,
     onDraft(draft ? `${draft}${draft.endsWith("\n") ? "" : "\n"}+ ${names.join(", ")}` : `+ ${names.join(", ")}`);
     event.currentTarget.value = "";
   }
+  const liveThink = messages.findLast(item => item.role === "assistant")?.thinking?.trim().split(/\n/).filter(Boolean).slice(-3) ?? [];
+  const footerLines = busy && liveThink.length ? liveThink : busy ? lines.slice(-3) : [];
   const who = busy ? "agent" : "user";
-  return <section className="chat-pane" data-cursor={who} aria-label="Chat">
+  const [board, setBoard] = useState<"off" | "system" | "proprietary">("off");
+  const [kbOpen, setKbOpen] = useState(true);
+  useEffect(() => {
+    const native = (window as Window & { klaudNative?: { inApp?: boolean; systemKeyboard?: boolean } }).klaudNative;
+    const narrow = phone || window.matchMedia("(max-width: 820px)").matches;
+    if (!narrow) { setBoard("off"); return; }
+    setBoard(native?.inApp && !native.systemKeyboard ? "proprietary" : "system");
+  }, [phone]);
+  function typeKey(key: string) {
+    const current = draftRef.current;
+    const next = key === "del" ? current.slice(0, -1) : current + key;
+    draftRef.current = next;
+    onDraft(next);
+  }
+  function onLedgerScroll(event: ReactUIEvent<HTMLDivElement>) {
+    if (board !== "proprietary" || !kbOpen || ignoreScroll.current) return;
+    const y = event.currentTarget.scrollTop;
+    if (y - lastScroll.current > 14) setKbOpen(false);
+    lastScroll.current = y;
+  }
+  return <section className="chat-pane" data-cursor={who} aria-label="Chat" style={unitAccent ? { ["--unit-accent" as string]: unitAccent, ["--klaud-accent" as string]: unitAccent } : undefined}>
     <header className="chat-heading"><div className="chat-identity">
-      {bot && <AvatarScene botId={bot.id} avatar={bot.avatar} state={phase} size={56} decorative paused={!visible} live={busy} toolName={toolName}/>}
+      {bot && <AvatarScene botId={bot.id} avatar={bot.avatar} state={phase} size={68} decorative paused={!visible} live={busy} toolName={toolName} accent={unitAccent} theme={unitTheme}/>}
       <div><h1>{bot?.name || "Choose a field unit"}</h1>
         <span className="avatar-caption" data-phase={phase}>{phase === "tool" && toolName ? toolName : phaseLabels[phase]}</span></div>
     </div><div className="chat-status">
-      <button type="button" className="computer-toggle" aria-pressed={railOpen} onClick={() => onToggleComputer?.()}>Computer</button>
+      <button type="button" className="units-toggle" onClick={() => onOpenBots?.()}>Units</button>
+      <button type="button" className="computer-toggle" aria-pressed={railOpen} onClick={() => onToggleComputer?.()}>{swapLabel || "Computer"}</button>
       <span className="folio" title="Field unit folio">{bot ? bot.id.slice(-4).toUpperCase() : "----"}</span>
     </div></header>
     <form className="crt-screen" onSubmit={submit}>
-    <div className="transcript" ref={ledger} role="log" aria-label="Conversation ledger" aria-live={busy ? "off" : "polite"} aria-relevant="additions text" tabIndex={0}>
+    <div className="transcript" ref={ledger} role="log" aria-label="Conversation ledger" aria-live={busy ? "off" : "polite"} aria-relevant="additions text" tabIndex={0} onScroll={onLedgerScroll}>
       {notice && <p className="ledger-notice" role="status">{notice}</p>}
       {hasEarlier && <button type="button" className="history-control" disabled={busy || loadingEarlier || !onEarlier} onClick={() => { prevHeight.current = ledger.current?.scrollHeight || 0; onEarlier?.(); }}>{loadingEarlier ? "Opening archive…" : "Open earlier ledger"}</button>}
       {!bot ? <div className="empty"><p className="eyebrow">No active unit</p><h2>Give your first agent a name.</h2><p className="muted">A durable conversation, ready when you are.</p>{onOpenBots && <button type="button" onClick={onOpenBots}>Open field units</button>}</div>
@@ -474,11 +715,11 @@ export function ChatPane({ bot, messages, phase, busy, draft, onDraft, onSubmit,
           : rows.map((row, index) => {
             const live = busy && index === lastAssistant && index === rows.length - 1;
             return <article className={`message ${row.role}${row.isError ? " message-error" : ""}${!row.content && !live ? " message-slim" : ""}`} key={row.id}>
-              <div className="role" onClick={() => { if (row.role === "assistant" && row.path.length) onPath(row.path); }}>{row.role === "assistant" && <BotAvatar botId={bot.id} avatar={bot.avatar} state="ready" size={36} decorative paused/>}
+              <div className="role" onClick={() => { if (row.role === "assistant" && row.path.length) onPath(row.path); }}>{row.role === "assistant" && <BotAvatar botId={bot.id} avatar={bot.avatar} state="ready" size={44} decorative paused accent={unitAccent} theme={unitTheme}/>}
                 <span className="message-number">{String(index + 1).padStart(3, "0")}</span>
               </div><div className="message-body">{row.role === "assistant" && row.path.length > 0 && <button type="button" className="path-open sr-only" onClick={() => onPath(row.path)} aria-label={`Open Path, ${row.path.length} nodes, reply ${index + 1}`}>Path</button>}
                 {row.role === "user" && <span className="crt-prompt" aria-hidden="true">›</span>}
-                <ReplyBody text={row.content} live={live}/>
+                <ReplyBody text={row.content} live={live} cwd={bot.cwd} onOpenFile={onOpenFile}/>
                 {row.role === "user" && row.isError && <p className="message-retry-note" role="status">Not confirmed as accepted. Input restored for retry.</p>}
               </div>
             </article>;
@@ -496,19 +737,26 @@ export function ChatPane({ bot, messages, phase, busy, draft, onDraft, onSubmit,
       <div className="crt-prompt-row">
         <input ref={fileRef} className="sr-only" type="file" multiple onChange={attach} tabIndex={-1} aria-hidden="true"/>
         <button type="button" className="crt-attach" disabled={!bot || disabled || busy} aria-label="Add attachment" title="Add attachment" onClick={() => fileRef.current?.click()}>+</button>
-        <textarea id={inputId} className="crt-input" value={draft} onChange={event => onDraft(event.target.value)} placeholder={bot ? "" : "choose a field unit"} disabled={!bot || disabled || busy} rows={1} maxLength={128 * 1024} aria-label="Operator input"
-          onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }}/>
-        {busy ? <button type="button" className="stop-run" onClick={onStop}>stop</button> : null}
+        {board === "proprietary" && <button type="button" className="crt-kb-toggle" aria-pressed={kbOpen} aria-label={kbOpen ? "Hide keyboard" : "Show keyboard"} title={kbOpen ? "Hide keyboard" : "Show keyboard"} onClick={() => setKbOpen(open => !open)}>{kbOpen ? "⌄" : "⌃"}</button>}
+        <div className="crt-input-wrap" onPointerDown={() => { if (board === "proprietary") setKbOpen(true); }}>
+          <div className="crt-input-mirror" aria-hidden="true">{draft || (!bot ? "choose a field unit" : "")}{!busy && <i className="crt-caret" data-who="user"/>}</div>
+          <textarea id={inputId} className="crt-input" value={draft} onChange={event => onDraft(event.target.value)} placeholder="" disabled={!bot || disabled || busy} rows={1} maxLength={128 * 1024} aria-label="Operator input" inputMode={board === "proprietary" ? "none" : "text"} enterKeyHint="send" autoComplete="off" autoCorrect="off" spellCheck={false} readOnly={board === "proprietary"}
+            onKeyDown={event => { if (board === "proprietary") return; if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }}/>
+        </div>
+        {busy ? <button type="button" className="stop-run" onClick={onStop}>stop</button> : board !== "proprietary" ? <button type="submit" className="crt-send" disabled={!bot || disabled || !draft.trim()}>send</button> : null}
       </div>
     </div>}
     <div className="chat-footer" data-busy={busy ? "true" : "false"} data-paused={!visible} aria-live="polite">
       <span className="activity-signal" aria-hidden="true"><i/><i/><i/></span>
       <div className="thought-stream">
-        {busy && lines.slice(-4).map((line, index, all) => <p key={`${index}-${line.slice(0, 24)}`}>{line}{index === all.length - 1 && !(lastAssistant >= 0 && lastAssistant === rows.length - 1) && <i className="crt-caret" data-who="agent" aria-hidden="true"/>}</p>)}
-        {busy && !lines.length && <p><i className="crt-caret" data-who="agent" aria-hidden="true"/></p>}
+        {busy && footerLines.map((line, index, all) => <p key={`${index}-${line.slice(0, 24)}`}>{line}{index === all.length - 1 && !(lastAssistant >= 0 && lastAssistant === rows.length - 1) && <i className="crt-caret" data-who="agent" aria-hidden="true"/>}</p>)}
+        {busy && !footerLines.length && <p><i className="crt-caret" data-who="agent" aria-hidden="true"/></p>}
         {!busy && <p>Ready</p>}
       </div>
     </div>
+    {!nativeComposer && board === "proprietary" && <div className={`field-kb-shell${kbOpen ? "" : " is-away"}`} data-open={kbOpen ? "true" : "false"}>
+      <FieldKeyboard disabled={!bot || disabled || busy} draft={draft} onDraft={onDraft} onType={typeKey} onSend={() => submit()} onHide={() => setKbOpen(false)}/>
+    </div>}
     </form>
   </section>;
 }
@@ -529,16 +777,78 @@ function InspectPreview({ doc }: { doc: InspectDoc }) {
   return <pre className="inspect-text">{doc.text || "This file has no text content."}</pre>;
 }
 
+export function InspectFloat({ frame, onMove, onClose, onPin }: {
+  frame: InspectFrame;
+  onMove: (id: string, x: number, y: number) => void;
+  onClose: (id: string) => void;
+  onPin: (id: string) => void;
+}) {
+  const [handoff, setHandoff] = useState("");
+  function drag(event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const originX = event.clientX - frame.x;
+    const originY = event.clientY - frame.y;
+    const move = (next: PointerEvent) => onMove(frame.id, next.clientX - originX, next.clientY - originY);
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  async function handoffFile(mode: "save" | "share") {
+    if (frame.doc.error) return;
+    setHandoff("");
+    try { await (mode === "save" ? saveInspectDoc(frame.doc) : shareInspectDoc(frame.doc)); }
+    catch (error) { setHandoff(error instanceof Error ? error.message : "Could not export this file."); }
+  }
+  return <section className="inspect-float" data-pinned={frame.pinned || undefined} data-kind={frame.doc.kind} style={{ left: frame.x, top: frame.y }} aria-label={frame.doc.name}>
+    <div className="inspect-float-bar" onPointerDown={drag}>
+      <span title={frame.doc.path}>{frame.doc.name}</span>
+      <div className="desktop-window-actions">
+        <button type="button" disabled={Boolean(frame.doc.error)} onPointerDown={event => event.stopPropagation()} onClick={() => { void handoffFile("save"); }}>Save</button>
+        <button type="button" disabled={Boolean(frame.doc.error)} onPointerDown={event => event.stopPropagation()} onClick={() => { void handoffFile("share"); }}>Share</button>
+        <button type="button" aria-pressed={frame.pinned} title={frame.pinned ? "Unpin" : "Pin"} onPointerDown={event => event.stopPropagation()} onClick={() => onPin(frame.id)}>⌖</button>
+        <button type="button" className="inspect-float-close" aria-label="Close file" onPointerDown={event => event.stopPropagation()} onClick={() => onClose(frame.id)}>×</button>
+      </div>
+    </div>
+    <div className="inspect-preview"><InspectPreview doc={frame.doc}/></div>
+    {handoff && <p className="inspect-handoff" role="status">{handoff}</p>}
+  </section>;
+}
+
 export function ContextRail({ tab, onTab, nodes, selectedNodeId, onSelectNode, liveNodeId, bot, busy,
   held, onHold, files, filesLoading = false, doc, inspectLoading = false,
-  onInspect, onCloseInspect, onRefresh }: ContextRailProps) {
+  onInspect, onCloseInspect, onRefresh, onPopOut }: ContextRailProps) {
   const id = useId();
   const selected = nodes.find(node => node.id === selectedNodeId) || nodes.at(-1);
   const tabs = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const lastFile = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { if (doc && held) closeRef.current?.focus({ preventScroll: true }); }, [doc?.path, held]);
+  const desktopRef = useRef<HTMLDivElement>(null);
+  const [handoff, setHandoff] = useState("");
+  useEffect(() => { if (doc) closeRef.current?.focus({ preventScroll: true }); }, [doc?.path]);
   function closeInspect() { onCloseInspect(); lastFile.current?.focus({ preventScroll: true }); }
+  function dragCrt(event: ReactPointerEvent<HTMLElement>) {
+    if (!held || !doc || inspectLoading) return;
+    event.preventDefault();
+    const move = (next: PointerEvent) => {
+      const box = desktopRef.current?.getBoundingClientRect();
+      if (!box) return;
+      if (next.clientX < box.left || next.clientX > box.right || next.clientY < box.top || next.clientY > box.bottom) {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        onPopOut?.(doc, next.clientX - 36, next.clientY - 10);
+      }
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  async function handoffFile(mode: "save" | "share") {
+    if (!doc || doc.error) return;
+    setHandoff("");
+    try { await (mode === "save" ? saveInspectDoc(doc) : shareInspectDoc(doc)); }
+    catch (error) { setHandoff(error instanceof Error ? error.message : "Could not export this file."); }
+  }
   return <aside className="context-rail inspect-drawer" aria-label="Context rail">
     <header className="rail-heading"><div className="rail-tabs" role="tablist" aria-label="Context view" ref={tabs}
       onKeyDown={event => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
@@ -550,6 +860,7 @@ export function ContextRail({ tab, onTab, nodes, selectedNodeId, onSelectNode, l
     </div><span className="harness-status">{tab === "path" ? selected?.label ?? "Select a Path" : held ? "Operator hold" : busy ? "Agent driving" : "Parked"}</span></header>
     {tab === "path" ? <section className="path-focus" role="tabpanel" id={`${id}-path`} aria-labelledby={`${id}-path-tab`} tabIndex={0}>
       <div className="rail-kicker"><span>Execution path</span><span>{busy && liveNodeId ? `${String(Math.max(1, nodes.findIndex(n => n.id === liveNodeId) + 1)).padStart(2, "0")} / ${String(nodes.length).padStart(2, "0")}` : String(nodes.length).padStart(2, "0")}</span></div>
+      {selected && <div className="path-detail"><p className="path-focus-kicker">{selected.kind === "tool" ? toolChip(selected.label) : selected.kind} / selected node</p><h2>{selected.kind === "tool" ? toolChip(selected.label) : selected.label}</h2><pre className="path-focus-body">{selected.text || "No text recorded for this node."}</pre></div>}
       <ol className="turn-graph path-tree" aria-label="Path spine">{(() => {
         const tools = nodes.map((node, index) => ({ node, index })).filter(item => item.node.kind === "tool");
         return nodes.map((node, index) => {
@@ -570,22 +881,29 @@ export function ContextRail({ tab, onTab, nodes, selectedNodeId, onSelectNode, l
           </li>;
         });
       })()}</ol>{!nodes.length && <div className="path-empty"><span className="path-empty-mark" aria-hidden="true">┌─┐<br/>└─┼─┐<br/>&nbsp;&nbsp;└─┘</span><h2>Follow the work.</h2><p>The path graph nests here as the run walks.</p></div>}
-      {selected && <div className="path-detail"><p className="path-focus-kicker">{selected.kind} / selected node</p><h2>{selected.label}</h2><pre className="path-focus-body">{selected.text || "No text recorded for this node."}</pre></div>}
     </section> : <section className="computer-panel" role="tabpanel" id={`${id}-crt`} aria-labelledby={`${id}-crt-tab`}>
       <div className="computer-controls"><span className="small">Workspace / read-only</span><div>{onRefresh && <button type="button" aria-label="Refresh workspace files" title="Refresh files" disabled={filesLoading || !bot} onClick={onRefresh}>↻</button>}
         <button type="button" aria-pressed={held} disabled={!bot} onClick={() => onHold(!held)}>{held ? "Release" : "Take hold"}</button></div></div>
       <div className="computer-monitor" data-held={held} data-driving={busy && !held}>
         <div className="computer-bezel"><span>klaʊd CRT</span><span title={bot?.cwd}>{bot?.cwd ? bot.cwd.split("/").filter(Boolean).slice(-2).join("/") : "cwd"}</span></div>
         <div className="computer-cwd" title={bot?.cwd || "Working directory unavailable"}><span>cwd / </span>{bot?.cwd || "not provided"}</div>
-        <div className="computer-desktop" inert={!held} onClick={() => { if (held && doc) closeInspect(); }}>
-          <div className="desktop-files" aria-label="Workspace files">{files.map(file => <button type="button" className={`desktop-icon${doc?.path === file.path ? " open" : ""}`} key={file.path}
+        <div className="computer-desktop" ref={desktopRef} onClick={() => { if (doc) closeInspect(); }}>
+          <div className="desktop-files" inert={!held} aria-label="Workspace files">{files.map(file => <button type="button" className={`desktop-icon${doc?.path === file.path ? " open" : ""}`} key={file.path}
             disabled={!held} title={`${file.path} · ${file.size.toLocaleString()} bytes`} onClick={event => { event.stopPropagation(); lastFile.current = event.currentTarget; onInspect(file.path); }}>
             <FileGlyph kind={file.kind}/><span>{file.path.split("/").pop()}<small>{file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : file.kind}</small></span><span className="file-size">{file.size < 1024 ? `${file.size} B` : `${Math.ceil(file.size / 1024)} K`}</span>
           </button>)}</div>
           {!files.length && <p className="desktop-empty">{filesLoading ? "Reading workspace…" : !bot ? "Select a field unit." : "Workspace empty."}</p>}
-          {(doc || inspectLoading) && <section className="desktop-window" data-kind={doc?.kind || "text"} aria-label={doc?.name || "File inspection"} onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === "Escape" && held) { event.stopPropagation(); closeInspect(); } }}>
-            <div className="desktop-window-bar"><span title={doc?.path}>{doc?.name || "Opening file…"}</span><button ref={closeRef} type="button" disabled={!held} aria-label="Close file inspection" onClick={closeInspect}>×</button></div>
-            <div className="inspect-preview" tabIndex={held ? 0 : -1}>{inspectLoading ? <p className="inspect-text" role="status">Opening file…</p> : doc ? <InspectPreview doc={doc}/> : null}</div>
+          {(doc || inspectLoading) && <section className="desktop-window" data-kind={doc?.kind || "text"} aria-label={doc?.name || "File inspection"} onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); closeInspect(); } }}>
+            <div className="desktop-window-bar" onPointerDown={dragCrt}>
+              <span title={doc?.path}>{doc?.name || "Opening file…"}</span>
+              <div className="desktop-window-actions">
+                <button type="button" disabled={!doc || inspectLoading || Boolean(doc.error)} onPointerDown={event => event.stopPropagation()} onClick={() => { void handoffFile("save"); }}>Save</button>
+                <button type="button" disabled={!doc || inspectLoading || Boolean(doc.error)} onPointerDown={event => event.stopPropagation()} onClick={() => { void handoffFile("share"); }}>Share</button>
+                <button ref={closeRef} type="button" className="inspect-float-close" aria-label="Close file inspection" onPointerDown={event => event.stopPropagation()} onClick={closeInspect}>×</button>
+              </div>
+            </div>
+            <div className="inspect-preview" tabIndex={0}>{inspectLoading ? <p className="inspect-text" role="status">Opening file…</p> : doc ? <InspectPreview doc={doc}/> : null}</div>
+            {handoff && <p className="inspect-handoff" role="status">{handoff}</p>}
           </section>}
         </div>
         {!held && <div className="computer-glass" aria-label="Computer interaction locked"><p>{busy ? `${bot?.name || "Agent"} has the screen.` : "Take hold to inspect the workspace."}<span>File interaction is paused.</span></p></div>}
@@ -696,4 +1014,54 @@ export function SetupWizard({ open, onClose, onFinish, profile, bots = [], selec
       {step < 2 ? <button type="button" className="primary" disabled={working || step === 1 && !validLimits} onClick={() => setStep(step + 1)}>{step === 0 ? "Keep existing model" : "Review starter"}</button>
         : <button type="button" className="primary" disabled={working || !validLimits || !starter.trim()} aria-busy={working} onClick={() => void finish()}>{working ? "Saving…" : "Save profile & open composer"}</button>}</div>
   </Modal>;
+}
+
+export function AccountOnboard({ connection, onSignIn, onRetry, onRequest, requested, requesting, error, returning = false }: {
+  connection: "connecting" | "connected" | "auth" | "offline";
+  onSignIn: () => void;
+  onRetry: () => void;
+  onRequest: (email: string, name: string) => Promise<void>;
+  requested: boolean;
+  requesting: boolean;
+  error?: string;
+  returning?: boolean;
+}) {
+  const [step, setStep] = useState(returning ? 1 : 0);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const labels = ["ZERMO account", "Authelia", "Console"];
+  return <section className="connection-door" aria-label={returning ? "klaʊdbot sign in" : "klaʊdbot onboarding"}>
+    <div>
+      <p className="eyebrow">{returning ? "House account" : "First run / house account"}</p>
+      <strong>{connection === "connecting" ? "Establishing link…" : returning ? "Sign in to klaʊdbot" : "Set up klaʊdbot"}</strong>
+      <p>{returning ? "This device already has a house account on this harness. Sign in at auth.zermo.org if the session expired." : "A zermo.org account is minted into Authelia, then into the reinklaud API list. The console is one product — not a sibling bot."}</p>
+    </div>
+    <ol className="setup-index">{labels.map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined}><span>{String(index + 1).padStart(2, "0")}</span>{label}</li>)}</ol>
+    {step === 0 && <form className="onboard-form" onSubmit={event => { event.preventDefault(); void onRequest(email, name).then(() => setStep(1)); }}>
+      <label className="field-label">Your name<input required maxLength={80} value={name} onChange={event => setName(event.target.value)} autoComplete="name" /></label>
+      <label className="field-label">Email on zermo.org<input type="email" required maxLength={120} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder="you@zermo.org" /></label>
+      <p className="muted">This queues you for Authelia. Existing house users can skip ahead.</p>
+      {requested && <p className="muted">Request received. Continue to Authelia.</p>}
+      <div className="dialog-actions">
+        <button type="button" onClick={() => setStep(1)}>I already have an account</button>
+        <button type="submit" className="primary" disabled={requesting} aria-busy={requesting}>{requesting ? "Sending…" : "Request account"}</button>
+      </div>
+    </form>}
+    {step === 1 && <div>
+      <p>Sign in at auth.zermo.org. That cookie is the Authelia permit. After mint, /state on reinklaud.zermo.org answers as the API list.</p>
+      <div className="dialog-actions">
+        <button type="button" onClick={() => { if (!returning) setStep(0); }} disabled={returning}>Back</button>
+        <button type="button" className="primary" onClick={onSignIn}>Sign in · auth.zermo.org</button>
+        <button type="button" onClick={() => setStep(2)}>Continue</button>
+      </div>
+    </div>}
+    {step === 2 && <div>
+      <p>{connection === "connected" ? "Minted. The field console is open." : connection === "auth" ? "Authelia has you, waiting on the API list." : "Retry the link once Authelia has advanced the permit."}</p>
+      <div className="dialog-actions">
+        <button type="button" onClick={() => setStep(1)}>Back</button>
+        <button type="button" className="primary" disabled={connection === "connecting"} onClick={onRetry}>Retry link</button>
+      </div>
+    </div>}
+    {error && <p className="inline-error" role="alert">{error}</p>}
+  </section>;
 }

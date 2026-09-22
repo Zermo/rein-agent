@@ -48,10 +48,26 @@ export function validateMessages(value: unknown): Message[] {
 }
 const publicText = (value: unknown): string => typeof value === "string" ? value : Array.isArray(value) ? value.filter(item => object(item) && item.type === "text").map(item => String(item.text ?? "")).join("\n") : "";
 
-/** Public answer and tool records only. Never render provider thinking payloads. */
 export function updateTranscript(messages: Message[], event: AgEvent): Message[] {
   const next = [...messages];
   let id: string, message: Message;
+  if (["THINKING_START", "THINKING_CONTENT", "THINKING_END"].includes(event.type)) {
+    if (typeof event.messageId !== "string") throw new Error("Missing transcript message id.");
+    const streamId = event.messageId;
+    let existing = next.findLast(item => item.role === "assistant" && (item.local || item.streamIds?.includes(streamId)));
+    if (!existing) {
+      const waiting = next.findIndex(item => item.role === "assistant" && item.pending && !item.content && !item.thinking);
+      if (waiting >= 0) existing = next[waiting];
+    }
+    id = existing?.id ?? streamId;
+    const delta = event.type === "THINKING_CONTENT" ? String(event.delta ?? "") : "";
+    const ended = event.type === "THINKING_END" && typeof event.content === "string" ? event.content : "";
+    const thinking = (ended && ended.length >= (existing?.thinking?.length ?? 0) ? ended : `${existing?.thinking ?? ""}${delta}`).slice(0, 24_000);
+    message = { ...existing, id, role: "assistant", local: true, streamIds: [...new Set([...(existing?.streamIds ?? []), streamId])], content: existing?.content ?? "", thinking, pending: event.type !== "THINKING_END" || Boolean(existing?.pending && !existing?.content) };
+    const index = next.findIndex(item => item.id === id);
+    if (index >= 0) next[index] = message; else next.push(message);
+    return next;
+  }
   if (["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"].includes(event.type)) {
     if (typeof event.messageId !== "string") throw new Error("Missing transcript message id.");
     id = event.messageId;
@@ -141,7 +157,9 @@ export function groupTurns(messages: Message[]): Turn[] {
   }
   for (const turn of turns) {
     const nodes: PathNode[] = [];
-    if (turn.user) nodes.push({ id: turn.user.id, kind: "user", label: "You", text: turn.user.content.slice(0, 500) });
+    if (turn.user) nodes.push({ id: turn.user.id, kind: "user", label: "You", text: turn.user.content.slice(0, 2000) });
+    const thought = turn.messages.filter(item => item.role === "assistant").map(item => item.thinking?.trim() ?? "").filter(Boolean).join("\n\n");
+    if (thought) nodes.push({ id: `${turn.id}-think`, kind: "think", label: "Think", text: thought.slice(0, 12_000) });
     const results = new Map(turn.messages.filter(item => item.role === "tool").map(item => [item.toolCallId, item]));
     const tools = new Set<string>();
     for (const message of turn.messages) {
@@ -149,32 +167,55 @@ export function groupTurns(messages: Message[]): Turn[] {
         if (tools.has(call.id)) continue;
         tools.add(call.id);
         const result = results.get(call.id);
-        nodes.push({ id: `tool-${call.id}`, kind: "tool", label: `${call.function.name}${result?.isError ? " · failed" : ""}`, text: `${call.function.arguments}\n${result?.content ?? ""}`.slice(0, 500) });
+        nodes.push({ id: `tool-${call.id}`, kind: "tool", label: `${call.function.name}${result?.isError ? " · failed" : ""}`, text: `${call.function.arguments}\n${result?.content ?? ""}`.slice(0, 4000) });
       }
       if (message.role === "tool" && !tools.has(message.toolCallId ?? message.id)) {
         tools.add(message.toolCallId ?? message.id);
-        nodes.push({ id: message.id, kind: "tool", label: `${message.toolName ?? "Tool"}${message.isError ? " · failed" : ""}`, text: `${message.arguments ?? ""}\n${message.content}`.trim().slice(0, 500) });
+        nodes.push({ id: message.id, kind: "tool", label: `${message.toolName ?? "Tool"}${message.isError ? " · failed" : ""}`, text: `${message.arguments ?? ""}\n${message.content}`.trim().slice(0, 4000) });
       }
     }
     const answer = turn.messages.findLast(item => item.role === "assistant");
-    if (answer) nodes.push({ id: answer.id, kind: "reply", label: "Reply", text: answer.content.slice(0, 500) });
+    if (answer) nodes.push({ id: answer.id, kind: "reply", label: "Reply", text: answer.content.slice(0, 4000) });
     turn.nodes = nodes;
   }
   return turns;
+}
+
+const INSPECT_MEDIA = /(?:png|svg|html?)$/i;
+const INSPECT_FILE = /`([^`\n]+\.(?:png|jpe?g|gif|webp|svg|html?|md|txt|json|csv|js|mjs|cjs|ts|jsx|tsx|css|py|ya?ml|sh))`|\]\(([^)\n]+\.(?:png|jpe?g|gif|webp|svg|html?|md|txt|json|csv|js|mjs|cjs|ts|jsx|tsx|css|py|ya?ml|sh))\)|(?<![\w/])([\w./-]+\.(?:png|jpe?g|gif|webp|svg|html?|md|txt|json|csv|js|mjs|cjs|ts|jsx|tsx|css|py|ya?ml|sh))\b/gi;
+
+export function normalizeInspectPath(raw: string, cwd = ""): string | undefined {
+  let path = raw.trim();
+  if (!path || /https?:|\.\.|(?:secret|token|password|credential|\.env)/i.test(path)) return;
+  if (cwd && path.startsWith(cwd.replace(/\/$/, "") + "/")) path = path.slice(cwd.replace(/\/$/, "").length + 1);
+  else if (path.startsWith("/")) path = path.split("/").pop()!;
+  path = path.replace(/^\.\//, "");
+  return path || undefined;
+}
+
+export function inspectableSpans(text: string, cwd = ""): { start: number; end: number; path: string; raw: string }[] {
+  INSPECT_FILE.lastIndex = 0;
+  const out: { start: number; end: number; path: string; raw: string }[] = [];
+  for (const match of text.matchAll(INSPECT_FILE)) {
+    const path = normalizeInspectPath(match[1] || match[2] || match[3] || "", cwd);
+    if (!path || match.index == null) continue;
+    out.push({ start: match.index, end: match.index + match[0].length, path, raw: match[0] });
+  }
+  return out.slice(0, 8);
+}
+
+export function inspectablePaths(text: string, cwd = ""): string[] {
+  const out: string[] = [];
+  for (const span of inspectableSpans(text, cwd)) if (!out.includes(span.path)) out.push(span.path);
+  return out;
 }
 
 export function latestPresentation(messages: Message[], cwd = ""): string | undefined {
   for (let i = messages.length - 1; i >= Math.max(0, messages.length - 8); i--) {
     const message = messages[i];
     if (message.role === "user" || message.status === "running") continue;
-    const matches = [...message.content.matchAll(/`([^`\n]+\.(?:png|svg|html?))`|\]\(([^)\n]+\.(?:png|svg|html?))\)|(?<![\w/])([\w./-]+\.(?:png|svg|html?))\b/gi)];
-    for (const match of matches.reverse()) {
-      let path = match[1] || match[2] || match[3];
-      if (!path || /https?:|\.\.|(?:secret|token|password|credential|\.env)/i.test(path)) continue;
-      if (cwd && path.startsWith(cwd.replace(/\/$/, "") + "/")) path = path.slice(cwd.replace(/\/$/, "").length + 1);
-      else if (path.startsWith("/")) path = path.split("/").pop()!;
-      return path.replace(/^\.\//, "");
-    }
+    const paths = inspectablePaths(message.content, cwd).filter(path => INSPECT_MEDIA.test(path));
+    if (paths.length) return paths.at(-1);
   }
 }
 

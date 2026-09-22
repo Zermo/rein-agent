@@ -25,13 +25,15 @@ export interface Message {
   toolCalls?: ToolCall[]; toolCallId?: string; toolName?: string; arguments?: string;
   status?: "running" | "complete" | "recorded"; isError?: boolean;
   completion?: { stopReason?: string; reasoningTokens?: number };
+  thinking?: string;
   local?: boolean; pending?: boolean; truncated?: boolean; persistedId?: string; streamIds?: string[];
 }
-export interface PathNode { id: string; kind: "user" | "tool" | "reply"; label: string; text: string }
+export interface PathNode { id: string; kind: "user" | "tool" | "think" | "reply"; label: string; text: string }
 export interface Turn { id: string; user?: Message; messages: Message[]; nodes: PathNode[] }
 export type InspectKind = "image" | "html" | "text";
 export interface InspectFile { path: string; size: number; kind: InspectKind; mtime: number }
 export interface InspectDoc { path: string; name: string; kind: InspectKind; url: string; text?: string; error?: string }
+export interface InspectFrame { id: string; doc: InspectDoc; x: number; y: number; pinned: boolean }
 export interface PendingAction { id: string; runId: string; kind: "approval" | "tool"; tool: string; summary: string; args?: Record<string, unknown> }
 export interface Activity { autonomy: { status: "inactive" | "running" | "unavailable"; kind?: "scan" | "routine" } }
 export interface AgEvent { type: string; [key: string]: unknown }

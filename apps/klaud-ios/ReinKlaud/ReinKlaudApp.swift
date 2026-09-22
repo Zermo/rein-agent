@@ -71,12 +71,6 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
-enum KlaudLegacyEvaluationResult: Equatable {
-    case accepted
-    case rejected
-    case unknown
-}
-
 @MainActor
 final class KlaudBridge: NSObject, ObservableObject {
     @Published var fault: String?
@@ -99,7 +93,6 @@ final class KlaudBridge: NSObject, ObservableObject {
     let sounds = ReinSoundEngine()
     let localInference = KlaudLocalInference()
     var commandSink: (([String: Any]) -> Void)?
-    var legacyCommandSink: ((String, @escaping (KlaudLegacyEvaluationResult) -> Void) -> Void)?
 
     struct DraftSnapshot {
         let scope: KlaudComposerScope?
@@ -118,19 +111,12 @@ final class KlaudBridge: NSObject, ObservableObject {
         let revision: Int
     }
 
-    private enum ComposerTransport {
-        case none
-        case scoped
-        case legacy
-    }
-
     private var composerScope: KlaudComposerScope?
     private var drafts: [KlaudComposerScope: DraftRecord] = [:]
     private var pendingSends: [String: KlaudPendingComposerSend] = [:]
     private var submitLatches: [KlaudComposerScope: SubmitLatch] = [:]
-    private var transport: ComposerTransport = .none
-    private var pendingLegacyDraft: (revision: Int, text: String)?
-    private var legacyDocumentNonce: String?
+    private var composerDocumentNonce: String?
+    private var webEdits: [KlaudComposerScope: (document: String, revision: Int)] = [:]
     private(set) var dictationActive = false
     private var dictationRange: NSRange?
     private var dictationScope: KlaudComposerScope?
@@ -171,11 +157,22 @@ final class KlaudBridge: NSObject, ObservableObject {
     }
 
     func resetComposerTransport() {
+        composerDocumentNonce = nil
+        hideComposer()
+    }
+
+    private func endComposerEditing() {
         stopDictation()
+        if let editor = composerTextView, editor.markedTextRange != nil {
+            editor.unmarkText()
+            setComposerDraft(editor.text)
+        }
+        composerTextView?.resignFirstResponder()
+    }
+
+    private func hideComposer() {
+        endComposerEditing()
         persistCurrentDraft()
-        pendingLegacyDraft = nil
-        legacyDocumentNonce = nil
-        transport = .none
         composerScope = nil
         composerVisible = false
         composerEnabled = false
@@ -186,40 +183,44 @@ final class KlaudBridge: NSObject, ObservableObject {
     }
 
     func receiveComposerMessage(_ body: [String: Any]) {
-        let version = (body["protocolVersion"] as? NSNumber)?.intValue
-        guard version == KlaudComposerContract.version,
-              let action = body["action"] as? String else { return }
+        guard KlaudComposerContract.integer(body["protocolVersion"]) == KlaudComposerContract.version,
+              let action = body["action"] as? String,
+              let nonce = KlaudComposerContract.identifier(body["documentNonce"]) else { return }
+        if action == "hello" {
+            guard let scope = KlaudComposerContract.scope(from: body),
+                  let requestID = KlaudComposerContract.identifier(body["requestId"]) else { return }
+            composerDocumentNonce = nonce
+            emitComposerCommand(["action": "ready", "requestId": requestID], scope: scope)
+            return
+        }
+        guard composerDocumentNonce == nonce else { return }
         switch action {
-        case "state":
-            let promotedFromLegacy = transport == .legacy
-            transport = .scoped
-            pendingLegacyDraft = nil
-            legacyDocumentNonce = nil
-            updateComposerState(body, promotedFromLegacy: promotedFromLegacy)
-        case "legacyState":
-            guard transport != .scoped else { return }
-            legacyDocumentNonce = body["documentNonce"] as? String
-            updateLegacyComposerState(body)
-        case "sendAck":
-            receiveSendAcknowledgement(body)
-        case "dismiss":
-            requestKeyboardDismissal()
-        default:
-            break
+        case "state": updateComposerState(body)
+        case "sendAck": receiveSendAcknowledgement(body)
+        case "dismiss": requestKeyboardDismissal()
+        default: break
         }
     }
 
+    var composerWithinLimit: Bool {
+        composerText.utf8.count <= KlaudComposerContract.maximumUTF8Count
+    }
+
+    private var composerTextIsReady: Bool {
+        guard composerWithinLimit, !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard let editor = composerTextView else { return true }
+        return editor.markedTextRange == nil &&
+            editor.text.utf8.count <= KlaudComposerContract.maximumUTF8Count &&
+            editor.text.utf8.elementsEqual(composerText.utf8)
+    }
+
     func setComposerDraft(_ text: String) {
-        guard text != composerText,
-              text.utf8.count <= KlaudComposerContract.maximumUTF8Count else { return }
+        // Keep the local composition intact; the outbound boundary enforces its byte limit.
+        // Swift String equality is canonical, not byte-exact; revisions must track the actual UTF-8.
+        guard !text.utf8.elementsEqual(composerText.utf8) else { return }
         composerText = text
         composerRevision &+= 1
         persistCurrentDraft()
-        if transport == .legacy, let composerScope {
-            pendingLegacyDraft = (composerRevision, text)
-            evaluateLegacy("setDraft(\(Self.json(text)),\(composerRevision),\(Self.json(Self.legacyScopeKey(composerScope))))")
-            return
-        }
         emitComposerCommand([
             "action": "draft",
             "revision": composerRevision,
@@ -229,7 +230,7 @@ final class KlaudBridge: NSObject, ObservableObject {
 
     func submitComposer() {
         guard composerEnabled, !composerBusy, submitLatches.isEmpty, let composerScope,
-              !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+              composerTextIsReady else { return }
         stopDictationForManualEditing()
         let requestID = UUID().uuidString.lowercased()
         let latch = SubmitLatch(requestID: requestID, scope: composerScope, revision: composerRevision)
@@ -242,29 +243,6 @@ final class KlaudBridge: NSObject, ObservableObject {
             revision: composerRevision,
             text: composerText
         )
-        if transport == .legacy {
-            let expectedDocumentNonce = legacyDocumentNonce
-            evaluateLegacy("submit(\(Self.json(Self.legacyScopeKey(composerScope))))") { [weak self] result in
-                guard let self,
-                      self.submitLatches[composerScope]?.requestID == requestID else { return }
-                guard self.transport == .legacy,
-                      let expectedDocumentNonce,
-                      self.legacyDocumentNonce == expectedDocumentNonce else {
-                    self.markDeliveryUnknown(scope: composerScope, requestID: requestID)
-                    return
-                }
-                switch result {
-                case .accepted:
-                    break
-                case .rejected:
-                    self.pendingSends.removeValue(forKey: requestID)
-                    self.releaseSubmitLatch(scope: composerScope, requestID: requestID)
-                case .unknown:
-                    self.markDeliveryUnknown(scope: composerScope, requestID: requestID)
-                }
-            }
-            return
-        }
         emitComposerCommand([
             "action": "send",
             "requestId": requestID,
@@ -275,10 +253,6 @@ final class KlaudBridge: NSObject, ObservableObject {
 
     func stopRun() {
         guard composerBusy, composerScope != nil else { return }
-        if transport == .legacy, let composerScope {
-            evaluateLegacy("stop(\(Self.json(Self.legacyScopeKey(composerScope))))")
-            return
-        }
         emitComposerCommand([
             "action": "stop",
             "requestId": UUID().uuidString.lowercased()
@@ -384,6 +358,7 @@ final class KlaudBridge: NSObject, ObservableObject {
     }
 
     func refineDraftOnDevice() {
+        guard composerTextIsReady else { return }
         let snapshot = currentDraftSnapshot()
         localInference.refine(snapshot.text) { [weak self] result in
             guard let self, case .success(let revised) = result else { return }
@@ -398,7 +373,7 @@ final class KlaudBridge: NSObject, ObservableObject {
     func applyRefinedDraft(_ revised: String, from snapshot: DraftSnapshot) {
         guard composerScope == snapshot.scope,
               composerRevision == snapshot.revision,
-              composerText == snapshot.text else {
+              composerText.utf8.elementsEqual(snapshot.text.utf8) else {
             localInference.markDraftChanged()
             return
         }
@@ -422,104 +397,51 @@ final class KlaudBridge: NSObject, ObservableObject {
         _ = mime
     }
 
-    private func updateComposerState(
-        _ body: [String: Any],
-        promotedFromLegacy: Bool
-    ) {
-        guard body["visible"] as? Bool == true,
-              let nextScope = KlaudComposerContract.scope(from: body) else {
-            resetComposerTransport()
-            return
-        }
-
-        let remoteDraft = (body["draft"] as? String) ?? ""
-        let nextEnabled = body["enabled"] as? Bool ?? false
-        let nextBusy = body["busy"] as? Bool ?? false
-        if composerScope != nextScope {
-            stopDictation()
+    private func updateComposerState(_ body: [String: Any]) {
+        guard let visible = KlaudComposerContract.boolean(body["visible"]) else { return }
+        if !visible { hideComposer(); return }
+        guard let nextScope = KlaudComposerContract.scope(from: body),
+              let remoteDraft = body["draft"] as? String,
+              remoteDraft.utf8.count <= KlaudComposerContract.maximumUTF8Count,
+              let nextEnabled = KlaudComposerContract.boolean(body["enabled"]),
+              let nextBusy = KlaudComposerContract.boolean(body["busy"]),
+              let webRevision = KlaudComposerContract.integer(body["webRevision"]),
+              let document = composerDocumentNonce else { return }
+        let changedScope = composerScope != nextScope
+        let editedOnWeb = webRevision > 0 &&
+            (webEdits[nextScope]?.document != document || webRevision > (webEdits[nextScope]?.revision ?? 0))
+        if changedScope {
+            endComposerEditing()
             persistCurrentDraft()
             composerScope = nextScope
-            let record = drafts[nextScope] ?? DraftRecord(
-                text: remoteDraft.utf8.count <= KlaudComposerContract.maximumUTF8Count ? remoteDraft : "",
-                revision: 0
-            )
-            drafts[nextScope] = record
+            let record = drafts[nextScope] ?? DraftRecord(text: "", revision: 0)
             composerText = record.text
             composerRevision = record.revision
         }
-        if !nextEnabled || nextBusy { stopDictation() }
-        if let latch = submitLatches[nextScope] {
-            if promotedFromLegacy {
-                markDeliveryUnknown(scope: nextScope, requestID: latch.requestID)
-            }
-            if let pending = pendingSends[latch.requestID], nextBusy {
-                acceptPendingSend(pending)
-            }
+        if editedOnWeb {
+            composerText = remoteDraft
+            composerRevision &+= 1
+            webEdits[nextScope] = (document, webRevision)
         }
-
+        persistCurrentDraft()
+        if !nextEnabled || nextBusy { stopDictation() }
         composerVisible = true
         composerEnabled = nextEnabled
         composerBusy = nextBusy
         composerSubmitting = !submitLatches.isEmpty
-        if remoteDraft != composerText {
-            emitComposerCommand([
-                "action": "draft",
-                "revision": composerRevision,
-                "text": composerText
-            ])
+        // Busy is optimistic UI state, never evidence that this send was accepted.
+        if changedScope || editedOnWeb || !remoteDraft.utf8.elementsEqual(composerText.utf8) {
+            emitComposerCommand(["action": "draft", "revision": composerRevision, "text": composerText])
         }
-    }
-
-    private func updateLegacyComposerState(_ body: [String: Any]) {
-        guard body["visible"] as? Bool == true,
-              let scopeKey = body["scope"] as? String,
-              !scopeKey.isEmpty,
-              let nextScope = KlaudComposerContract.scope(from: body) else {
-            resetComposerTransport()
-            return
-        }
-        let remoteDraft = (body["draft"] as? String) ?? ""
-        let reportedRevision = (body["revision"] as? NSNumber)?.intValue ?? 0
-        let nextEnabled = body["enabled"] as? Bool ?? false
-        let nextBusy = body["busy"] as? Bool ?? false
-        if transport != .legacy || composerScope != nextScope {
-            stopDictation()
-            persistCurrentDraft()
-            transport = .legacy
-            composerScope = nextScope
-            pendingLegacyDraft = nil
-            composerText = remoteDraft.utf8.count <= KlaudComposerContract.maximumUTF8Count ? remoteDraft : ""
-            composerRevision = reportedRevision
-            persistCurrentDraft()
-        } else if reportedRevision >= composerRevision {
-            if let pendingLegacyDraft, reportedRevision == pendingLegacyDraft.revision {
-                if remoteDraft == pendingLegacyDraft.text {
-                    self.pendingLegacyDraft = nil
-                }
-            } else if remoteDraft.utf8.count <= KlaudComposerContract.maximumUTF8Count {
-                composerText = remoteDraft
-                composerRevision = reportedRevision
-                persistCurrentDraft()
-            }
-        }
-        if !nextEnabled || nextBusy { stopDictation() }
-        if let latch = submitLatches[nextScope],
-           let pending = pendingSends[latch.requestID],
-           nextBusy || (reportedRevision == latch.revision && remoteDraft.isEmpty) {
-            acceptPendingSend(pending)
-        }
-        composerVisible = true
-        composerEnabled = nextEnabled
-        composerBusy = nextBusy
-        composerSubmitting = !submitLatches.isEmpty
     }
 
     private func receiveSendAcknowledgement(_ body: [String: Any]) {
         guard let requestID = body["requestId"] as? String,
               let pending = pendingSends[requestID],
               KlaudComposerContract.scope(from: body) == pending.scope,
-              (body["revision"] as? NSNumber)?.intValue == pending.revision else { return }
-        guard body["accepted"] as? Bool == true else {
+              KlaudComposerContract.integer(body["revision"]) == pending.revision,
+              let accepted = KlaudComposerContract.boolean(body["accepted"]) else { return }
+        guard accepted else {
             pendingSends.removeValue(forKey: requestID)
             releaseSubmitLatch(scope: pending.scope, requestID: requestID)
             return
@@ -532,13 +454,13 @@ final class KlaudBridge: NSObject, ObservableObject {
         releaseSubmitLatch(scope: pending.scope, requestID: pending.requestID)
         if composerScope == pending.scope,
            composerRevision == pending.revision,
-           composerText == pending.text {
+           composerText.utf8.elementsEqual(pending.text.utf8) {
             setComposerDraft("")
             return
         }
         if let record = drafts[pending.scope],
            record.revision == pending.revision,
-           record.text == pending.text {
+           record.text.utf8.elementsEqual(pending.text.utf8) {
             drafts[pending.scope] = DraftRecord(text: "", revision: pending.revision &+ 1)
         }
     }
@@ -554,20 +476,16 @@ final class KlaudBridge: NSObject, ObservableObject {
         if submitLatches.isEmpty { composerDeliveryUncertain = false }
     }
 
-    private func markDeliveryUnknown(scope: KlaudComposerScope, requestID: String) {
-        guard submitLatches[scope]?.requestID == requestID else { return }
-        composerSubmitting = true
-        composerDeliveryUncertain = true
-    }
-
     private func persistCurrentDraft() {
         guard let composerScope else { return }
         drafts[composerScope] = DraftRecord(text: composerText, revision: composerRevision)
     }
 
-    private func emitComposerCommand(_ values: [String: Any]) {
-        guard transport == .scoped, let composerScope else { return }
+    private func emitComposerCommand(_ values: [String: Any], scope: KlaudComposerScope? = nil) {
+        guard let composerScope = scope ?? composerScope, let nonce = composerDocumentNonce else { return }
+        if let text = values["text"] as? String, text.utf8.count > KlaudComposerContract.maximumUTF8Count { return }
         var payload = values
+        payload["documentNonce"] = nonce
         payload["protocolVersion"] = KlaudComposerContract.version
         payload["botId"] = composerScope.botID
         payload["sessionId"] = composerScope.sessionID
@@ -578,42 +496,11 @@ final class KlaudBridge: NSObject, ObservableObject {
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
-        let source = "window.dispatchEvent(new CustomEvent('\(KlaudComposerContract.eventName)',{detail:\(json)}))"
+        let source = "if(window.klaudNative&&window.klaudNative.documentNonce===\(Self.json(nonce))){window.dispatchEvent(new CustomEvent('\(KlaudComposerContract.eventName)',{detail:\(json)}))}"
         webView?.evaluateJavaScript(source, completionHandler: nil)
     }
 
-    private func evaluateLegacy(
-        _ invocation: String,
-        completion: ((KlaudLegacyEvaluationResult) -> Void)? = nil
-    ) {
-        if let legacyCommandSink {
-            legacyCommandSink(invocation) { result in
-                Task { @MainActor in completion?(result) }
-            }
-            return
-        }
-        guard let webView else {
-            completion?(.unknown)
-            return
-        }
-        webView.evaluateJavaScript(
-            "window.klaudLegacyNativeComposer&&window.klaudLegacyNativeComposer.\(invocation)"
-        ) { result, error in
-            Task { @MainActor in
-                guard error == nil, let value = result as? NSNumber else {
-                    completion?(.unknown)
-                    return
-                }
-                completion?(value.boolValue ? .accepted : .rejected)
-            }
-        }
-    }
-
-    private static func legacyScopeKey(_ scope: KlaudComposerScope) -> String {
-        "\(scope.botID)|\(scope.sessionID)"
-    }
-
-    private static func json(_ value: String) -> String {
+    fileprivate static func json(_ value: String) -> String {
         let data = (try? JSONEncoder().encode(value)) ?? Data("\"\"".utf8)
         return String(data: data, encoding: .utf8) ?? "\"\""
     }
@@ -847,19 +734,18 @@ struct KlaudWebView: UIViewRepresentable {
         let seen = UserDefaults.standard.bool(forKey: "rein.klaud.setup-seen") || ready
         let boot = """
         (function(){
-          var documentNonce = (window.crypto && window.crypto.randomUUID)
-            ? window.crypto.randomUUID()
-            : String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+          var documentNonce = window.crypto && window.crypto.randomUUID && window.crypto.randomUUID();
+          if (!documentNonce) return;
           var trusted = location.protocol === 'https:' &&
             (location.hostname === 'openbot.zermo.org' || location.hostname === 'reinklaud.zermo.org') &&
             (!location.port || location.port === '443');
           if (!trusted) return;
           var native = window.klaudNative || {};
           var capabilities = Array.isArray(native.capabilities) ? native.capabilities.slice() : [];
-          if (!capabilities.includes('composer.v1')) capabilities.push('composer.v1');
+          if (!capabilities.includes('composer.v2')) capabilities.push('composer.v2');
           window.klaudNative = Object.assign(native, {
             inApp: true,
-            protocolVersion: 1,
+            protocolVersion: 2,
             capabilities: capabilities,
             documentNonce: documentNonce,
             systemKeyboard: \(thirdParty ? "true" : "false")
@@ -881,132 +767,7 @@ struct KlaudWebView: UIViewRepresentable {
               try { window.webkit.messageHandlers.klaud.postMessage({kind:'setup',documentNonce:documentNonce,key:String(k),value:String(v||'')}); } catch(e) {}
             }
           };
-          window.dispatchEvent(new CustomEvent('klaud-native-ready', {detail:{protocolVersion:1,documentNonce:documentNonce}}));
-          setTimeout(function(){
-            if (window.__klaudLegacyNativeComposerInstalled) return;
-            window.__klaudLegacyNativeComposerInstalled = true;
-            var lastState = '';
-            var lastLedger = null;
-            var lastScrollTop = 0;
-            var nativeRevision = 0;
-            var activeScope = '';
-            var descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-            var nativeValueSetter = descriptor && descriptor.set;
-            function post(message) {
-              message.documentNonce = documentNonce;
-              try { window.webkit.messageHandlers.klaud.postMessage(message); } catch(e) {}
-            }
-            function fiberIdentity(pane) {
-              var key = Object.keys(pane).find(function(value){ return value.indexOf('__reactFiber$') === 0; });
-              var node = key ? pane[key] : null;
-              while (node) {
-                var props = node.memoizedProps;
-                var bot = props && props.bot;
-                if (bot && typeof bot.id === 'string' && bot.id &&
-                    typeof bot.sessionId === 'string' && bot.sessionId) {
-                  return {botID:bot.id,sessionID:bot.sessionId,scope:bot.id+'|'+bot.sessionId};
-                }
-                node = node.return;
-              }
-              return null;
-            }
-            function legacyContext() {
-              var panes = Array.prototype.filter.call(document.querySelectorAll('.chat-pane'), function(pane){
-                var style = window.getComputedStyle(pane);
-                return pane.getClientRects().length && style.display !== 'none' && style.visibility !== 'hidden';
-              });
-              if (panes.length !== 1) return null;
-              var pane = panes[0];
-              var botID = pane.getAttribute('data-bot-id') || '';
-              var sessionID = pane.getAttribute('data-session-id') || '';
-              var identity = botID && sessionID
-                ? {botID:botID,sessionID:sessionID,scope:botID+'|'+sessionID}
-                : fiberIdentity(pane);
-              if (!identity) return null;
-              var field = pane.querySelector('textarea.crt-input');
-              var form = field && field.closest('form');
-              if (!field || !form || !pane.contains(form)) return null;
-              return {
-                pane: pane,
-                field: field,
-                form: form,
-                stop: pane.querySelector('.stop-run'),
-                ledger: pane.querySelector('.transcript'),
-                botID: identity.botID,
-                sessionID: identity.sessionID,
-                scope: identity.scope
-              };
-            }
-            function report() {
-              var context = legacyContext();
-              var scope = context ? context.scope : '';
-              if (scope !== activeScope) {
-                activeScope = scope;
-                nativeRevision = 0;
-                lastState = '';
-              }
-              var field = context ? context.field : null;
-              var state = {
-                kind: 'composer', protocolVersion: 1, action: 'legacyState',
-                visible: !!context,
-                enabled: !!(field && !field.disabled),
-                busy: !!(context && context.stop),
-                draft: field ? String(field.value || '') : '',
-                revision: nativeRevision,
-                botId: context ? context.botID : '',
-                sessionId: context ? context.sessionID : '',
-                scope: scope
-              };
-              var encoded = JSON.stringify(state);
-              if (encoded !== lastState) { lastState = encoded; post(state); }
-              var ledger = context ? context.ledger : null;
-              if (ledger && ledger !== lastLedger) {
-                lastLedger = ledger;
-                lastScrollTop = ledger.scrollTop;
-                ledger.addEventListener('scroll', function(){
-                  var next = ledger.scrollTop;
-                  if (Math.abs(next - lastScrollTop) > 14) {
-                    post({kind:'composer',protocolVersion:1,action:'dismiss'});
-                  }
-                  lastScrollTop = next;
-                }, {passive:true});
-              }
-            }
-            window.klaudLegacyNativeComposer = {
-              setDraft: function(value, revision, expectedScope) {
-                var context = legacyContext();
-                if (!context || !expectedScope || expectedScope !== context.scope || !nativeValueSetter) return false;
-                nativeRevision = Number(revision) || 0;
-                nativeValueSetter.call(context.field, String(value || ''));
-                context.field.dispatchEvent(new InputEvent('input', {bubbles:true,inputType:'insertText',data:null}));
-                report();
-                return true;
-              },
-              submit: function(expectedScope) {
-                var context = legacyContext();
-                if (!context || !expectedScope || expectedScope !== context.scope ||
-                    context.field.disabled || !String(context.field.value || '').trim()) return false;
-                if (context.form.requestSubmit) context.form.requestSubmit();
-                else context.form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));
-                return true;
-              },
-              stop: function(expectedScope) {
-                var context = legacyContext();
-                if (!context || !expectedScope || expectedScope !== context.scope || !context.stop) return false;
-                context.stop.click();
-                return true;
-              }
-            };
-            var nativeStyle = document.createElement('style');
-            nativeStyle.id = 'klaud-native-composer-style';
-            nativeStyle.textContent = '.crt-prompt-dock,.field-kb-shell{display:none!important}';
-            (document.head || document.documentElement).appendChild(nativeStyle);
-            document.addEventListener('input', function(event){
-              if (event.target && event.target.matches && event.target.matches('textarea.crt-input')) report();
-            }, true);
-            setInterval(report, 140);
-            report();
-          }, 400);
+          window.dispatchEvent(new CustomEvent('klaud-native-ready', {detail:{protocolVersion:2,documentNonce:documentNonce}}));
         })();
         """
         config.userContentController.addUserScript(WKUserScript(source: boot, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -1059,7 +820,7 @@ struct KlaudWebView: UIViewRepresentable {
             }
             if kind == "composer" {
                 DispatchQueue.main.async {
-                    for accepted in self.documentGate.receiveComposer(body, capturedEpoch: messageEpoch) {
+                    if let accepted = self.documentGate.receiveComposer(body, capturedEpoch: messageEpoch) {
                         self.bridge.receiveComposerMessage(accepted)
                     }
                 }
@@ -1112,7 +873,11 @@ struct KlaudWebView: UIViewRepresentable {
             documentGate.failNavigation()
             activeNavigation = nil
             let code = (error as NSError).code
-            if code == NSURLErrorCancelled { return }
+            if code == NSURLErrorCancelled {
+                documentGate.beginNavigation()
+                commitCurrentDocument(webView)
+                return
+            }
             bridge.fault = error.localizedDescription
         }
 
@@ -1120,31 +885,30 @@ struct KlaudWebView: UIViewRepresentable {
             guard navigation === activeNavigation else { return }
             bridge.fault = nil
             activeNavigation = nil
-            let host = webView.url?.host?.lowercased() ?? ""
-            guard host == "openbot.zermo.org" || host == "reinklaud.zermo.org" else {
-                documentGate.failNavigation()
-                bridge.resetComposerTransport()
-                return
-            }
+            commitCurrentDocument(webView)
+        }
 
+        private func commitCurrentDocument(_ webView: WKWebView) {
             let finishedEpoch = documentGate.epoch
-            webView.evaluateJavaScript("window.klaudNative&&window.klaudNative.documentNonce") { result, _ in
+            webView.evaluateJavaScript("({nonce:window.klaudNative&&window.klaudNative.documentNonce,scheme:window.location.protocol,host:window.location.hostname,port:window.location.port})") { result, _ in
                 DispatchQueue.main.async {
                     guard self.documentGate.epoch == finishedEpoch,
                           self.documentGate.navigationInProgress else { return }
-                    guard let nonce = result as? String, !nonce.isEmpty else {
+                    guard let page = result as? [String: Any],
+                          let nonce = KlaudComposerContract.identifier(page["nonce"]),
+                          page["scheme"] as? String == "https:",
+                          let host = page["host"] as? String,
+                          let port = page["port"] as? String,
+                          (port.isEmpty || port == "443"),
+                          KlaudComposerContract.allowedHosts.contains(host) else {
                         self.documentGate.failNavigation()
-                        self.bridge.fault = "Native composer security handshake failed."
+                        self.bridge.resetComposerTransport()
                         return
                     }
-                    let pending = self.documentGate.commit(
-                        nonce: nonce,
-                        capturedEpoch: finishedEpoch
-                    )
-                    guard self.documentGate.committedNonce == nonce,
-                          !self.documentGate.navigationInProgress else { return }
+                    guard self.documentGate.commit(nonce: nonce, capturedEpoch: finishedEpoch) else { return }
                     UserDefaults.standard.set(true, forKey: "rein.klaud.account-ready")
-                    for message in pending { self.bridge.receiveComposerMessage(message) }
+                    // Precommit messages were discarded. Ask the committed document to negotiate again.
+                    webView.evaluateJavaScript("if(window.klaudNative&&window.klaudNative.documentNonce===\(KlaudBridge.json(nonce))){window.dispatchEvent(new Event('klaud-native-ready'))}")
                 }
             }
         }

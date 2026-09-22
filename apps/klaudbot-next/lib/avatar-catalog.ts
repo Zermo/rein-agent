@@ -5,17 +5,35 @@ export const AVATAR_STYLES = Object.freeze(([
   { id: "baseball", label: "Slugger", description: "Baseball cap and sporting frames" },
   { id: "medic", label: "Medic", description: "Surgical cap, mask, and stethoscope" },
   { id: "explorer", label: "Explorer", description: "Wide-brimmed field hat and round spectacles" },
+  { id: "radio", label: "Comms", description: "Small headset cups and round goggles" },
+  { id: "ranger", label: "Field", description: "Plain brim hat and round spectacles" },
+  { id: "welder", label: "Shop", description: "Low mechanic cap and safety frames" },
+  { id: "sailor", label: "Knit", description: "Simple knit cap" },
+  { id: "courier", label: "Newsie", description: "Short-brim newsboy cap" },
+  { id: "watch", label: "Driver", description: "Soft peaked cap" },
+  { id: "clerk", label: "Clerk", description: "Banker's visor, no crown" },
+  { id: "open", label: "Open", description: "Goggles and a collar, no hat" },
 ] as const).map(style => Object.freeze(style)));
 
 export type AvatarId = (typeof AVATAR_STYLES)[number]["id"];
+export const CORE_AVATAR_COUNT = 6;
+export type KitExtra = "none" | "strap" | "badge";
+export interface AvatarKit { extra: KitExtra; band: boolean; bolt: boolean }
+
+export function kitForSeed(seed: number): AvatarKit {
+  const n = seed >>> 0;
+  const extra: KitExtra = n % 5 !== 0 ? "none" : ((n >>> 3) & 1 ? "strap" : "badge");
+  return { extra, band: n % 8 === 0, bolt: false };
+}
 
 // Stable across machines, reloads, and a change to the bot's display name.
+// Implicit assignment stays on the original six so existing units do not reshuffle.
 export function avatarForBot(id?: unknown, explicit?: string): AvatarId {
   const selected = AVATAR_STYLES.find(style => style.id === explicit);
   if (selected) return selected.id;
   let hash = 2166136261;
   for (const code of String(id ?? "").slice(0, 4096)) hash = Math.imul(hash ^ code.codePointAt(0)!, 16777619);
-  return AVATAR_STYLES[(hash >>> 0) % AVATAR_STYLES.length].id;
+  return AVATAR_STYLES[(hash >>> 0) % CORE_AVATAR_COUNT].id;
 }
 
 export const AVATAR_STATES = Object.freeze({

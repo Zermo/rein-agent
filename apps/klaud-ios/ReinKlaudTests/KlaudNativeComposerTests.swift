@@ -52,49 +52,16 @@ final class KlaudNativeComposerTests: XCTestCase {
         let old = ["documentNonce": "old-document", "draft": "stale"]
         let current = ["documentNonce": "current-document", "draft": "fresh"]
 
-        XCTAssertTrue(gate.receiveComposer(old, capturedEpoch: currentEpoch).isEmpty)
-        XCTAssertTrue(gate.receiveComposer(current, capturedEpoch: currentEpoch).isEmpty)
+        XCTAssertNil(gate.receiveComposer(old, capturedEpoch: currentEpoch))
+        XCTAssertNil(gate.receiveComposer(current, capturedEpoch: currentEpoch))
         let committed = gate.commit(nonce: "current-document", capturedEpoch: currentEpoch)
 
-        XCTAssertEqual(committed.first?["draft"] as? String, "fresh")
-        XCTAssertTrue(gate.receiveComposer(old, capturedEpoch: currentEpoch).isEmpty)
+        XCTAssertTrue(committed) // No precommit command is replayed; the document must send again.
+        XCTAssertNil(gate.receiveComposer(old, capturedEpoch: currentEpoch))
         XCTAssertEqual(
-            gate.receiveComposer(current, capturedEpoch: currentEpoch).first?["draft"] as? String,
+            gate.receiveComposer(current, capturedEpoch: currentEpoch)?["draft"] as? String,
             "fresh"
         )
-    }
-
-    func testDocumentGatePreservesScopedThenLegacyMessageOrder() {
-        var gate = KlaudDocumentBridgeGate()
-        gate.beginNavigation()
-        let epoch = gate.epoch
-        let scoped: [String: Any] = [
-            "documentNonce": "document",
-            "protocolVersion": 1,
-            "action": "state",
-            "visible": true,
-            "botId": "bot-1",
-            "sessionId": "session-1",
-            "enabled": true,
-            "busy": false,
-            "draft": "scoped",
-        ]
-        let legacy: [String: Any] = [
-            "documentNonce": "document",
-            "protocolVersion": 1,
-            "action": "legacyState",
-            "visible": false,
-        ]
-        XCTAssertTrue(gate.receiveComposer(scoped, capturedEpoch: epoch).isEmpty)
-        XCTAssertTrue(gate.receiveComposer(legacy, capturedEpoch: epoch).isEmpty)
-
-        let buffered = gate.commit(nonce: "document", capturedEpoch: epoch)
-        let bridge = KlaudBridge()
-        buffered.forEach(bridge.receiveComposerMessage)
-
-        XCTAssertEqual(buffered.compactMap { $0["action"] as? String }, ["state", "legacyState"])
-        XCTAssertTrue(bridge.composerVisible)
-        XCTAssertEqual(bridge.composerText, "scoped")
     }
 
     func testDocumentNonceRejectsMessagesCapturedBeforeNewNavigation() {
@@ -103,10 +70,10 @@ final class KlaudNativeComposerTests: XCTestCase {
         let oldEpoch = gate.epoch
         gate.beginNavigation()
 
-        XCTAssertTrue(gate.receiveComposer(
+        XCTAssertNil(gate.receiveComposer(
             ["documentNonce": "old-document"],
             capturedEpoch: oldEpoch
-        ).isEmpty)
+        ))
     }
 
     func testDelayedSendAcknowledgementDoesNotEraseNewerTyping() throws {
@@ -123,9 +90,10 @@ final class KlaudNativeComposerTests: XCTestCase {
         bridge.setComposerDraft("first revision plus newer typing")
         bridge.receiveComposerMessage([
             "kind": "composer",
-            "protocolVersion": 1,
+            "protocolVersion": KlaudComposerContract.version,
+            "documentNonce": "fixture-document",
             "action": "sendAck",
-            "botId": "bot-1",
+            "botId": "klaud-bot-1234abcd",
             "sessionId": "session-1",
             "requestId": requestID,
             "revision": revision,
@@ -146,9 +114,10 @@ final class KlaudNativeComposerTests: XCTestCase {
 
         bridge.receiveComposerMessage([
             "kind": "composer",
-            "protocolVersion": 1,
+            "protocolVersion": KlaudComposerContract.version,
+            "documentNonce": "fixture-document",
             "action": "sendAck",
-            "botId": "bot-1",
+            "botId": "klaud-bot-1234abcd",
             "sessionId": "session-1",
             "requestId": try XCTUnwrap(send["requestId"] as? String),
             "revision": try XCTUnwrap(send["revision"] as? Int),
@@ -181,9 +150,10 @@ final class KlaudNativeComposerTests: XCTestCase {
 
         bridge.receiveComposerMessage([
             "kind": "composer",
-            "protocolVersion": 1,
+            "protocolVersion": KlaudComposerContract.version,
+            "documentNonce": "fixture-document",
             "action": "sendAck",
-            "botId": "bot-1",
+            "botId": "klaud-bot-1234abcd",
             "sessionId": "session-1",
             "requestId": try XCTUnwrap(send["requestId"] as? String),
             "revision": try XCTUnwrap(send["revision"] as? Int),
@@ -206,9 +176,10 @@ final class KlaudNativeComposerTests: XCTestCase {
 
         bridge.receiveComposerMessage([
             "kind": "composer",
-            "protocolVersion": 1,
+            "protocolVersion": KlaudComposerContract.version,
+            "documentNonce": "fixture-document",
             "action": "sendAck",
-            "botId": "bot-1",
+            "botId": "klaud-bot-1234abcd",
             "sessionId": "wrong-session",
             "requestId": requestID,
             "revision": revision,
@@ -218,9 +189,10 @@ final class KlaudNativeComposerTests: XCTestCase {
 
         bridge.receiveComposerMessage([
             "kind": "composer",
-            "protocolVersion": 1,
+            "protocolVersion": KlaudComposerContract.version,
+            "documentNonce": "fixture-document",
             "action": "sendAck",
-            "botId": "bot-1",
+            "botId": "klaud-bot-1234abcd",
             "sessionId": "session-1",
             "requestId": requestID,
             "revision": revision,
@@ -235,8 +207,8 @@ final class KlaudNativeComposerTests: XCTestCase {
         bridge.commandSink = { commands.append($0) }
         bridge.submitComposer()
 
-        bridge.receiveComposerMessage(state(bot: "bot-2", session: "session-2", draft: "two"))
-        bridge.receiveComposerMessage(state(bot: "bot-1", session: "session-1", draft: ""))
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-5678abcd", session: "session-2", draft: "two"))
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-1234abcd", session: "session-1", draft: ""))
         bridge.submitComposer()
 
         XCTAssertTrue(bridge.composerSubmitting)
@@ -250,19 +222,20 @@ final class KlaudNativeComposerTests: XCTestCase {
         bridge.commandSink = { commands.append($0) }
         bridge.submitComposer()
         let send = try XCTUnwrap(commands.last)
-        bridge.receiveComposerMessage(state(bot: "bot-2", session: "session-2", draft: "two"))
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-5678abcd", session: "session-2", draft: "two"))
 
         bridge.receiveComposerMessage([
             "kind": "composer",
-            "protocolVersion": 1,
+            "protocolVersion": KlaudComposerContract.version,
+            "documentNonce": "fixture-document",
             "action": "sendAck",
-            "botId": "bot-1",
+            "botId": "klaud-bot-1234abcd",
             "sessionId": "session-1",
             "requestId": try XCTUnwrap(send["requestId"] as? String),
             "revision": try XCTUnwrap(send["revision"] as? Int),
             "accepted": true,
         ])
-        bridge.receiveComposerMessage(state(bot: "bot-1", session: "session-1", draft: ""))
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-1234abcd", session: "session-1", draft: ""))
 
         XCTAssertFalse(bridge.composerSubmitting)
         XCTAssertEqual(bridge.composerText, "")
@@ -275,7 +248,8 @@ final class KlaudNativeComposerTests: XCTestCase {
         bridge.submitComposer()
 
         bridge.resetComposerTransport()
-        bridge.receiveComposerMessage(state(bot: "bot-1", session: "session-1", draft: ""))
+        negotiate(bridge)
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-1234abcd", session: "session-1", draft: ""))
         bridge.submitComposer()
 
         XCTAssertTrue(bridge.composerSubmitting)
@@ -289,7 +263,8 @@ final class KlaudNativeComposerTests: XCTestCase {
         bridge.commandSink = { commands.append($0) }
         bridge.submitComposer()
         bridge.resetComposerTransport()
-        bridge.receiveComposerMessage(state(bot: "bot-1", session: "session-1", draft: ""))
+        negotiate(bridge)
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-1234abcd", session: "session-1", draft: ""))
 
         bridge.allowRetryAfterUnknownDelivery()
         bridge.submitComposer()
@@ -299,67 +274,43 @@ final class KlaudNativeComposerTests: XCTestCase {
         XCTAssertEqual(commands.filter { $0["action"] as? String == "send" }.count, 2)
     }
 
-    func testAuthoritativeBusyStateCompletesUnknownDeliveryAfterNavigation() {
+    func testBusyStateCannotAcknowledgeUnknownDeliveryAfterNavigation() {
         let bridge = makeReadyBridge(draft: "accepted remotely")
         bridge.commandSink = { _ in }
         bridge.submitComposer()
         bridge.resetComposerTransport()
-        var acceptedState = state(bot: "bot-1", session: "session-1", draft: "")
+        negotiate(bridge)
+        var acceptedState = state(bot: "klaud-bot-1234abcd", session: "session-1", draft: "")
         acceptedState["busy"] = true
         acceptedState["enabled"] = false
 
         bridge.receiveComposerMessage(acceptedState)
 
-        XCTAssertFalse(bridge.composerSubmitting)
-        XCTAssertFalse(bridge.composerDeliveryUncertain)
-        XCTAssertEqual(bridge.composerText, "")
+        XCTAssertTrue(bridge.composerSubmitting)
+        XCTAssertTrue(bridge.composerDeliveryUncertain)
+        XCTAssertEqual(bridge.composerText, "accepted remotely")
     }
 
     func testBotSwitchRestoresEachScopedDraft() {
         let bridge = makeReadyBridge(draft: "one")
         bridge.commandSink = { _ in }
         bridge.setComposerDraft("bot one draft")
-        bridge.receiveComposerMessage(state(bot: "bot-2", session: "session-2", draft: "two"))
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-5678abcd", session: "session-2", draft: "two"))
         bridge.setComposerDraft("bot two draft")
-        bridge.receiveComposerMessage(state(bot: "bot-1", session: "session-1", draft: ""))
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-1234abcd", session: "session-1", draft: ""))
 
         XCTAssertEqual(bridge.composerText, "bot one draft")
     }
 
-    @MainActor
-    func testLegacyTransportRejectsDelayedDraftState() {
+    func testHelloAcknowledgesWithoutAdoptingScopeOrDraft() {
         let bridge = KlaudBridge()
-        bridge.receiveComposerMessage([
-            "protocolVersion": 1,
-            "action": "legacyState",
-            "visible": true,
-            "enabled": true,
-            "busy": false,
-            "draft": "web",
-            "revision": 0,
-            "scope": "bot-one|ABCD",
-            "botId": "bot-one",
-            "sessionId": "ABCD",
-            "documentNonce": "legacy-document"
-        ])
-
-        bridge.setComposerDraft("native")
-        bridge.receiveComposerMessage([
-            "protocolVersion": 1,
-            "action": "legacyState",
-            "visible": true,
-            "enabled": true,
-            "busy": false,
-            "draft": "web",
-            "revision": 0,
-            "scope": "bot-one|ABCD",
-            "botId": "bot-one",
-            "sessionId": "ABCD",
-            "documentNonce": "legacy-document"
-        ])
-
-        XCTAssertEqual(bridge.composerText, "native")
-        XCTAssertEqual(bridge.composerRevision, 1)
+        var commands: [[String: Any]] = []
+        bridge.commandSink = { commands.append($0) }
+        negotiate(bridge)
+        XCTAssertEqual(commands.last?["action"] as? String, "ready")
+        XCTAssertEqual(commands.last?["documentNonce"] as? String, "fixture-document")
+        XCTAssertFalse(bridge.composerVisible)
+        XCTAssertEqual(bridge.composerText, "")
     }
 
     func testComposerScopeChangeStopsActiveDictationTracking() {
@@ -370,7 +321,7 @@ final class KlaudNativeComposerTests: XCTestCase {
         bridge.beginDictationTracking(in: editor)
         XCTAssertTrue(bridge.dictationActive)
 
-        bridge.receiveComposerMessage(state(bot: "bot-2", session: "session-2", draft: "bot two"))
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-5678abcd", session: "session-2", draft: "bot two"))
 
         XCTAssertFalse(bridge.dictationActive)
         XCTAssertEqual(bridge.composerText, "bot two")
@@ -381,77 +332,13 @@ final class KlaudNativeComposerTests: XCTestCase {
         let editor = KlaudComposerTextView()
         editor.text = bridge.composerText
         bridge.beginDictationTracking(in: editor)
-        var busyState = state(bot: "bot-1", session: "session-1", draft: "draft")
+        var busyState = state(bot: "klaud-bot-1234abcd", session: "session-1", draft: "draft")
         busyState["busy"] = true
         busyState["enabled"] = false
 
         bridge.receiveComposerMessage(busyState)
 
         XCTAssertFalse(bridge.dictationActive)
-    }
-
-    func testLegacyScopeChangeReplacesTheActiveDraftScope() {
-        let bridge = KlaudBridge()
-        bridge.receiveComposerMessage(legacyState(scope: "bot-one|ABCD", draft: "one", revision: 0))
-        bridge.setComposerDraft("one local")
-
-        bridge.receiveComposerMessage(legacyState(scope: "bot-two|EFGH", draft: "two", revision: 0))
-
-        XCTAssertEqual(bridge.composerText, "two")
-        XCTAssertEqual(bridge.composerRevision, 0)
-    }
-
-    func testLegacyEvaluationFailureKeepsUnknownDeliveryLatched() async {
-        let bridge = KlaudBridge()
-        bridge.receiveComposerMessage(legacyState(scope: "bot-one|ABCD", draft: "send once", revision: 0))
-        var completion: ((KlaudLegacyEvaluationResult) -> Void)?
-        bridge.legacyCommandSink = { _, handler in completion = handler }
-
-        bridge.submitComposer()
-        completion?(.unknown)
-        await Task.yield()
-
-        XCTAssertTrue(bridge.composerSubmitting)
-        XCTAssertTrue(bridge.composerDeliveryUncertain)
-    }
-
-    func testInvalidatedLegacyEvaluationCannotReleaseDeliveryLatch() async {
-        let bridge = KlaudBridge()
-        bridge.receiveComposerMessage(legacyState(scope: "bot-one|ABCD", draft: "send once", revision: 0))
-        var completion: ((KlaudLegacyEvaluationResult) -> Void)?
-        bridge.legacyCommandSink = { _, handler in completion = handler }
-
-        bridge.submitComposer()
-        bridge.resetComposerTransport()
-        completion?(.rejected)
-        await Task.yield()
-
-        XCTAssertTrue(bridge.composerSubmitting)
-        XCTAssertTrue(bridge.composerDeliveryUncertain)
-    }
-
-    func testLegacySubmitReconcilesWhenScopedTransportTakesOwnership() async {
-        let bridge = KlaudBridge()
-        bridge.receiveComposerMessage(legacyState(scope: "bot-1|session-1", draft: "send once", revision: 0))
-        bridge.legacyCommandSink = { _, completion in completion(.accepted) }
-        var commands: [[String: Any]] = []
-        bridge.commandSink = { commands.append($0) }
-
-        bridge.submitComposer()
-        await Task.yield()
-        var busy = state(bot: "bot-1", session: "session-1", draft: "")
-        busy["busy"] = true
-        busy["enabled"] = false
-        bridge.receiveComposerMessage(busy)
-
-        XCTAssertFalse(bridge.composerSubmitting)
-        XCTAssertFalse(bridge.composerDeliveryUncertain)
-        XCTAssertEqual(bridge.composerText, "")
-
-        bridge.receiveComposerMessage(state(bot: "bot-1", session: "session-1", draft: ""))
-        bridge.setComposerDraft("next")
-        bridge.submitComposer()
-        XCTAssertEqual(commands.filter { $0["action"] as? String == "send" }.count, 1)
     }
 
     @MainActor
@@ -482,14 +369,25 @@ final class KlaudNativeComposerTests: XCTestCase {
 
     private func makeReadyBridge(draft: String) -> KlaudBridge {
         let bridge = KlaudBridge()
-        bridge.receiveComposerMessage(state(bot: "bot-1", session: "session-1", draft: draft))
+        negotiate(bridge)
+        bridge.receiveComposerMessage(state(bot: "klaud-bot-1234abcd", session: "session-1", draft: draft))
         return bridge
+    }
+
+    private func negotiate(_ bridge: KlaudBridge) {
+        bridge.receiveComposerMessage([
+            "protocolVersion": KlaudComposerContract.version,
+            "documentNonce": "fixture-document",
+            "action": "hello", "requestId": "hello-1",
+            "botId": "klaud-bot-1234abcd", "sessionId": "session-1",
+        ])
     }
 
     private func state(bot: String, session: String, draft: String) -> [String: Any] {
         [
             "kind": "composer",
-            "protocolVersion": 1,
+            "protocolVersion": KlaudComposerContract.version,
+            "documentNonce": "fixture-document",
             "action": "state",
             "visible": true,
             "botId": bot,
@@ -497,24 +395,8 @@ final class KlaudNativeComposerTests: XCTestCase {
             "enabled": true,
             "busy": false,
             "draft": draft,
+            "webRevision": 1,
         ]
     }
 
-    private func legacyState(scope: String, draft: String, revision: Int) -> [String: Any] {
-        let identity = scope.split(separator: "|", maxSplits: 1).map(String.init)
-        return [
-            "kind": "composer",
-            "protocolVersion": 1,
-            "action": "legacyState",
-            "visible": true,
-            "enabled": true,
-            "busy": false,
-            "draft": draft,
-            "revision": revision,
-            "scope": scope,
-            "botId": identity.first ?? "",
-            "sessionId": identity.count == 2 ? identity[1] : "",
-            "documentNonce": "legacy-document",
-        ]
-    }
 }

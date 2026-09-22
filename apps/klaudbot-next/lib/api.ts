@@ -1,7 +1,8 @@
 import { frontendTools, object, validateMessages, validateSettings, validateSnapshot } from "./model.ts";
 import type { Activity, AgEvent, Bot, InspectDoc, InspectFile, Patch, RunSettings } from "./types.ts";
 
-export const SIGN_IN_URL = "https://auth.zermo.org/?rd=https%3A%2F%2Fopenbot.zermo.org%2F";
+export const PUBLIC_HOSTS = ["openbot.zermo.org", "reinklaud.zermo.org"] as const;
+export const SIGN_IN_URL = "https://auth.zermo.org/?rd=https%3A%2F%2Freinklaud.zermo.org%2F";
 export const MAX_INPUT_BYTES = 128 * 1024;
 export const MAX_INSPECT_BYTES = 5 * 1024 * 1024;
 export function protectedHtml(text: string): string {
@@ -15,8 +16,11 @@ export class ApiError extends Error {
   authRequired: boolean;
   constructor(message: string, status = 0, authRequired = false) { super(message); this.name = "ApiError"; this.status = status; this.authRequired = authRequired; }
 }
-export const isPublicHost = (hostname: string) => hostname.toLowerCase() === "openbot.zermo.org";
-export function signIn(): void { window.location.assign(SIGN_IN_URL); }
+export const isPublicHost = (hostname: string) => (PUBLIC_HOSTS as readonly string[]).includes(hostname.toLowerCase());
+export function signIn(): void {
+  const rd = typeof window !== "undefined" ? `${window.location.origin}/` : "https://reinklaud.zermo.org/";
+  window.location.assign(`https://auth.zermo.org/?rd=${encodeURIComponent(rd)}`);
+}
 
 /** One parser handles CRLF split across packets, multiline data and UTF-8 boundaries. */
 export async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<AgEvent> {
@@ -57,6 +61,22 @@ export function safeInspectPath(raw: string): string {
   return path;
 }
 
+let hiddenAt = 0;
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") hiddenAt = Date.now();
+  });
+}
+function recentlyBackgrounded(): boolean {
+  return hiddenAt > 0 && Date.now() - hiddenAt < 12_000;
+}
+function shouldOpenSignIn(path: string): boolean {
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
+  if (recentlyBackgrounded()) return false;
+  if (path === "/run" || path.startsWith("/runs/")) return false;
+  return true;
+}
+
 export class KlaudApi {
   private token = "";
   private fetcher: typeof fetch;
@@ -82,7 +102,7 @@ export class KlaudApi {
       // from a total network outage; never follow a login redirect in fetch.
       if (publicHost && error instanceof TypeError && !signal?.aborted && path !== "/health") {
         const health = await this.fetcher(this.base + "/health", { credentials: "same-origin", redirect: "error", cache: "no-store", signal }).catch(() => null);
-        if (health?.ok) { signIn(); throw new ApiError("Sign in to connect to the field console.", 401, true); }
+        if (health?.ok && shouldOpenSignIn(path)) { signIn(); throw new ApiError("Sign in to connect to the field console.", 401, true); }
       }
       throw error;
     }
@@ -91,7 +111,7 @@ export class KlaudApi {
       if (response.headers.get("content-type")?.includes("json")) { try { const value: unknown = await response.json(); if (object(value)) detail = value; } catch { /* No HTML or private upstream body in a fault banner. */ } }
       const auth = response.status === 401 || detail.code === "auth_required" || detail.authRequired === true;
       // The shim converts upstream login redirects to 401, so fetch never follows them.
-      if (auth && publicHost) signIn();
+      if (auth && publicHost && shouldOpenSignIn(path)) signIn();
       throw new ApiError(auth ? "Sign in to connect to the field console." : typeof detail.error === "string" ? detail.error : `Console request returned HTTP ${response.status}.`, response.status, auth);
     }
     return response;

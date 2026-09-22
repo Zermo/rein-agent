@@ -62,8 +62,10 @@ final class KlaudLocalInference: ObservableObject {
 
     private let model = SystemLanguageModel.default
     private var work: Task<Void, Never>?
+    private var submission: Task<String?, Never>?
     private var activeBackgroundTask: BGContinuedProcessingTask?
     private var requestIdentifier: String?
+    private var cancellationError: LocalError?
     private var completion: Completion?
     private var progressUnitCount: Int64 = 0
 
@@ -130,10 +132,10 @@ final class KlaudLocalInference: ObservableObject {
         ) { [weak self] task in
             guard let continuedTask = task as? BGContinuedProcessingTask else {
                 task.setTaskCompleted(success: false)
-                Task { @MainActor in self?.finish(.failure(LocalError.registrationFailed)) }
+                Task { @MainActor in self?.expire(identifier: identifier, error: .registrationFailed) }
                 return
             }
-            Task { @MainActor in self?.attach(continuedTask) }
+            Task { @MainActor in self?.attach(continuedTask, identifier: identifier) }
         }
         guard registered else {
             let error = LocalError.registrationFailed
@@ -143,11 +145,12 @@ final class KlaudLocalInference: ObservableObject {
         }
 
         requestIdentifier = identifier
+        cancellationError = nil
         self.completion = completion
         isRunning = true
         status = "Refining privately"
         updateProgress(5)
-        startInference(draft: trimmed)
+        startInference(draft: trimmed, identifier: identifier)
         submitContinuationRequest(identifier: identifier)
     }
 
@@ -170,15 +173,22 @@ final class KlaudLocalInference: ObservableObject {
             request.strategy = .fail
             request.requiredResources = []
             do {
+                try Task.checkCancellation()
                 try await BGTaskScheduler.shared.submitTaskRequest(request)
                 return nil
             } catch {
                 return error.localizedDescription
             }
         }
+        self.submission = submission
         Task { @MainActor [weak self] in
-            if let message = await submission.value {
-                self?.continuationSubmissionFailed(identifier: identifier, message: message)
+            let message = await submission.value
+            guard let self, isRunning, requestIdentifier == identifier, cancellationError == nil else {
+                BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
+                return
+            }
+            if let message {
+                continuationSubmissionFailed(identifier: identifier, message: message)
             }
         }
     }
@@ -189,9 +199,11 @@ final class KlaudLocalInference: ObservableObject {
         _ = message
     }
 
-    private func attach(_ task: BGContinuedProcessingTask) {
-        guard isRunning else {
-            task.setTaskCompleted(success: true)
+    private func attach(_ task: BGContinuedProcessingTask, identifier: String) {
+        if activeBackgroundTask === task { return }
+        guard isRunning, requestIdentifier == identifier, task.identifier == identifier,
+              cancellationError == nil, activeBackgroundTask == nil else {
+            task.setTaskCompleted(success: false)
             return
         }
         activeBackgroundTask = task
@@ -202,11 +214,11 @@ final class KlaudLocalInference: ObservableObject {
             subtitle: "Running privately on this iPhone"
         )
         task.expirationHandler = { [weak self] in
-            Task { @MainActor in self?.expire() }
+            Task { @MainActor in self?.expire(identifier: identifier) }
         }
     }
 
-    private func startInference(draft: String) {
+    private func startInference(draft: String, identifier: String) {
         let session = LanguageModelSession(
             model: model,
             instructions: """
@@ -220,8 +232,9 @@ final class KlaudLocalInference: ObservableObject {
             maximumResponseTokens: Self.maximumResponseTokens
         )
         let work = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, requestIdentifier == identifier else { return }
             do {
+                try Task.checkCancellation()
                 updateProgress(25)
                 let response = try await session.respond(
                     to: "Refine this reply draft without changing its meaning:\n\n\(draft)",
@@ -231,26 +244,36 @@ final class KlaudLocalInference: ObservableObject {
                 updateProgress(85)
                 let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { throw LocalError.emptyResponse }
-                finish(.success(text))
+                finish(.success(text), identifier: identifier)
             } catch is CancellationError {
-                finish(.failure(LocalError.expired))
+                finish(.failure(LocalError.expired), identifier: identifier)
             } catch {
-                finish(.failure(error))
+                finish(.failure(error), identifier: identifier)
             }
         }
         self.work = work
     }
 
-    private func expire() {
-        guard isRunning else { return }
+    private func expire(identifier: String, error: LocalError = .expired) {
+        guard isRunning, requestIdentifier == identifier, cancellationError == nil else { return }
+        cancellationError = error
+        status = error.localizedDescription
         work?.cancel()
-        finish(.failure(LocalError.expired))
+        submission?.cancel()
+        activeBackgroundTask?.setTaskCompleted(success: false)
+        activeBackgroundTask = nil
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
+        // Cancellation requests termination; only the settled worker releases ownership.
     }
 
-    private func finish(_ result: Result<String, Error>) {
-        guard isRunning else { return }
+    private func finish(_ result: Result<String, Error>, identifier: String) {
+        guard isRunning, requestIdentifier == identifier else { return }
+        let result = cancellationError.map { Result<String, Error>.failure($0) } ?? result
+        cancellationError = nil
         isRunning = false
         work = nil
+        submission?.cancel()
+        submission = nil
 
         let success: Bool
         switch result {

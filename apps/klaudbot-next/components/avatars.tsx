@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import { AVATAR_BROWS, AVATAR_STATES, AVATAR_STYLES, avatarForBot, isAvatarPhase, type AvatarId } from "../lib/avatar-catalog";
+import { AVATAR_BROWS, AVATAR_STATES, AVATAR_STYLES, avatarForBot, isAvatarPhase, kitForSeed, type AvatarId, type AvatarKit } from "../lib/avatar-catalog";
 import { attachAvatarMotion, seedForAvatar, type AvatarMotionController } from "../lib/avatar-motion";
 
 export interface BotAvatarProps {
@@ -11,22 +11,52 @@ export interface BotAvatarProps {
   size?: number;
   decorative?: boolean;
   paused?: boolean;
+  accent?: string;
+  theme?: "field" | "night" | "paper";
 }
 
 export interface AvatarPickerProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  accent?: string;
+  theme?: "field" | "night" | "paper";
 }
 
 const ink = "var(--avatar-ink)", rust = "var(--avatar-rust)", paper = "var(--avatar-paper)", gold = "var(--avatar-gold)";
 
 function Glasses({ kind = "round" }: { kind?: "round" | "square" }) {
   return <g className="bot-avatar-glasses" fill="none" stroke={ink} strokeWidth="3" strokeLinejoin="round">
-    {kind === "square" ? <><path d="M31 73 H57 V86 Q44 92 34 85 Z"/><path d="M71 73 H97 L94 85 Q82 92 71 86 Z"/></> : <><ellipse cx="44" cy="80" rx="13" ry="11"/><ellipse cx="84" cy="80" rx="13" ry="11"/></>}
+    {kind === "square" ? <><path d="M27 64 H61 V96 Q44 102 30 93 Z"/><path d="M67 64 H101 L98 93 Q84 102 67 96 Z"/></> : <><circle cx="44" cy="80" r="17"/><circle cx="84" cy="80" r="17"/></>}
     <path d="M57 77 Q64 73 71 77 M25 74 L31 77 M97 77 L103 74"/>
     <path d="M38 76 L44 72 M78 76 L84 72" stroke={gold} strokeWidth="2"/>
   </g>;
+}
+
+const EYE_LOOK: Record<string, readonly [number, number, number]> = {
+  ready: [1.1, 0.4, 6.2],
+  working: [1.8, 0.8, 5.2],
+  thinking: [0.2, -2.4, 5.6],
+  responding: [1.4, 0.2, 6.8],
+  presenting: [0, 0.3, 6.0],
+  tool: [2.0, 1.0, 5.0],
+  journaling: [1.5, 1.2, 5.4],
+  autonomy: [0.5, -0.8, 5.8],
+  approval: [0, 0.4, 6.4],
+  error: [-0.2, 1.2, 7.2],
+};
+
+function Eyes({ phase }: { phase: string }) {
+  const [dx, dy, pr] = EYE_LOOK[phase] ?? EYE_LOOK.ready;
+  const Eye = ({ cx }: { cx: number }) => (
+    <g className="bot-avatar-eye" transform={`translate(${cx} 80)`}>
+      <circle className="bot-avatar-sclera" r="15.2" fill="#f4ead4" stroke="#12100e" strokeWidth="3"/>
+      <circle className="bot-avatar-iris" cx={dx} cy={dy} r="10.4" fill={rust} stroke="#12100e" strokeWidth="2"/>
+      <circle className="bot-avatar-pupil" cx={dx} cy={dy} r={pr} fill="#12100e"/>
+      <circle className="bot-avatar-glint" cx={dx - 3.6} cy={dy - 3.4} r="2.4" fill="#f4ead4"/>
+    </g>
+  );
+  return <g className="bot-avatar-eyes" aria-hidden="true"><Eye cx={44}/><Eye cx={84}/></g>;
 }
 
 function Headwear({ avatar }: { avatar: AvatarId }) {
@@ -74,6 +104,46 @@ function Headwear({ avatar }: { avatar: AvatarId }) {
       <path d="M60 48 H68 V54 H60 Z" fill={gold}/>
       <Glasses/>
     </>;
+    case "radio": return <>
+      <path d="M38 56 Q40 32 64 30 Q88 32 90 56" fill={rust} stroke={ink} strokeWidth="3"/>
+      <circle cx="28" cy="78" r="7" fill={rust} stroke={ink} strokeWidth="3"/>
+      <circle cx="100" cy="78" r="7" fill={rust} stroke={ink} strokeWidth="3"/>
+      <Glasses/>
+    </>;
+    case "ranger": return <>
+      <ellipse cx="64" cy="56" rx="44" ry="8" fill={rust} stroke={ink} strokeWidth="3"/>
+      <path d="M42 54 Q44 28 64 26 Q84 28 86 54 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <Glasses/>
+    </>;
+    case "welder": return <>
+      <path d="M34 56 Q36 28 64 26 Q92 30 96 56 L70 60 L40 58 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <path d="M32 54 H78 Q98 54 104 64 Q86 68 68 60 H32 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <Glasses kind="square"/>
+    </>;
+    case "sailor": return <>
+      <path d="M32 64 Q34 28 64 26 Q94 28 96 64 L88 70 H40 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <path d="M40 46 H88 M42 58 H86" fill="none" stroke={ink} strokeWidth="2"/>
+      <Glasses/>
+    </>;
+    case "courier": return <>
+      <path d="M36 58 Q40 26 64 24 Q90 28 94 58 Q64 66 36 58 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <path d="M34 56 L62 54 Q86 54 96 64 Q78 68 60 60 L34 60 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <Glasses kind="square"/>
+    </>;
+    case "watch": return <>
+      <path d="M36 56 Q38 30 64 28 Q90 30 92 56 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <path d="M28 54 H100 V60 H28 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <Glasses kind="square"/>
+    </>;
+    case "clerk": return <>
+      <path d="M24 62 Q64 72 104 62 L100 70 Q64 80 28 70 Z" fill={gold} stroke={ink} strokeWidth="3"/>
+      <path d="M30 58 H98" fill="none" stroke={ink} strokeWidth="3"/>
+      <Glasses/>
+    </>;
+    case "open": return <>
+      <path d="M40 102 Q64 110 88 102 L84 118 Q64 112 44 118 Z" fill={rust} stroke={ink} strokeWidth="3"/>
+      <Glasses/>
+    </>;
     default: return <>
       <path d="M26 60 C24 32 41 17 65 18 C91 18 105 35 103 62 L99 89 L87 95 L85 54 Q64 44 43 54 L40 95 L27 90 Z" fill={rust} stroke={ink} strokeWidth="3"/>
       <path d="M39 28 Q32 46 36 61 M86 27 Q97 39 96 58 M60 21 Q56 32 58 45" fill="none" stroke={gold} strokeWidth="2" strokeDasharray="3 3"/>
@@ -86,7 +156,15 @@ function Headwear({ avatar }: { avatar: AvatarId }) {
   }
 }
 
-export function BotAvatar({ avatar, botId, state = "ready", size = 48, decorative = false, paused = false }: BotAvatarProps) {
+function KitGear({ kit }: { kit: AvatarKit }) {
+  return <g className="bot-avatar-kit" fill="none">
+    {kit.band && <path d="M40 48 H88" stroke={gold} strokeWidth="2"/>}
+    {kit.extra === "strap" && <path d="M38 94 Q64 112 90 94" stroke={ink} strokeWidth="3"/>}
+    {kit.extra === "badge" && <circle cx="64" cy="40" r="4" fill={gold} stroke={ink} strokeWidth="2"/>}
+  </g>;
+}
+
+export function BotAvatar({ avatar, botId, state = "ready", size = 48, decorative = false, paused = false, accent, theme = "field" }: BotAvatarProps) {
   const choice = avatarForBot(botId, avatar);
   const phase = isAvatarPhase(state) ? state : "ready";
   const label = AVATAR_STYLES.find(style => style.id === choice)!.label;
@@ -94,6 +172,7 @@ export function BotAvatar({ avatar, botId, state = "ready", size = 48, decorativ
   const brows = AVATAR_BROWS[phase];
   const svg = useRef<SVGSVGElement>(null), motion = useRef<AvatarMotionController | null>(null);
   const seed = seedForAvatar(botId ?? choice);
+  const kit = kitForSeed(seed);
   useEffect(() => {
     if (!svg.current) return;
     motion.current = attachAvatarMotion(svg.current);
@@ -101,24 +180,27 @@ export function BotAvatar({ avatar, botId, state = "ready", size = 48, decorativ
   }, [choice]);
   useEffect(() => { motion.current?.update({ phase, seed, paused }); }, [choice, phase, seed, paused]);
   return <svg ref={svg} className="bot-avatar" viewBox="0 0 128 128" width={dimension} height={dimension}
-    data-avatar={choice} data-state={phase} data-paused={paused ? "true" : "false"}
+    data-avatar={choice} data-kit={kit.extra} data-theme={theme} data-state={phase} data-paused={paused ? "true" : "false"}
+    style={accent ? { ["--avatar-rust" as string]: accent } : undefined}
     role={decorative ? undefined : "img"} aria-hidden={decorative ? "true" : undefined}
     aria-label={decorative ? undefined : `${label} avatar — ${AVATAR_STATES[phase]}`} focusable="false">
     <g className="bot-avatar-portrait"><Headwear avatar={choice}/>
+      <Eyes phase={phase}/>
       <g className="bot-avatar-brows" fill="none" stroke={ink} strokeWidth="4" strokeLinecap="round">
         <g className="bot-avatar-brow-left"><path d={brows[0]}/></g>
         <g className="bot-avatar-brow-right"><path d={brows[1]}/></g>
       </g>
+      <KitGear kit={kit}/>
     </g>
   </svg>;
 }
 
-export function AvatarPicker({ value, onChange, disabled = false }: AvatarPickerProps) {
+export function AvatarPicker({ value, onChange, disabled = false, accent, theme = "field" }: AvatarPickerProps) {
   return <div className="avatar-picker" role="group" aria-label="Bot avatar">
     {AVATAR_STYLES.map(style => <button className="avatar-choice" type="button" key={style.id}
       aria-pressed={value === style.id} aria-label={`${style.label}: ${style.description}`} disabled={disabled}
       onClick={() => onChange?.(style.id)}>
-      <BotAvatar avatar={style.id} size={72} decorative paused/><span>{style.label}</span>
+      <BotAvatar avatar={style.id} size={72} decorative paused accent={accent} theme={theme}/><span>{style.label}</span>
       <span className="avatar-choice-mark" aria-hidden="true">{value === style.id ? "✓" : "+"}</span>
     </button>)}
   </div>;

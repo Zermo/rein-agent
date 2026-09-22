@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type PointerEvent } from "react";
 
 const KEY = "rein.klaud.pane-widths";
-const ROSTER_MIN = 168, ROSTER_MAX = 320, ROSTER_DEFAULT = 220;
+const ROSTER_MIN = 220, ROSTER_MAX = 380, ROSTER_DEFAULT = 260;
 const RAIL_MIN = 320, RAIL_MAX = 720, RAIL_DEFAULT = 420;
 
 function clamp(n: number, lo: number, hi: number) {
@@ -40,9 +40,9 @@ function Handle({ label, onDrag }: { label: string; onDrag: (dx: number) => void
   return <button type="button" className="pane-resizer" aria-label={label} onPointerDown={down} onPointerMove={move} />;
 }
 
-export function SplitPanes({ showLeft, left, center, right, railOpen = true, onRailOpen }: {
+export function SplitPanes({ showLeft, left, center, right, railOpen = true }: {
   showLeft: boolean; left: ReactNode; center: ReactNode; right: ReactNode;
-  railOpen?: boolean; onRailOpen?: (open: boolean) => void;
+  railOpen?: boolean;
 }) {
   const [{ roster, rail }, setWidths] = useState(readStored);
   useEffect(() => {
@@ -55,10 +55,6 @@ export function SplitPanes({ showLeft, left, center, right, railOpen = true, onR
         <Handle label="Resize agent rail" onDrag={dx => setWidths(w => ({ ...w, roster: clamp(w.roster + dx, ROSTER_MIN, ROSTER_MAX) }))} />
       </> : null}
       <div className="split-center">{center}</div>
-      <div className="crt-keys" role="group" aria-label="Agent computer">
-        <button type="button" className="crt-key" aria-label="Collapse computer" disabled={!railOpen} onClick={() => onRailOpen?.(false)}>◄</button>
-        <button type="button" className="crt-key" aria-label="Expand computer" disabled={railOpen} onClick={() => onRailOpen?.(true)}>►</button>
-      </div>
       {railOpen ? <>
         <Handle label="Resize computer pane" onDrag={dx => setWidths(w => ({ ...w, rail: clamp(w.rail - dx, RAIL_MIN, RAIL_MAX) }))} />
         <div className="split-right">{right}</div>

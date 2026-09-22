@@ -5,8 +5,9 @@ import { Readable } from "node:stream";
 
 export const MAX_INSPECT_BYTES = 5 * 1024 * 1024;
 export const MAX_REQUEST_BYTES = 256 * 1024;
-export const PUBLIC_ORIGIN = "https://openbot.zermo.org";
-export const SIGN_IN_URL = "https://auth.zermo.org/?rd=https%3A%2F%2Fopenbot.zermo.org%2F";
+export const PUBLIC_ORIGIN = "https://reinklaud.zermo.org";
+export const PUBLIC_ORIGINS = ["https://reinklaud.zermo.org", "https://openbot.zermo.org"] as const;
+export const SIGN_IN_URL = "https://auth.zermo.org/?rd=https%3A%2F%2Freinklaud.zermo.org%2F";
 
 export interface ProxyConfig {
   origin: string;
@@ -91,9 +92,12 @@ export function validateRequestBoundary(request: Request, config: ProxyConfig): 
   hosts.add("openbot.zermo.org");
   hosts.add("openbot.zermo.org:443");
   hosts.add("openbot.zermo.org:80");
+  hosts.add("reinklaud.zermo.org");
+  hosts.add("reinklaud.zermo.org:443");
+  hosts.add("reinklaud.zermo.org:80");
   if (!host || !hosts.has(host)) return json(403, { error: "Invalid Host or Origin." });
   const origin = request.headers.get("origin");
-  const origins = new Set([config.sandboxOrigin, PUBLIC_ORIGIN, "http://10.0.0.56:4317", "http://127.0.0.1:4317"]);
+  const origins = new Set([config.sandboxOrigin, ...PUBLIC_ORIGINS, "http://10.0.0.56:4317", "http://127.0.0.1:4317"]);
   // Compare the complete header, not URL.origin: paths, userinfo, multiple values,
   // null, alternate ports and lookalike hosts must not become allowlisted.
   if (origin !== null && !origins.has(origin)) return json(403, { error: "Invalid Host or Origin." });
@@ -292,9 +296,9 @@ function upstreamHeaders(request: Request, config: ProxyConfig, target: URL): He
     const value = request.headers.get(name);
     if (value !== null && !nominated.has(name)) headers.set(name, value);
   }
-  const publicRequest = /^openbot\.zermo\.org(?::(?:80|443))?$/.test(request.headers.get("host")?.toLowerCase() ?? "");
+  const publicRequest = /^(?:openbot|reinklaud)\.zermo\.org(?::(?:80|443))?$/.test(request.headers.get("host")?.toLowerCase() ?? "");
   const trustedIdentity = config.trustAuthProxy && publicRequest && loopbackBind(config.bindHost);
-  headers.set("host", trustedIdentity ? "openbot.zermo.org" : target.host);
+  headers.set("host", publicRequest ? "openbot.zermo.org" : target.host);
   const origin = request.headers.get("origin");
   if (origin !== null) {
     // The sandbox cannot be allowlisted in the original harness. Only after

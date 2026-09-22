@@ -99,7 +99,7 @@ test("quiet engine only constructs on trusted visible enabled unlock; sends orig
   assert.equal(await engine.unlock({ isTrusted: true }), true);
   assert.equal(engine.state, "running");
   assert.equal(fixture.contexts.length, 1);
-  assert.ok(fixture.events.some(event => event[0] === "set" && event[1] === 1), "default master level");
+  assert.ok(fixture.events.some(event => event[0] === "set" && event[1] === .72), "original quiet master level");
   fixture.events.length = 0;
   assert.equal(engine.play("hover"), true);
   assert.equal(engine.activeVoices, 1);

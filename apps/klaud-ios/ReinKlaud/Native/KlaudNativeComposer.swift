@@ -31,6 +31,13 @@ struct KlaudNativeComposer: View {
                 .background(rust.opacity(0.72))
             }
 
+            if !bridge.composerWithinLimit {
+                Text("Draft exceeds 128 KiB. Shorten it to send.")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(paper)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+            }
+
             HStack(alignment: .bottom, spacing: 6) {
                 composerButton(symbol: "plus", label: "Add Attachment") {
                     bridge.keyFeedback("letter")
@@ -43,7 +50,7 @@ struct KlaudNativeComposer: View {
                     bridge.refineDraftOnDevice()
                 }
                 .disabled(
-                    !bridge.composerEnabled || bridge.composerBusy ||
+                    !bridge.composerEnabled || bridge.composerBusy || !bridge.composerWithinLimit ||
                     bridge.localInference.isRunning || bridge.localInference.availability != .ready ||
                     bridge.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 )
@@ -94,7 +101,7 @@ struct KlaudNativeComposer: View {
                 .disabled(
                     !bridge.composerBusy && (
                         !bridge.composerEnabled ||
-                        bridge.composerSubmitting ||
+                        bridge.composerSubmitting || !bridge.composerWithinLimit ||
                         bridge.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
                 )
@@ -193,7 +200,7 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
         view.alpha = view.isEditable ? 1 : 0.6
         view.setComposerState(busy: bridge.composerBusy, submitting: bridge.composerSubmitting)
 
-        if view.text != bridge.composerText {
+        if view.markedTextRange == nil && !view.text.utf8.elementsEqual(bridge.composerText.utf8) {
             view.performProgrammaticUpdate {
                 let selection = view.selectedRange
                 view.text = bridge.composerText
@@ -254,7 +261,9 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
             if textView.markedTextRange != nil { return true }
             let current = textView.text as NSString
             guard range.location <= current.length, range.location + range.length <= current.length else { return false }
-            return current.replacingCharacters(in: range, with: text).utf8.count <= KlaudComposerContract.maximumUTF8Count
+            let nextCount = current.replacingCharacters(in: range, with: text).utf8.count
+            // A committed IME overflow must remain correctable without growing it.
+            return nextCount <= max(KlaudComposerContract.maximumUTF8Count, textView.text.utf8.count)
         }
 
         func handle(_ action: KlaudKeyboardAction) {

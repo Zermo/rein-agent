@@ -1,10 +1,12 @@
 node_modules/
 .next/
 *.tsbuildinfo
-.env*
+.env
+.env.local
+.env.*.local
 *.token
 *.log
 *.pid
 test-results/
 test-failure.png
-.sandbox/*.err
+.sandbox/
