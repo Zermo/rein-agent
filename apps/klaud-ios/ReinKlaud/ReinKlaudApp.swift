@@ -292,10 +292,25 @@ struct KlaudWebView: UIViewRepresentable {
             if lower.contains("emoji") { return false }
             return lower.contains("com.")
         }
+        let ready = UserDefaults.standard.bool(forKey: "rein.klaud.account-ready")
+        let seen = UserDefaults.standard.bool(forKey: "rein.klaud.setup-seen") || ready
         let boot = """
         window.klaudNative=Object.assign(window.klaudNative||{},{inApp:true,systemKeyboard:\(thirdParty ? "true" : "false")});
         window.klaudNative.feel=function(k){try{window.webkit.messageHandlers.klaud.postMessage({kind:'haptic',key:String(k||'letter')});}catch(e){}};
         window.klaudNative.dictate=function(a){try{window.webkit.messageHandlers.klaud.postMessage({kind:'dictate',action:String(a||'start')});}catch(e){}};
+        (function(){
+          try {
+            if (\(ready ? "true" : "false")) localStorage.setItem('rein.klaud.account-ready','1');
+            if (\(seen ? "true" : "false")) localStorage.setItem('rein.klaud.setup-seen','1');
+          } catch (e) {}
+          var orig = Storage.prototype.setItem;
+          Storage.prototype.setItem = function(k, v) {
+            orig.call(this, k, v);
+            if (k === 'rein.klaud.account-ready' || k === 'rein.klaud.setup-seen' || k === 'rein.klaud.setup-profile') {
+              try { window.webkit.messageHandlers.klaud.postMessage({kind:'setup',key:String(k),value:String(v||'')}); } catch (e) {}
+            }
+          };
+        })();
         """
         config.userContentController.addUserScript(WKUserScript(source: boot, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(context.coordinator, name: "klaud")
@@ -339,6 +354,16 @@ struct KlaudWebView: UIViewRepresentable {
                 }
                 return
             }
+            if kind == "setup" {
+                let key = body["key"] as? String ?? ""
+                if key == "rein.klaud.account-ready" || key == "rein.klaud.setup-seen" {
+                    UserDefaults.standard.set(true, forKey: key)
+                }
+                if key == "rein.klaud.setup-profile" {
+                    UserDefaults.standard.set(true, forKey: "rein.klaud.setup-seen")
+                }
+                return
+            }
             guard body["bytes"] is String else { return }
             let action = body["action"] as? String ?? "share"
             let name = body["name"] as? String ?? "file"
@@ -364,6 +389,10 @@ struct KlaudWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             bridge.fault = nil
+            let host = webView.url?.host?.lowercased() ?? ""
+            if host == "openbot.zermo.org" || host == "reinklaud.zermo.org" {
+                UserDefaults.standard.set(true, forKey: "rein.klaud.account-ready")
+            }
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
