@@ -37,10 +37,11 @@ test("bots create, list, and reopen the same private JSONL session", (t) => {
 	assert.equal(header.type, "header");
 	assert.equal(header.version, 1);
 	assert.equal(header.id, bot.sessionId);
-	assert.equal(header.cwd, process.cwd());
+	assert.equal(header.cwd, bot.cwd);
 	assert.equal(bot.computer, "local");
 	assert.equal(bot.engine, "openai-compat");
-	assert.equal(bot.cwd, process.cwd());
+	assert.match(bot.cwd ?? "", /\/computers\/klaud-bot-/);
+	assert.notEqual(bot.cwd, process.cwd());
 	assert.equal(fs.statSync(file).mode & 0o777, 0o600);
 	assert.equal(fs.statSync(registry(home)).mode & 0o777, 0o600);
 	assert.deepEqual(fs.readdirSync(join(home, "klaud")), ["bots.json"]);

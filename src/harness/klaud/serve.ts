@@ -19,7 +19,7 @@ import { createKlaudTools } from "./tools.ts";
 import { klaudBotPrompt } from "./prompt.ts";
 import { flagDrift, operatorInterrupt } from "../interrupt.ts";
 import { pinJournal } from "../journal.ts";
-import { avatarFor, createBot, getBot, listBots, setBotAvatar } from "./bots.ts";
+import { avatarFor, createBot, ensureOwnComputers, getBot, listBots, setBotAvatar } from "./bots.ts";
 import { inspectRoot, listInspectFiles, readInspectFile, resolveInspectFile } from "./inspect.ts";
 import type { KlaudBot } from "./bots.ts";
 
@@ -223,6 +223,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 	const checkHome = () => { if (!opts.run && home !== processHome()) throw new Error("Set REIN_HOME to the requested home before starting rein serve; the runner uses process-wide configuration and sessions."); };
 	checkHome();
 	loadKlaudShell(home);
+	ensureOwnComputers(home, cwd);
 	const prefsFile = join(home, "klaud", "prefs.json");
 	readPrefs(prefsFile);
 	const settingsFile = join(home, "klaud", "run-settings.json");

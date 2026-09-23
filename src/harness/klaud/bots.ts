@@ -4,6 +4,7 @@ import type { Stats } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createSession, sessionPath, sessionsDir } from "../../agent/session.ts";
+import { botComputer } from "../computer.ts";
 
 export interface KlaudBot {
 	id: string;
@@ -157,7 +158,7 @@ function saveRegistry(home: string, bots: KlaudBot[]): void {
 	}
 }
 
-export function createBot(name: string, home?: string, cwd = process.cwd()): KlaudBot {
+export function createBot(name: string, home?: string, _shared = process.cwd()): KlaudBot {
 	const normalizedName = botName(name);
 	const root = botHome(home);
 	checkStorage(root);
@@ -174,18 +175,42 @@ export function createBot(name: string, home?: string, cwd = process.cwd()): Kla
 		if (!id) throw new Error("Could not allocate a unique bot id after repeated collisions.");
 		mkdirSync(sessionsDir(root), { recursive: true, mode: 0o700 });
 		checkStorage(root);
-		const sessionId = createSession({ cwd: resolve(cwd) }, root);
+		const computer = botComputer(id, root);
+		const sessionId = createSession({ cwd: computer }, root);
 		const file = sessionPath(sessionId, root);
 		const owned = checkPath(file, false)!;
 		try {
 			if (bots.some(bot => bot.sessionId === sessionId)) throw new Error("Bot session id collision.");
-			const bot: KlaudBot = { id, name: normalizedName, sessionId, created: new Date().toISOString(), computer: "local", engine: "openai-compat", cwd: resolve(cwd) };
+			const bot: KlaudBot = { id, name: normalizedName, sessionId, created: new Date().toISOString(), computer: "local", engine: "openai-compat", cwd: computer };
 			saveRegistry(root, [...bots, bot]);
 			return bot;
 		} catch (error) {
 			removeOwned(root, file, owned);
 			throw error;
 		}
+	} finally { unlock(); }
+}
+
+
+export function ensureOwnComputers(home: string | undefined, shared: string): void {
+	const root = botHome(home);
+	try { closeSync(openSync(join(root, "klaud", "bots.json"), constants.O_RDONLY | constants.O_NOFOLLOW)); }
+	catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw error;
+	}
+	checkStorage(root);
+	const unlock = lockRegistry(root);
+	try {
+		const bots = listBots(root);
+		const sharedReal = resolve(shared);
+		let changed = false;
+		const next = bots.map(bot => {
+			if (bot.cwd && resolve(bot.cwd) !== sharedReal) return bot;
+			changed = true;
+			return { ...bot, cwd: botComputer(bot.id, root) };
+		});
+		if (changed) saveRegistry(root, next);
 	} finally { unlock(); }
 }
 
