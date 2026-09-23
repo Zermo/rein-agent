@@ -181,13 +181,12 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
         view.keyboardDismissMode = .interactive
         view.accessibilityLabel = "Reply"
         view.onCommandSend = { [weak coordinator = context.coordinator] in coordinator?.handle(.send) }
-        // System keyboard. The CRT board was a replacement inputView, so every
-        // key waited on our handler. UIKit inserts at its own caret. Do not
-        // write selectedRange back on each keystroke.
-        view.inputView = nil
-        view.inputAccessoryView = nil
-        view.keyboardType = .default
-        view.returnKeyType = .default
+        // Rein keys replace the system keyboard. A nil inputView lets UIKit
+        // cover this board. Do not write selectedRange back on each key.
+        let keyboard = KlaudKeyboardInputView { [weak coordinator = context.coordinator] action in
+            coordinator?.handle(action)
+        }
+        view.installCRTKeyboard(keyboard)
         return view
     }
 
@@ -196,6 +195,7 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
         bridge.composerTextView = view
         view.isEditable = bridge.composerEnabled && !bridge.composerBusy
         view.alpha = view.isEditable ? 1 : 0.6
+        view.restoreReinKeyboard()
         view.setComposerState(busy: bridge.composerBusy, submitting: bridge.composerSubmitting)
 
         if view.markedTextRange == nil && !view.text.utf8.elementsEqual(bridge.composerText.utf8) {
@@ -317,10 +317,23 @@ final class KlaudComposerTextView: UITextView {
         )]
     }
 
+    override var inputView: UIView? {
+        get { crtKeyboard ?? super.inputView }
+        set { super.inputView = crtKeyboard ?? newValue }
+    }
+
     func installCRTKeyboard(_ keyboard: UIView) {
         crtKeyboard = keyboard
-        inputView = keyboard
+        super.inputView = keyboard
         inputAccessoryView = nil
+        if isFirstResponder { reloadInputViews() }
+    }
+
+    func restoreReinKeyboard() {
+        guard let crtKeyboard, super.inputView !== crtKeyboard else { return }
+        super.inputView = crtKeyboard
+        inputAccessoryView = nil
+        if isFirstResponder { reloadInputViews() }
     }
 
     func setComposerState(busy: Bool, submitting: Bool) {
