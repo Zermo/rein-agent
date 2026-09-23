@@ -1,6 +1,7 @@
 /** Bundled Streamable HTTP MCP client. There is no @stdlib/mcp package in this process. */
 import type { AgentTool } from "../../agent/agent-loop.ts";
 import { allowedHttpUrl } from "../net-guard.ts";
+import { rememberTool } from "../tool-memory.ts";
 
 const PROTOCOL = "2025-03-26";
 const MAX_BODY = 64_000;
@@ -83,6 +84,7 @@ const mcpTool: AgentTool = {
 				? { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }
 				: { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: args.name, arguments: args.arguments ?? {} } };
 			const done = await post(url, call, init.session, linked, token);
+			rememberTool(url.toString(), "bundled mcp tool. op=list then op=call. Do not install a client.");
 			return { content: clip(JSON.stringify(done.result)) };
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
