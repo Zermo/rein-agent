@@ -1,8 +1,8 @@
 {
   "description": "klaʊdbot is one product: a field console for the agents you host.\n\nThe iPhone and iPad app opens your live console. Sign in through auth.zermo.org, pick a field unit, and keep the ledger, Path, and Computer in one CRT-styled workspace. Chat, files, and approvals stay on your host. This is not a separate chatbot or a sibling app.\n\nSwipe between Units, Chat, Computer, and Settings. The in-app keyboard is built for the console: QWERTY with a number row, punctuation on the main board, dictation, and Taptic key feel. Thinking shows in the footer as it happens. Agent files can open in Computer and pin as frames.\n\nYou choose the host that receives messages. Zermo does not sell your conversations, run ads, or require a consumer AI subscription inside the app.\n\nRequires a klaʊdbot / Rein host you control and a sign-in on auth.zermo.org.",
   "keywords": "AI agent,assistant,self-hosted,local AI,automation,developer,workflow,console,klaudbot",
-  "marketingUrl": "https://openbot.zermo.org/",
+  "marketingUrl": "https://reinklaud.zermo.org/",
   "promotionalText": "Your hosted agents, in a CRT field console on iPhone and iPad.",
-  "supportUrl": "https://openbot.zermo.org/support",
+  "supportUrl": "https://reinklaud.zermo.org/support",
   "whatsNew": "First public console build. Live klaʊdbot in a native shell: Authelia sign-in, CRT keyboard, Path thinking, Computer files, and house haptics."
 }

@@ -15,7 +15,7 @@ struct ReinKlaudApp: App {
     }
 }
 
-private let klaudOrigin = URL(string: "https://openbot.zermo.org/")!
+private let klaudOrigin = URL(string: "https://reinklaud.zermo.org/")!
 
 struct KlaudWebShell: View {
     @StateObject private var bridge = KlaudBridge()
