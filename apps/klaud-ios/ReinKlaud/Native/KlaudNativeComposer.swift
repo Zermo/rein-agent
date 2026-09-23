@@ -181,10 +181,13 @@ struct KlaudComposerTextEditor: UIViewRepresentable {
         view.keyboardDismissMode = .interactive
         view.accessibilityLabel = "Reply"
         view.onCommandSend = { [weak coordinator = context.coordinator] in coordinator?.handle(.send) }
-        let keyboard = KlaudKeyboardInputView { [weak coordinator = context.coordinator] action in
-            coordinator?.handle(action)
-        }
-        view.installCRTKeyboard(keyboard)
+        // System keyboard. The CRT board was a replacement inputView, so every
+        // key waited on our handler. UIKit inserts at its own caret. Do not
+        // write selectedRange back on each keystroke.
+        view.inputView = nil
+        view.inputAccessoryView = nil
+        view.keyboardType = .default
+        view.returnKeyType = .default
         return view
     }
 
