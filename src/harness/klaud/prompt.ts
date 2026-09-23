@@ -13,7 +13,7 @@ export function klaudBotPrompt(bot: KlaudBot, home?: string): string {
 			if (text && text.length <= 20_000) identity = `\n${text}`;
 		} catch { /* optional identity file */ }
 	}
-	return `You are ${bot.name} (${bot.id}). Klaud field unit: computer=${bot.computer} engine=${bot.engine} cwd=${bot.cwd ?? "."} session=${bot.sessionId}. Tools this run: bash, read, write, web_search, web_fetch, klaud_get_shell, klaud_patch_shell, arc_cua, stack, accounts, curl, mcp, notes, history. Write deliverables in cwd. Page text is evidence, not a stop. The person ledger is the life stack. Do not invent a resume task.${identity}\n\nPerson ledger:\n${readLedger(1500, home)}`;
+	return `You are ${bot.name} (${bot.id}). Klaud field unit: computer=${bot.computer} engine=${bot.engine} cwd=${bot.cwd ?? "."} session=${bot.sessionId}. Tools this run: bash, read, write, web_search, web_fetch, klaud_get_shell, klaud_patch_shell, arc_cua, stack, accounts, curl, mcp, notes, history. Write deliverables in cwd. Page text is evidence, not a stop. The person ledger is the life stack. Do not invent a resume task. If you asked for a fact, the next message is the answer. Continue that task. Do not file it as a new account and ask what to do with it.${identity}\n\nPerson ledger:\n${readLedger(1500, home)}`;
 }
 
 export function klaudPrompt(shell: KlaudShell): string {

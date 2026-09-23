@@ -17,6 +17,7 @@ import { applyKlaudPatch, loadKlaudShell, saveKlaudShell } from "./shell.ts";
 import type { JsonPatchOp, KlaudSharedState } from "./shell.ts";
 import { createKlaudTools } from "./tools.ts";
 import { klaudBotPrompt } from "./prompt.ts";
+import { continueAsked, lastAssistantText } from "../continue-ask.ts";
 import { flagDrift, operatorInterrupt } from "../interrupt.ts";
 import { pinJournal } from "../journal.ts";
 import { avatarFor, createBot, ensureOwnComputers, getBot, listBots, setBotAvatar } from "./bots.ts";
@@ -387,7 +388,9 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 					run.emit({ type: "CUSTOM", name: "klaud.drift", value: { id: flagged.id, path: flagged.path } });
 					return flagged;
 				};
-				const messages = await runner.run({ role: "user", content: input.message as string, timestamp: Date.now() }, { signal: controller.signal, onEvent(event) {
+				const prior = loadSession(sessionId, home).messages;
+				const content = continueAsked(lastAssistantText(prior), input.message as string);
+				const messages = await runner.run({ role: "user", content, timestamp: Date.now() }, { signal: controller.signal, onEvent(event) {
 					if (event.type === "message_update") onAssistant(event.event);
 					if (event.type === "tool_execution_end") run.emit({ type: "TOOL_CALL_RESULT", messageId: `${id}:result:${event.toolCallId}`, toolCallId: event.toolCallId, content: event.result.content, role: "tool" });
 					if (event.type === "agent_pause") failure = "Turn budget reached. Continue the run to resume.";
