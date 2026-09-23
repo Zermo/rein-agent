@@ -17,7 +17,10 @@ import { applyKlaudPatch, loadKlaudShell, saveKlaudShell } from "./shell.ts";
 import type { JsonPatchOp, KlaudSharedState } from "./shell.ts";
 import { createKlaudTools } from "./tools.ts";
 import { klaudBotPrompt } from "./prompt.ts";
-import { createBot, getBot, listBots } from "./bots.ts";
+import { flagDrift, operatorInterrupt } from "../interrupt.ts";
+import { pinJournal } from "../journal.ts";
+import { avatarFor, createBot, getBot, listBots, setBotAvatar } from "./bots.ts";
+import { inspectRoot, listInspectFiles, readInspectFile, resolveInspectFile } from "./inspect.ts";
 import type { KlaudBot } from "./bots.ts";
 
 export interface ServeOptions {
@@ -46,8 +49,13 @@ privateHosts.addSubnet("100.64.0.0", 10, "ipv4");
 privateHosts.addSubnet("::1", 128, "ipv6");
 privateHosts.addSubnet("fc00::", 7, "ipv6");
 privateHosts.addSubnet("fe80::", 10, "ipv6");
-const PUBLIC_FILES: Record<string, string> = { "/": "index.html", "/index.html": "index.html", "/browser.js": "browser.js", "/renderer.js": "renderer.js", "/styles.css": "styles.css", "/icon.svg": "icon.svg" };
-const PUBLIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
+const PUBLIC_FILES: Record<string, string> = {
+	"/": "index.html", "/index.html": "index.html", "/browser.js": "browser.js", "/renderer.js": "renderer.js",
+	"/styles.css": "styles.css", "/tokens.css": "tokens.css", "/setup.css": "setup.css", "/avatars.css": "avatars.css",
+	"/icon.svg": "icon.svg", "/icon.png": "icon.png", "/favicon.ico": "icon.png", "/rein-logo.svg": "rein-logo.svg",
+	"/rein-field-guide-card.jpg": "rein-field-guide-card.jpg",
+};
+const PUBLIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg" };
 const FALLBACK_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>rein-klaʊd</title></head><body><p>rein-klaʊd</p><p>API on this origin. Bearer required except <code>/</code> and <code>/health</code>.</p></body></html>`;
 /** Explicit numeric private/loopback/mesh bind. Never 0.0.0.0, ::, hostnames, or public addresses. */
 export function validateBindHost(value: string): string {
@@ -124,8 +132,8 @@ function botMessages(bot: KlaudBot, home: string, before?: number) {
 		const content = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
 		if (message.role === "toolResult") return [{ id: message.id, role: "tool", content, toolCallId: message.toolCallId }];
 		const toolCalls = message.content.filter(part => part.type === "toolCall").map(part => ({ id: part.id, type: "function", function: { name: part.name, arguments: JSON.stringify(part.arguments) } }));
-		// Only display text and tool records; never serialize thinking or private session metadata.
-		return content || toolCalls.length ? [{ id: message.id, role: "assistant", content, ...(toolCalls.length ? { toolCalls } : {}) }] : [];
+		const thinking = message.content.filter(part => part.type === "thinking").map(part => part.thinking).filter(Boolean).join("\n\n");
+		return content || toolCalls.length || thinking ? [{ id: message.id, role: "assistant", content, ...(thinking ? { thinking } : {}), ...(toolCalls.length ? { toolCalls } : {}) }] : [];
 	});
 	const end = Math.min(before ?? messages.length, messages.length);
 	const page: Record<string, unknown>[] = [];
@@ -193,6 +201,7 @@ interface ActiveRun {
 	threadId: string;
 	controller: AbortController;
 	pending: Map<string, Pending>;
+	steer?(text: string, quote?: string): { id: string; path: string };
 	emit(event: AgUiEvent): void;
 }
 /** Race a stalled test producer against cancellation without holding HTTP shutdown open. */
@@ -216,14 +225,43 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 	loadKlaudShell(home);
 	const prefsFile = join(home, "klaud", "prefs.json");
 	readPrefs(prefsFile);
-	const token = opts.token ?? randomBytes(24).toString("hex");
+	const settingsFile = join(home, "klaud", "run-settings.json");
+	const defaultRunSettings = { bashApproval: "always" as const, reasoningEffort: "default" as const, toolWhitelist: [] as string[] };
+	const readRunSettings = () => {
+		try {
+			const value = JSON.parse(readFileSync(settingsFile, "utf8")) as { bashApproval?: string; reasoningEffort?: string; toolWhitelist?: string[] };
+			const bashApproval = ["always", "auto", "ask", "whitelist"].includes(String(value?.bashApproval)) ? value.bashApproval as typeof defaultRunSettings.bashApproval : defaultRunSettings.bashApproval;
+			const reasoningEffort = ["default", "off", "low", "medium", "high"].includes(String(value?.reasoningEffort)) ? value.reasoningEffort as string : defaultRunSettings.reasoningEffort;
+			const toolWhitelist = Array.isArray(value?.toolWhitelist) ? value.toolWhitelist.filter((name): name is string => typeof name === "string" && name.length > 0 && name.length < 80) : [];
+			return { bashApproval, reasoningEffort, toolWhitelist };
+		} catch { /* default */ }
+		return { ...defaultRunSettings, toolWhitelist: [] };
+	};
+	const writeRunSettings = (next: { bashApproval: string; reasoningEffort: string; toolWhitelist?: string[] }) => {
+		privateWrite(settingsFile, JSON.stringify({ bashApproval: next.bashApproval, reasoningEffort: next.reasoningEffort, toolWhitelist: next.toolWhitelist ?? readRunSettings().toolWhitelist }) + "\n");
+	};
+	const publicRunSettings = () => {
+		const value = readRunSettings();
+		return { bashApproval: value.bashApproval, reasoningEffort: value.reasoningEffort };
+	};
+	const intendedPort = opts.port ?? 0;
+	const existingTokenFile = intendedPort ? join(home, "klaud", `serve-${intendedPort}.token`) : "";
+	let persisted = "";
+	if (!opts.token && existingTokenFile) {
+		try {
+			const existing = privateRead(existingTokenFile).trim();
+			if (/^[\x21-\x7e]{1,512}$/.test(existing)) persisted = existing;
+		} catch { /* mint */ }
+	}
+	const token = opts.token ?? (persisted || randomBytes(24).toString("hex"));
 	if (!/^[\x21-\x7e]{1,512}$/.test(token)) throw new Error("The bearer token must be nonempty printable ASCII without spaces.");
 	const authorization = Buffer.from(`Bearer ${token}`);
+	const persistToken = intendedPort > 0 && opts.token === undefined;
 	const active = new Map<string, ActiveRun>(), threads = new Set<string>();
 	const executions = new Set<Promise<void>>();
 	let url = "", tokenFile: string | undefined, closing: Promise<void> | undefined;
 	const snapshot = (): KlaudSharedState => {
-		const bots = listBots(home), prefs = readPrefs(prefsFile);
+		const bots = listBots(home).map(bot => ({ ...bot, avatar: avatarFor(bot.id, home) })), prefs = readPrefs(prefsFile);
 		return { shell: loadKlaudShell(home), prefs: bots.some(bot => bot.id === prefs.lastBotId) ? prefs : {}, bots,
 			approvals: [...active.values()].flatMap(run => [...run.pending.entries()].filter(([, pending]) => pending.kind === "approval" || pending.tool === "confirmAction").map(([id, pending]) => ({ id, tool: pending.tool, summary: pending.summary }))) };
 	};
@@ -270,6 +308,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 			if (res.writableLength > MAX_BODY * 4) { controller.abort(); res.destroy(); }
 		} };
 		active.set(id, run); threads.add(sessionId);
+	const live = { origin: String(input.message ?? "").slice(0, 800), thinking: "", tools: [] as string[] };
 		const disconnected = () => controller.abort();
 		res.once("close", disconnected);
 		res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", Connection: "keep-alive", "X-Accel-Buffering": "no" });
@@ -277,6 +316,12 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		let turn = 0, failure: string | undefined;
 		const onAssistant = (event: AssistantMessageEvent) => {
 			if (controller.signal.aborted) return;
+			if ("partial" in event && event.partial) {
+				const thinking = event.partial.content.filter(part => part.type === "thinking").map(part => part.thinking).join("\n");
+				if (thinking) live.thinking = thinking.slice(-4000);
+				const calls = event.partial.content.filter(part => part.type === "toolCall").map(part => part.name);
+				if (calls.length) live.tools = calls.slice(-8);
+			}
 			if (event.type === "done") { failure = undefined; turn++; return; }
 			if (event.type === "error") { failure = event.error.errorMessage || event.reason; turn++; return; }
 			for (const encoded of toAgUiEvents(event, { threadId, runId: `${id}:${turn}` })) run.emit(encoded);
@@ -313,6 +358,13 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 					if (controller.signal.aborted) return "Run cancelled.";
 					const mutates = ["bash", "write", "edit", "gates"].includes(name) || name === "tmux" && !["list", "capture"].includes(String(args.op));
 					if (!mutates) return;
+					const settings = readRunSettings();
+					if (settings.bashApproval === "always") return;
+					if (settings.bashApproval === "auto" && name === "bash") return;
+					if (settings.bashApproval === "whitelist") {
+						if (!settings.toolWhitelist.includes(name)) writeRunSettings({ ...settings, toolWhitelist: [...settings.toolWhitelist, name] });
+						return;
+					}
 					const allow = await waitFor(run, randomUUID(), "approval", name, args);
 					return allow === true && !controller.signal.aborted ? undefined : "The user denied this action.";
 				} });
@@ -324,7 +376,16 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 						runner.tools[index] = addition;
 					} else runner.tools.push(addition);
 				}
-				if (bot) runner.systemPrompt = `${klaudBotPrompt(bot)}\n\n${runner.systemPrompt}`;
+				if (bot) runner.systemPrompt = `${klaudBotPrompt(bot, home)}\n\n${runner.systemPrompt}`;
+				run.steer = (text: string, quote?: string) => {
+					const selected = quote?.trim() || "";
+					if (selected) pinJournal(selected, home, workCwd);
+					const origin = selected || live.origin;
+					const flagged = flagDrift({ runId: id, sessionId, origin, thinking: live.thinking, tools: [...live.tools] }, text, home);
+					runner.steer({ role: "user", content: operatorInterrupt(text, { runId: id, sessionId, origin, thinking: live.thinking, tools: [...live.tools], driftId: flagged.id, file: flagged.path, quote: selected }), timestamp: Date.now() });
+					run.emit({ type: "CUSTOM", name: "klaud.drift", value: { id: flagged.id, path: flagged.path } });
+					return flagged;
+				};
 				const messages = await runner.run({ role: "user", content: input.message as string, timestamp: Date.now() }, { signal: controller.signal, onEvent(event) {
 					if (event.type === "message_update") onAssistant(event.event);
 					if (event.type === "tool_execution_end") run.emit({ type: "TOOL_CALL_RESULT", messageId: `${id}:result:${event.toolCallId}`, toolCallId: event.toolCallId, content: event.result.content, role: "tool" });
@@ -348,7 +409,20 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 		res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Content-Type-Options", "nosniff"); res.setHeader("Referrer-Policy", "no-referrer"); res.setHeader("X-Frame-Options", "DENY");
 		void (async () => {
 			if (closing) throw new HttpError(503, "Server is closing.");
-			if (req.headers.host !== new URL(url).host || req.headers.origin && req.headers.origin !== url) throw new HttpError(403, "Invalid Host or Origin.");
+			const stripDefaultPort = (value: string) => value.replace(/:(?:443|80)$/, "");
+			const requestHost = stripDefaultPort((req.headers.host ?? "").split(",")[0].trim().toLowerCase());
+			let requestOrigin = req.headers.origin;
+			if (requestOrigin) {
+				try {
+					const parsed = new URL(requestOrigin);
+					if (parsed.port === "443" && parsed.protocol === "https:" || parsed.port === "80" && parsed.protocol === "http:") parsed.port = "";
+					requestOrigin = parsed.origin;
+				} catch { /* keep raw origin; allowlist still rejects unknown values */ }
+			}
+			const expectedHost = new URL(url).host;
+			const allowedHosts = new Set([expectedHost, "reinklaud.zermo.org"]);
+			const allowedOrigins = new Set([url, "https://reinklaud.zermo.org", "http://10.0.0.56:4317", "http://127.0.0.1:4317"]);
+			if (!allowedHosts.has(requestHost) || (requestOrigin && !allowedOrigins.has(requestOrigin))) throw new HttpError(403, "Invalid Host or Origin.");
 			const path = (req.url ?? "/").split("?")[0];
 			if (req.method === "GET" && path === "/health") { json(res, 200, { ok: true, name: "rein-klaud" }); return; }
 			if (req.method === "GET" && Object.hasOwn(PUBLIC_FILES, path)) {
@@ -365,9 +439,18 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 				if (name === "index.html") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(FALLBACK_HTML); return; }
 				throw new HttpError(404, "Not found.");
 			}
-			const provided = Buffer.from(req.headers.authorization ?? "");
-			if (provided.length !== authorization.length || !timingSafeEqual(provided, authorization)) throw new HttpError(401, "Bearer token required.");
+			const remoteUser = String(req.headers["remote-user"] ?? req.headers["remote-email"] ?? "").trim();
+			const autheliaOk = requestHost === "reinklaud.zermo.org" && /^[A-Za-z0-9._@-]{1,128}$/.test(remoteUser);
+			if (!autheliaOk) {
+				const provided = Buffer.from(req.headers.authorization ?? "");
+				if (provided.length !== authorization.length || !timingSafeEqual(provided, authorization)) throw new HttpError(401, "Bearer token required.");
+			}
 			if (req.method === "GET" && req.url === "/state") { json(res, 200, snapshot()); return; }
+			if (req.method === "POST" && req.url === "/journal/pin") {
+				const input = await body(req);
+				if (typeof input.quote !== "string") invalid("Pin requires the selected thinking string.");
+				json(res, 200, pinJournal(input.quote, home, cwd)); return;
+			}
 			if (req.method === "GET" && req.url === "/bots") { json(res, 200, listBots(home)); return; }
 			if (req.method === "POST" && req.url === "/bots") {
 				const input = await body(req);
@@ -379,6 +462,52 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 				const before = messagesRoute[2] === undefined ? undefined : Number(messagesRoute[2]);
 				if (before !== undefined && !Number.isSafeInteger(before)) invalid("Invalid history cursor.");
 				json(res, 200, botMessages(requestedBot(messagesRoute[1], home), home, before)); return;
+			}
+			const inspectList = /^\/bots\/([^/]+)\/inspect-list$/.exec(path);
+			if (req.method === "GET" && inspectList) {
+				const bot = requestedBot(inspectList[1], home);
+				const root = inspectRoot(bot.cwd, cwd);
+				json(res, 200, { files: listInspectFiles(root) }); return;
+			}
+			const inspectFile = /^\/bots\/([^/]+)\/inspect(?:\/(.*))?$/.exec(path);
+			if (req.method === "GET" && inspectFile && inspectFile[0] !== `/bots/${inspectFile[1]}/inspect-list`) {
+				const bot = requestedBot(inspectFile[1], home);
+				const rel = decodeURIComponent((inspectFile[2] ?? "").replace(/\+/g, "%20")) || (new URL(req.url ?? "/", "http://klaud.local").searchParams.get("path") ?? "");
+				try {
+					const found = resolveInspectFile(inspectRoot(bot.cwd, cwd), rel);
+					const body = readInspectFile(found.file);
+					res.writeHead(200, { "Content-Type": found.type, "Content-Length": body.length, "X-Inspect-Kind": found.kind, "X-Inspect-Path": found.path }).end(body);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : "Not found.";
+					const code = /must stay|Invalid inspect/.test(message) ? 400 : 404;
+					throw new HttpError(code, message);
+				}
+				return;
+			}
+			if (req.method === "GET" && req.url === "/settings") { json(res, 200, publicRunSettings()); return; }
+			if (req.method === "POST" && req.url === "/settings") {
+				const input = await body(req);
+				const current = readRunSettings();
+				const bashApproval = ["always", "auto", "ask", "whitelist"].includes(String(input.bashApproval)) ? input.bashApproval : current.bashApproval;
+				const reasoningEffort = ["default", "off", "low", "medium", "high"].includes(String(input.reasoningEffort)) ? input.reasoningEffort : current.reasoningEffort;
+				const next = { bashApproval, reasoningEffort, toolWhitelist: current.toolWhitelist };
+				writeRunSettings(next);
+				json(res, 200, publicRunSettings()); return;
+			}
+			if (req.method === "GET" && req.url === "/activity") { json(res, 200, { autonomy: { status: "inactive" } }); return; }
+			if (req.method === "PATCH" && req.url && /^\/bots\/[^/]+$/.test(req.url)) {
+				const id = req.url.slice("/bots/".length);
+				requestedBot(id, home);
+				const input = await body(req);
+				if (typeof input.avatar !== "string") invalid("An avatar id is required.");
+				let bot: KlaudBot;
+				try { bot = setBotAvatar(id, input.avatar, home); }
+				catch (error) {
+					if (error instanceof Error && error.message === "Invalid avatar.") invalid(error.message);
+					throw error;
+				}
+				publishState();
+				json(res, 200, bot); return;
 			}
 			if (req.method === "POST" && req.url === "/prefs") {
 				const input = await body(req); validateFrontend("setPref", input); savePref(input.value); publishState(); json(res, 200, snapshot()); return;
@@ -402,11 +531,18 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 				const execution = streamRun(res, input, declarations, sessionId, bot); executions.add(execution);
 				try { await execution; } finally { executions.delete(execution); } return;
 			}
-			const route = /^\/runs\/([a-f0-9-]+)\/(cancel|tools\/([^/]+)|approvals\/([^/]+))$/.exec(req.url ?? "");
+			const route = /^\/runs\/([a-f0-9-]+)\/(cancel|steer|tools\/([^/]+)|approvals\/([^/]+))$/.exec(req.url ?? "");
 			if (req.method === "POST" && route) {
 				const input = await body(req), run = active.get(route[1]);
 				if (!run || run.controller.signal.aborted) throw new HttpError(404, "No active run.");
 				if (route[2] === "cancel") { run.controller.abort(); json(res, 200, { ok: true }); return; }
+				if (route[2] === "steer") {
+					if (typeof input.message !== "string" || !input.message.trim() || input.message.length > 8000) invalid("Interrupt requires a nonempty message.");
+					if (!run.steer) throw new HttpError(409, "This run cannot accept an interrupt.");
+					const quote = typeof input.quote === "string" ? input.quote : undefined;
+					const flagged = run.steer(input.message, quote);
+					json(res, 200, { ok: true, driftId: flagged.id, path: flagged.path }); return;
+				}
 				const id = decodeURIComponent(route[3] ?? route[4]), pending = run.pending.get(id);
 				if (!pending || pending.kind !== (route[3] ? "tool" : "approval")) throw new HttpError(404, "No pending action.");
 				if (pending.kind === "approval") {
@@ -417,7 +553,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 					if (!input.isError && pending.tool === "setPref") savePref(pending.args.value);
 					pending.settle({ content: input.result, isError: input.isError === true });
 				}
-				publishState(); json(res, 200, { ok: true }); return;
+				json(res, 200, { ok: true }); return;
 			}
 			throw new HttpError(404, "Not found.");
 		})().catch(error => {
@@ -431,14 +567,18 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 	const addr = server.address() as { address: string; port: number; family: string };
 	url = addr.family === "IPv6" || addr.family === "6" ? `http://[${addr.address}]:${addr.port}` : `http://${addr.address}:${addr.port}`;
 	try {
-		if (opts.token === undefined) { tokenFile = join(home, "klaud", `serve-${new URL(url).port}.token`); privateWrite(tokenFile, token + "\n"); }
+		if (opts.token === undefined) {
+			tokenFile = join(home, "klaud", `serve-${new URL(url).port}.token`);
+			privateWrite(tokenFile, token + "\n");
+			if (persistToken) tokenFile = undefined; // keep the file across restarts
+		}
 	} catch (error) { await new Promise<void>(resolve => server.close(() => resolve())); throw error; }
 	return { url, token, close() {
 		if (!closing) closing = (async () => {
 			for (const run of active.values()) run.controller.abort();
 				await new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); });
 				await Promise.allSettled([...executions]);
-			if (tokenFile) { try { if (privateRead(tokenFile) === token + "\n") unlinkSync(tokenFile); } catch { /* Preserve replaced or linked files. */ } }
+			if (tokenFile && !persistToken) { try { if (privateRead(tokenFile) === token + "\n") unlinkSync(tokenFile); } catch { /* Preserve replaced or linked files. */ } }
 		})();
 		return closing;
 	} };

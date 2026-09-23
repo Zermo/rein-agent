@@ -13,6 +13,7 @@ export interface KlaudBot {
 	computer: "local";
 	engine: "openai-compat";
 	cwd?: string;
+	avatar?: string;
 }
 
 const BOT_ID = /^klaud-bot-[0-9a-f]{8}$/;
@@ -193,4 +194,24 @@ export function getBot(id: string, home?: string): KlaudBot {
 	const bot = listBots(home).find(bot => bot.id === id);
 	if (!bot) throw new Error(`No such bot: ${id}`);
 	return bot;
+}
+
+const AVATAR_IDS = new Set(["aviator", "motorcycle", "builder", "baseball", "medic", "explorer", "radio", "ranger", "welder", "sailor", "courier", "watch", "clerk", "open"]);
+function avatarsPath(home?: string): string { return join(botHome(home), "klaud", "avatars.json"); }
+function readAvatars(home?: string): Record<string, string> {
+	try {
+		const raw = JSON.parse(readFileSync(avatarsPath(home), "utf8"));
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+		return Object.fromEntries(Object.entries(raw).filter(([id, value]) => BOT_ID.test(id) && AVATAR_IDS.has(String(value))));
+	} catch { return {}; }
+}
+export function avatarFor(id: string, home?: string): string | undefined { return readAvatars(home)[id]; }
+export function setBotAvatar(id: string, avatar: string, home?: string): KlaudBot {
+	const bot = getBot(id, home);
+	if (!AVATAR_IDS.has(avatar)) throw new Error("Invalid avatar.");
+	const root = botHome(home);
+	mkdirSync(join(root, "klaud"), { recursive: true, mode: 0o700 });
+	const next = { ...readAvatars(root), [id]: avatar };
+	writeFileSync(avatarsPath(root), JSON.stringify(next) + "\n", { mode: 0o600 });
+	return { ...bot, avatar };
 }

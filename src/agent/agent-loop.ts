@@ -104,6 +104,9 @@ export interface AgentLoopConfig {
 	recoverFromError?: (info: { message: AssistantMessage; context: AgentContext }) => boolean | Promise<boolean>;
 	shouldStopAfterTurn?: (info: { message: AssistantMessage; context: AgentContext }) => boolean;
 	getSteeringMessages?: () => AgentMessage[] | Promise<AgentMessage[]>;
+	/** Aborts only the current model or tool turn. The run continues and reads steering. */
+	turnSignal?: () => AbortSignal;
+	rearmTurn?: () => void;
 	getFollowUpMessages?: () => AgentMessage[] | Promise<AgentMessage[]>;
 	toolExecution?: "parallel" | "sequential";
 	/** Finite assistant-turn budget per run (1..10000). Default: 300. Exhaustion pauses for continuation. */
@@ -177,6 +180,9 @@ export async function agentLoop(
 		await emit({ type: "agent_pause", reason: "turn-budget", limit: maxTurns, used: maxTurns });
 	};
 	for (let turns = 0; turns < maxTurns && !signal?.aborted; turns++) {
+		config.rearmTurn?.();
+		const turnSignal = config.turnSignal?.();
+		const linked = signal && turnSignal ? AbortSignal.any([signal, turnSignal]) : turnSignal ?? signal;
 		if (turns > 0) await emit({ type: "turn_start" });
 		pending.push(...((await config.getSteeringMessages?.()) ?? []));
 		if (signal?.aborted) break;
@@ -186,7 +192,7 @@ export async function agentLoop(
 		let message: AssistantMessage;
 		let assistantStarted = false;
 		try {
-			message = await streamAssistantResponse(ctx, config, signal, (event) => {
+			message = await streamAssistantResponse(ctx, config, linked, (event) => {
 				if (event.type === "message_start") assistantStarted = true;
 				return emit(event);
 			});
@@ -200,18 +206,24 @@ export async function agentLoop(
 			if (!assistantStarted) await emit({ type: "message_start", message });
 			await emit({ type: "message_end", message });
 		}
+		const interrupted = Boolean(turnSignal?.aborted && !signal?.aborted);
+		if (interrupted) {
+			message.stopReason = "stop";
+			message.errorMessage = undefined;
+			if (!message.content.some(part => part.type === "text" || part.type === "thinking")) message.content.push({ type: "text", text: "Interrupted by the operator before this turn finished." });
+		}
 		ctx.messages.push(message);
 		newMessages.push(message);
 
 		const toolCalls = message.content.filter((c) => c.type === "toolCall");
 		const failed = message.stopReason === "error" || message.stopReason === "aborted";
 		let batch: ExecutedBatch = { messages: [], terminate: false };
-		if (toolCalls.length > 0) {
+		if (toolCalls.length > 0 && !interrupted) {
 			batch = failed
 				? await failTruncatedToolCalls(toolCalls, ctx, emit, "the model response failed or was aborted")
 				: message.stopReason === "length"
 					? await failTruncatedToolCalls(toolCalls, ctx, emit)
-					: await executeToolCalls(ctx, message, toolCalls, config, signal, emit);
+					: await executeToolCalls(ctx, message, toolCalls, config, linked, emit);
 			ctx.messages.push(...batch.messages);
 			newMessages.push(...batch.messages);
 			await config.afterToolBatch?.({
@@ -220,7 +232,9 @@ export async function agentLoop(
 			});
 		}
 		await emit({ type: "turn_end", message, toolResults: batch.messages });
-		if (signal?.aborted || message.stopReason === "aborted") break;
+		if (signal?.aborted) break;
+		if (interrupted) continue;
+		if (message.stopReason === "aborted") break;
 		if (failed) {
 			if (await config.recoverFromError?.({ message, context: ctx })) {
 				if (signal?.aborted) break;

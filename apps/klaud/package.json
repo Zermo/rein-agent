@@ -1,15 +1,17 @@
 {
   "name": "@rein/klaud",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
-  "productName": "rein-klaʊd",
+  "productName": "klaʊdbot",
   "main": "main.mjs",
   "license": "MIT",
   "engines": { "node": ">=22.18.0" },
   "scripts": {
     "postinstall": "install-electron",
     "build": "node build.mjs",
+    "package:macos": "node package-macos.mjs",
+    "package:macos:release": "node package-macos.mjs --release",
     "dev": "npm run build && electron .",
     "start": "electron .",
     "test": "node --test test/*.test.mjs"
@@ -22,5 +24,5 @@
     "electron": "44.2.0",
     "esbuild": "0.28.2"
   },
-  "build": { "appId": "org.zermo.rein-klaud", "productName": "rein-klaʊd" }
+  "build": { "appId": "org.zermo.rein-klaud", "productName": "klaʊdbot", "icon": "icon.png" }
 }

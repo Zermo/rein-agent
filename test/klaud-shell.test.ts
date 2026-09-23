@@ -153,7 +153,7 @@ test("persistence refuses symlink files, dangling links, and linked parent direc
 test("klaud tools return JSON strings and persist valid patches", async (t) => {
 	const home = fixture(t);
 	const tools = createKlaudTools(home);
-	assert.deepEqual(tools.map(tool => tool.name), ["bash", "read", "write", "web_search", "web_fetch", "klaud_get_shell", "klaud_patch_shell"]);
+	assert.deepEqual(tools.map(tool => tool.name), ["bash", "read", "write", "web_search", "web_fetch", "klaud_get_shell", "klaud_patch_shell", "arc_cua"]);
 	const get = tools.find(tool => tool.name === "klaud_get_shell")!;
 	const patch = tools.find(tool => tool.name === "klaud_patch_shell")!;
 	const read = await get.execute("fixture-read", {});

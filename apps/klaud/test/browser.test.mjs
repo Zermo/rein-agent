@@ -14,6 +14,7 @@ test("browser transport is same-origin fetch, not Electron IPC", async () => {
     sessionStorage: { getItem: key => storage.get(key) ?? null, setItem(key, value) { storage.set(key, value); } },
     fetch: async (url, opts) => {
       fetches.push({ url, headers: opts.headers });
+      if (String(url).includes("/settings")) return { ok: true, json: async () => ({ bashApproval: "ask", reasoningEffort: "default" }), body: { cancel() {} } };
       return { ok: true, json: async () => ({ bots: [] }), body: { cancel() {} } };
     },
     Set, Map, JSON, Object, Error, AbortController, TextDecoder,
@@ -22,8 +23,19 @@ test("browser transport is same-origin fetch, not Electron IPC", async () => {
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
   assert.equal(sandbox.klaud.canStartLocal, false);
+  assert.equal(typeof sandbox.klaud.onboardingInspect, "function");
+  assert.equal((await sandbox.klaud.onboardingInspect()).completed, true);
   await sandbox.klaud.connect({ token: "runtime-token", url: "http://127.0.0.1:9", mode: "remote" });
   assert.equal(fetches[0].url, "http://10.0.0.56:4317/state");
   assert.match(fetches[0].headers.Authorization, /^Bearer runtime-token$/);
   assert.equal(fetches[0].headers.Origin, "http://10.0.0.56:4317");
+  fetches.length = 0;
+  storage.clear();
+  sandbox.klaud = undefined;
+  vm.runInContext(source, sandbox);
+  await sandbox.klaud.connect({});
+  assert.equal(fetches[0].headers.Authorization, undefined);
+  const settings = await sandbox.klaud.request("getRunSettings");
+  assert.equal(settings.bashApproval, "ask");
+  assert.equal((await sandbox.klaud.request("getActivity")).autonomy.status, "unavailable");
 });

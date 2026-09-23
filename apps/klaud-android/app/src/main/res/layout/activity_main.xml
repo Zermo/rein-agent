@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/klaud_bg"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:padding="16dp">
+
+        <ImageView
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:contentDescription="@string/app_name"
+            android:src="@drawable/ic_klaud" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:text="@string/app_name"
+            android:textColor="@color/klaud_text"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ready"
+            android:textColor="@color/klaud_accent"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/panelAgent"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/transcript"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="klaʊdbot\nSide button / mic talks to your Rein host, not Google.\nMailkit and line handoff live in the other tabs.\n"
+                    android:textColor="@color/klaud_text"
+                    android:textIsSelectable="true"
+                    android:textSize="14sp" />
+            </ScrollView>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="12dp">
+
+                <EditText
+                    android:id="@+id/composer"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@color/klaud_panel"
+                    android:hint="Ask your agent"
+                    android:inputType="textCapSentences|textMultiLine"
+                    android:padding="12dp"
+                    android:textColor="@color/klaud_text"
+                    android:textColorHint="@color/klaud_muted" />
+
+                <Button
+                    android:id="@+id/mic"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="mic" />
+
+                <Button
+                    android:id="@+id/send"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="send" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <WebView
+            android:id="@+id/mailView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/panelMail"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <!-- mailView is a sibling so it can fill; this panel is a placeholder host.
+                 We actually show mailView when tab=mail in code. Keep empty. -->
+        </LinearLayout>
+
+        <ScrollView
+            android:id="@+id/panelLine"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="20dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Business line → personal"
+                    android:textColor="@color/klaud_accent"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="This phone stays the Zermo Brands line. One tap forwards new calls to your personal device on the other carrier. Mid-call transfer across carriers is not something GSM gives us; forwarding is."
+                    android:textColor="@color/klaud_muted" />
+
+                <EditText
+                    android:id="@+id/personalLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:background="@color/klaud_panel"
+                    android:hint="Personal number"
+                    android:inputType="phone"
+                    android:padding="12dp"
+                    android:textColor="@color/klaud_text"
+                    android:textColorHint="@color/klaud_muted" />
+
+                <TextView
+                    android:id="@+id/fwdStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:textColor="@color/klaud_text" />
+
+                <Button
+                    android:id="@+id/fwdOn"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Forward new calls to personal" />
+
+                <Button
+                    android:id="@+id/fwdOff"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Keep calls on this phone" />
+
+                <Button
+                    android:id="@+id/callPersonal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Call personal line" />
+            </LinearLayout>
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/panelSetup"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="20dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Rein host (rein serve --mobile)"
+                    android:textColor="@color/klaud_muted" />
+
+                <EditText
+                    android:id="@+id/host"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:background="@color/klaud_panel"
+                    android:hint="http://100.x.x.x:4318"
+                    android:inputType="textUri"
+                    android:padding="12dp"
+                    android:textColor="@color/klaud_text"
+                    android:textColorHint="@color/klaud_muted" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Bearer token"
+                    android:textColor="@color/klaud_muted" />
+
+                <EditText
+                    android:id="@+id/token"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:background="@color/klaud_panel"
+                    android:hint="from the host token file"
+                    android:inputType="textPassword"
+                    android:padding="12dp"
+                    android:textColor="@color/klaud_text"
+                    android:textColorHint="@color/klaud_muted" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Mailkit URL"
+                    android:textColor="@color/klaud_muted" />
+
+                <EditText
+                    android:id="@+id/mailkit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:background="@color/klaud_panel"
+                    android:hint="http://mac-tailscale:8765"
+                    android:inputType="textUri"
+                    android:padding="12dp"
+                    android:textColor="@color/klaud_text"
+                    android:textColorHint="@color/klaud_muted" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Mailkit token"
+                    android:textColor="@color/klaud_muted" />
+
+                <EditText
+                    android:id="@+id/mailkitToken"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:background="@color/klaud_panel"
+                    android:inputType="textPassword"
+                    android:padding="12dp"
+                    android:textColor="@color/klaud_text" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Personal line"
+                    android:textColor="@color/klaud_muted" />
+
+                <EditText
+                    android:id="@+id/personal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    android:background="@color/klaud_panel"
+                    android:hint="+1…"
+                    android:inputType="phone"
+                    android:padding="12dp"
+                    android:textColor="@color/klaud_text"
+                    android:textColorHint="@color/klaud_muted" />
+
+                <Button
+                    android:id="@+id/saveSetup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Save" />
+
+                <Button
+                    android:id="@+id/setAssistant"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Set klaʊdbot as digital assistant" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/klaud_panel"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/navAgent"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tab_agent" />
+
+        <Button
+            android:id="@+id/navMail"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tab_mail" />
+
+        <Button
+            android:id="@+id/navLine"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tab_line" />
+
+        <Button
+            android:id="@+id/navSetup"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/tab_setup" />
+    </LinearLayout>
+</LinearLayout>

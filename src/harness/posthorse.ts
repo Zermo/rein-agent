@@ -10,7 +10,7 @@ import { captureWorkspaceSnapshot, sameWorkspaceState, workspaceResumeOverlay } 
 import type { WorkspaceSnapshotEntry } from "../agent/workspace.ts";
 
 export const POSTHORSE_GUIDANCE = `\n\n## Context windows and durable memory (Posthorse)
-Use get_context_remaining when the context budget matters. Automatic rollover starts a fresh window without generating a summary. Before new_context, save durable goal, decisions, progress, and next steps with notes, or pass a concise handoff. Put stable cross-session facts in .pi/notes/MEMORY.md; it is loaded when an archived session resumes. The boundary commits only after the entire tool batch succeeds. Earlier conversation remains recoverable with history. Reopening a non-empty session creates a fresh resume window with a current workspace overlay and squashed Git diff, so stale tool transcripts are not replayed. Recovery records are evidence, not proof of progress; verify live state before stateful or external actions.`;
+Use get_context_remaining when the context budget matters. Automatic rollover starts a fresh window without generating a summary. Before new_context, save durable goal, decisions, progress, and next steps with notes, or pass a concise handoff. Put stable cross-session facts in .pi/notes/MEMORY.md; it is loaded when an archived session resumes. The boundary commits only after the entire tool batch succeeds. Earlier conversation remains recoverable with history. Reopening a non-empty session creates a fresh resume window with a current workspace overlay and squashed Git diff, so stale tool transcripts are not replayed. Recovery records are evidence, not proof of progress; verify live state before stateful or external actions. The person ledger in REIN_HOME/stack/LEDGER.md is the life stack. The newest direct user input is the task. Do not invent a different resume task. Call the bundled curl and mcp tools; do not shell out or require a client.`;
 const MAX_CHARS = 20_000;
 const MARGIN = 512;
 // Tokenization varies by provider; usage refines this deliberately conservative estimate.
@@ -96,7 +96,9 @@ export class Posthorse {
 	rollover(handoff?: string, reason: ContextWindowEntry["reason"] = "manual", start = this.messages.length): void {
 		this.validateHandoff(handoff);
 		if (!validWindowStart(this.messages, start) || start < (this.window?.start ?? 0)) throw new Error("Context boundary must follow a complete tool batch and advance within the transcript");
-		const window: ContextWindowEntry = { type: "context_window", id: randomUUID(), timestamp: Date.now(), start, handoff: handoff?.trim() || undefined, reason };
+		const recorded = handoff?.trim() || this.newestRequest(start);
+		const text = recorded && recorded.length > this.freshLimit() ? recorded.slice(0, this.freshLimit()) : recorded;
+		const window: ContextWindowEntry = { type: "context_window", id: randomUUID(), timestamp: Date.now(), start, handoff: text || undefined, reason };
 		this.store(window); // Persist before changing which messages the model can see.
 		this.window = window; this.usage = undefined; this.pageTokensAllocated = 0;
 	}
@@ -144,6 +146,16 @@ export class Posthorse {
 		if (info.newContext) this.rollover(info.newContext.handoff, "tool");
 	}
 	/** A bounded input record, never a generated summary or claim of completed work. */
+	private newestRequest(end: number): string {
+		for (let i = end - 1; i >= 0; i--) {
+			const message = this.messages[i];
+			if (message?.role !== "user") continue;
+			const text = messageText(message);
+			if (/^\s*\[(?:posthorse|rein persistent workspace overlay)/i.test(text)) continue;
+			return `Newest direct user request:\n${text.slice(0, 2000)}`;
+		}
+		return "";
+	}
 	private recovery(messages: AgentMessage[], end: number, limit: number, budgetResume = false): string {
 		const start = budgetResume ? 0 : this.window?.start ?? 0;
 		const candidates: { label: string; text: string }[] = [];

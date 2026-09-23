@@ -12,12 +12,14 @@ export function toAgUiEvents(
 	ids: { threadId: string; runId: string },
 ): AgUiEvent[] {
 	switch (event.type) {
-		// Serve owns the run start; thinking is never part of the UI stream.
 		case "start":
-		case "thinking_start":
-		case "thinking_delta":
-		case "thinking_end":
 			return [];
+		case "thinking_start":
+			return [{ type: "THINKING_START", messageId: `${ids.runId}:${event.contentIndex}` }];
+		case "thinking_delta":
+			return [{ type: "THINKING_CONTENT", messageId: `${ids.runId}:${event.contentIndex}`, delta: event.delta }];
+		case "thinking_end":
+			return [{ type: "THINKING_END", messageId: `${ids.runId}:${event.contentIndex}`, content: event.content }];
 		case "text_start":
 			return [{ type: "TEXT_MESSAGE_START", messageId: `${ids.runId}:${event.contentIndex}`, role: "assistant" }];
 		case "text_delta":

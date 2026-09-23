@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:recognitionService="org.zermo.klaud.voice.ZermoRecognitionService"
+    android:sessionService="org.zermo.klaud.voice.ZermoVoiceSessionService"
+    android:settingsActivity="org.zermo.klaud.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />

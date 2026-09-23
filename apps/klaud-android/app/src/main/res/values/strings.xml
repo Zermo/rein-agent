@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">klaʊdbot</string>
+    <string name="tab_agent">Agent</string>
+    <string name="tab_mail">Mail</string>
+    <string name="tab_line">Line</string>
+    <string name="tab_setup">Setup</string>
+</resources>

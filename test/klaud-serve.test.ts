@@ -70,6 +70,22 @@ test("strict Host and Origin checks also protect health", async t => {
 		assert.equal(status, 403);
 	}
 	assert.equal((await fetch(server.url + "/health", { headers: { Origin: server.url } })).status, 200);
+	assert.equal(await new Promise(resolve => {
+		const req = request(server.url + "/health", { headers: { Host: "reinklaud.zermo.org:443", Origin: "https://reinklaud.zermo.org:443" } }, res => { res.resume(); resolve(res.statusCode); });
+		req.end();
+	}), 200);
+	assert.equal(await new Promise(resolve => {
+		const req = request(server.url + "/state", { headers: { Host: "reinklaud.zermo.org", Origin: "https://reinklaud.zermo.org", "Remote-User": "tom" } }, res => { res.resume(); resolve(res.statusCode); });
+		req.end();
+	}), 200);
+	assert.equal(await new Promise(resolve => {
+		const req = request(server.url + "/state", { headers: { Host: "reinklaud.zermo.org", Origin: "https://reinklaud.zermo.org" } }, res => { res.resume(); resolve(res.statusCode); });
+		req.end();
+	}), 401);
+	assert.equal(await new Promise(resolve => {
+		const req = request(server.url + "/health", { headers: { Host: "openbot.zermo.org", Origin: "https://openbot.zermo.org" } }, res => { res.resume(); resolve(res.statusCode); });
+		req.end();
+	}), 403);
 });
 
 test("state patches are atomic, persisted, and limited to shell paths", async t => {
@@ -90,6 +106,24 @@ test("invalid and oversized request bodies fail before run starts", async t => {
 	}
 	assert.equal((await server.get("/bots")).status, 200);
 	assert.equal((await server.post("/bots", { name: "" })).status, 400);
+});
+
+
+test("all offered headwear ids persist and invalid ids return 400", async t => {
+	const server = await fixture(t);
+	const bot = await (await server.post("/bots", { name: "Fixture" })).json();
+	const offered = ["aviator", "motorcycle", "builder", "baseball", "medic", "explorer", "radio", "ranger", "welder", "sailor", "courier", "watch", "clerk", "open"];
+	for (const avatar of offered) {
+		const response = await fetch(`${server.url}/bots/${bot.id}`, { method: "PATCH", headers: server.headers, body: JSON.stringify({ avatar }) });
+		assert.equal(response.status, 200, avatar);
+		assert.equal((await response.json()).avatar, avatar);
+		assert.equal((await (await server.get("/state")).json()).bots.find((candidate: { id: string }) => candidate.id === bot.id).avatar, avatar);
+		assert.equal(JSON.parse(readFileSync(join(server.home, "klaud", "avatars.json"), "utf8"))[bot.id], avatar);
+	}
+	const avatars = readFileSync(join(server.home, "klaud", "avatars.json"));
+	const invalid = await fetch(`${server.url}/bots/${bot.id}`, { method: "PATCH", headers: server.headers, body: JSON.stringify({ avatar: "not-offered" }) });
+	assert.equal(invalid.status, 400);
+	assert.deepEqual(readFileSync(join(server.home, "klaud", "avatars.json")), avatars);
 });
 
 test("SSE sends snapshot, content, exactly one whole-run finish, and DONE without reasoning", async t => {
@@ -278,8 +312,8 @@ test("bind host refuses wildcards and public addresses; loopback still serves a 
 	assert.equal(page.status, 200);
 	assert.match(page.headers.get("content-type")!, /text\/html/);
 	const html = await page.text();
-	assert.match(html, /src="\.\/browser\.js"/);
-	assert.match(html, /src="\.\/renderer\.js"/);
+	assert.match(html, /src="\.\/browser\.js/);
+	assert.match(html, /src="\.\/renderer\.js/);
 	assert.match(html, /connect-src 'self'/);
 	assert.doesNotMatch(html, /API on this origin/);
 	const transport = await (await fetch(server.url + "/browser.js")).text();
@@ -288,4 +322,18 @@ test("bind host refuses wildcards and public addresses; loopback still serves a 
 	assert.equal((await fetch(server.url + "/renderer.js")).status, 200);
 	assert.equal((await fetch(server.url + "/state")).status, 401);
 	assert.equal((await fetch(server.url + "/health")).status, 200);
+});
+
+test("inspect serves cwd files and refuses traversal", async t => {
+	const { writeFileSync: write, mkdirSync } = await import("node:fs");
+	const cwd = mkdtempSync(join(tmpdir(), "rein-klaud-inspect-"));
+	t.after(() => rmSync(cwd, { recursive: true, force: true }));
+	write(join(cwd, "chart.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
+	const server = await fixture(t, { cwd });
+	const bot = await (await server.post("/bots", { name: "Ares" })).json();
+	const ok = await fetch(`${server.url}/bots/${bot.id}/inspect?path=chart.png`, { headers: server.headers });
+	assert.equal(ok.status, 200);
+	assert.match(ok.headers.get("content-type")!, /image\/png/);
+	assert.equal((await fetch(`${server.url}/bots/${bot.id}/inspect?path=${encodeURIComponent("../chart.png")}`, { headers: server.headers })).status, 400);
+	assert.equal((await fetch(`${server.url}/bots/${bot.id}/inspect?path=missing.png`, { headers: server.headers })).status, 404);
 });

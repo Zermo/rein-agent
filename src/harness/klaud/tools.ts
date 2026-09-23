@@ -1,5 +1,6 @@
 import type { AgentTool, AgentToolResult } from "../../agent/agent-loop.ts";
 import { toolsForCwd } from "../tools/index.ts";
+import { parseArcCuaPayload, runArcCuaHarness } from "./arc-cua.ts";
 import { applyKlaudPatch, KLAUD_SHELL_POINTERS, loadKlaudShell, saveKlaudShell } from "./shell.ts";
 import type { JsonPatchOp } from "./shell.ts";
 
@@ -55,6 +56,28 @@ export function createKlaudTools(home?: string, cwd = process.cwd()): AgentTool[
 					saveKlaudShell(shell, home);
 					return { content: JSON.stringify(shell) };
 				} catch (error) { return toolError(error); }
+			},
+		},
+		{
+			name: "arc_cua",
+			description: "Hand a bounded UI subtask to the TypeSafe/arc-cua harness. Planner owns goal, inputs, verification, and constraints. mode=demo is local; mode=desktop POSTs to the same-host sidecar.",
+			parameters: {
+				type: "object",
+				properties: {
+					goal: { type: "string" },
+					verification: { type: "array", items: { type: "string" } },
+					inputs: { type: "object", additionalProperties: { type: "string" } },
+					constraints: { type: "array", items: { type: "string" } },
+					max_actions: { type: "integer", minimum: 1, maximum: 30 },
+					mode: { type: "string", enum: ["demo", "desktop", "jev"] },
+				},
+				required: ["goal", "verification"],
+				additionalProperties: false,
+			},
+			executionMode: "sequential",
+			async execute(_id, args) {
+				try { return { content: JSON.stringify(await runArcCuaHarness(parseArcCuaPayload(args))) }; }
+				catch (error) { return toolError(error); }
 			},
 		},
 	];

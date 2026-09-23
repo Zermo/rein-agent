@@ -7,12 +7,16 @@ import findTool from "./find.ts";
 import lsTool from "./ls.ts";
 import webTools from "./web.ts";
 import gatesTool from "./gates.ts";
+import curlTool from "./curl.ts";
+import mcpTool from "./mcp.ts";
+import stackTool from "./stack.ts";
+import accountsTool from "./accounts.ts";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import type { AgentTool } from "../../agent/agent-loop.ts";
 import { createTmuxTool } from "../tmux.ts";
 
-export const TOOLS: AgentTool[] = [readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool, webTools[0], webTools[1], gatesTool, createTmuxTool(process.cwd())];
+export const TOOLS: AgentTool[] = [readTool, writeTool, editTool, bashTool, grepTool, findTool, lsTool, webTools[0], webTools[1], gatesTool, curlTool, mcpTool, stackTool, accountsTool, createTmuxTool(process.cwd())];
 
 /** Bind per-runner paths without changing the process or shared tool instances. */
 export function toolsForCwd(cwd: string): AgentTool[] {

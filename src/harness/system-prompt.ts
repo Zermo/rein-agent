@@ -12,6 +12,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { readOperatorGuidance } from "./operator-profile.ts";
+import { readLedger } from "./stack.ts";
+import { readJournal } from "./journal.ts";
 import type { DesktopSurface } from "./desktop/surface.ts";
 import { klaudPrompt } from "./klaud/prompt.ts";
 import { loadKlaudShell } from "./klaud/shell.ts";
@@ -64,6 +66,11 @@ const SELF_IMPROVE = `Self-improvement (this is part of the job, not a bonus):
 - If you learn something durable in this session — a quirk of this model, a bug pattern, a command that works, an explicitly stated user preference — append one line to LESSONS.md in the working folder (create it if missing). One line, actionable, no preamble. Never record secrets, diagnoses, or speculative personal traits.
 - LESSONS.md is shared memory across sessions. Read it before starting non-trivial work.
 - If the rein harness itself did something clunky for you (a tool result that was hard to use, a confusing error, a missing flag), note it under a \"## harness\" section in LESSONS.md — the rein improve loop reads that file.`;
+
+const PERSON_STACK = `Person stack:
+- The life stack is REIN_HOME/stack/LEDGER.md, loaded below. Physical plane: day job, clients, family, personal needs. Digital plane: lab hosts and account labels. Workspace .pi/notes are project memory, not this ledger.
+- Bundled tools: stack, accounts, curl (CurL), mcp. Do not shell out to curl. Do not require(@stdlib/mcp) or npm-install a client. Do not store secrets in the ledger or account index.
+- Do not invent a life fact or a resume task that is not in the ledger or the newest direct user request.`;
 
 const DURABLE_MEMORY = `Cross-session memory:
 - The notes tool provides persistent workspace memory: use notes op=read path=MEMORY.md (stored in .pi/notes/MEMORY.md). List notes when unsure of a name; write or append to create a missing note. Save concise, verified facts, decisions, constraints, and next steps when useful across sessions. Do not store secrets or speculative claims.
@@ -121,6 +128,12 @@ export function buildSystemPrompt(cwd: string, surface?: DesktopSurface): string
 		SELF_IMPROVE,
 		"",
 		DURABLE_MEMORY,
+		"",
+		PERSON_STACK,
+		"",
+		`Person ledger:\n${readLedger(2000)}`,
+		"",
+		`Live journal (pinned thinking strings, not recovered memory):\n${readJournal(800)}`,
 		"",
 		ENV(cwd, process.platform === "darwin" ? `macOS (${process.arch})` : `${process.platform} (${process.arch})`),
 	];

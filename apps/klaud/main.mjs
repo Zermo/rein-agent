@@ -1,48 +1,48 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { constants, existsSync, lstatSync, openSync, closeSync, readFileSync, fstatSync } from "node:fs";
+import { constants, lstatSync, openSync, closeSync, readFileSync, fstatSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyDelta, applyShellPatch, frontendTools, replayEvents, requestRoute, sseEvents, validateConnection, validateMessages, validateState } from "./model.mjs";
 import { stopChild } from "./lifecycle.mjs";
+import { localRuntimeEnvironment, prepareLocalRuntime } from "./runtime-paths.mjs";
+import { accountVerificationUrl, createOnboarding, onboardingEnvironment } from "./onboarding.mjs";
 
-const directory = dirname(fileURLToPath(import.meta.url)), root = resolve(directory, "../..");
+const directory = dirname(fileURLToPath(import.meta.url));
 const rendererUrl = pathToFileURL(join(directory, "dist/index.html")).href;
+const appIconPath = join(directory, "icon.png");
+const trayIconPath = busy => join(directory, `tray-${busy ? "working" : "ready"}${process.platform === "darwin" ? "Template" : ""}.png`);
 const environment = process.env.REIN_KLAUD_URL && process.env.REIN_KLAUD_TOKEN ? { mode: "remote", url: process.env.REIN_KLAUD_URL, token: process.env.REIN_KLAUD_TOKEN } : undefined;
 delete process.env.REIN_KLAUD_TOKEN;
-app.setName("rein-klaʊd");
+// Product rename must preserve the existing Electron cookies, preferences and storage.
+app.setPath("userData", join(app.getPath("appData"), "rein-klaʊd"));
+process.title = "klaʊdbot";
+app.setName("klaʊdbot");
 app.setAppUserModelId("org.zermo.rein-klaud");
-let window, tray, connection, state, activeRun, ownedServe, starting, sequence = 0, quitting = false, shutdown = false;
+const onboarding = createOnboarding({ userHome: homedir(), userData: app.getPath("userData"), sourceHome: process.env.REIN_HOME });
+let window, tray, connection, state, activeRun, ownedServe, starting, onboardingPreparing = false, sequence = 0, quitting = false, shutdown = false;
 const send = event => { event.sequence = ++sequence; if (window && !window.isDestroyed()) window.webContents.send("klaud:event", event); };
 const show = () => { if (window && !window.isDestroyed()) { window.show(); window.focus(); } };
 const safeError = error => String(error?.message || "Request failed.").replaceAll(connection?.token || "\0", "[redacted]").slice(0, 1000);
 
-// Original 22px droplet, painted into a bitmap so the tray does not depend on SVG support.
-function dropIcon(busy = false) {
-  const size = 22, pixels = Buffer.alloc(size * size * 4);
-  for (let y = 2; y < 21; y++) for (let x = 0; x < size; x++) {
-    const halfWidth = y < 12 ? (y - 2) * 0.65 : Math.sqrt(Math.max(0, 49 - (y - 13) ** 2));
-    if (Math.abs(x - 10.5) > halfWidth) continue;
-    const index = (y * size + x) * 4;
-    pixels[index] = busy ? 230 : 30; pixels[index + 1] = busy ? 145 : 30; pixels[index + 2] = 30; pixels[index + 3] = 255;
-  }
-  const icon = nativeImage.createFromBitmap(pixels, { width: size, height: size });
-  icon.setTemplateImage(!busy);
+function trayIcon(busy = false) {
+  const icon = nativeImage.createFromPath(trayIconPath(busy));
+  icon.setTemplateImage(process.platform === "darwin");
   return icon;
 }
 function updateTray() {
   const mode = state?.shell.chrome.tray ?? "normal";
   if (mode === "hidden") { tray?.destroy(); tray = undefined; return; }
   const busy = mode === "normal" && !!activeRun;
-  if (!tray) { tray = new Tray(dropIcon(busy)); tray.on("click", show); }
-  tray.setImage(dropIcon(busy));
-  tray.setToolTip(busy ? "rein-klaʊd · Running" : "rein-klaʊd");
+  if (!tray) { tray = new Tray(trayIcon(busy)); tray.on("click", show); }
+  tray.setImage(trayIcon(busy));
+  tray.setToolTip(busy ? "klaʊdbot · Running" : "klaʊdbot");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Open rein-klaʊd", click: show },
+    { label: "Open klaʊdbot", click: show },
     ...(mode === "normal" ? [{ label: activeRun ? "Running" : "Ready", enabled: false }] : []),
-    { type: "separator" }, { label: "Quit rein-klaʊd", click: () => app.quit() },
+    { type: "separator" }, { label: "Quit klaʊdbot", click: () => app.quit() },
   ]));
 }
 function adoptState(value, publish = false) {
@@ -62,8 +62,34 @@ async function http(method, path, body, signal = AbortSignal.timeout(15_000)) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error(`rein serve returned HTTP ${response.status}. ${response.status === 401 ? "Check the bearer token." : response.status === 501 ? "This backend does not support that operation yet." : "The request was rejected."}`);
+    // These authenticated setup endpoints return deliberately safe validation errors.
+    // Keep ordinary model/tool responses opaque; they may contain private content.
+    let detail;
+    if (/^\/(?:setup(?:\/(?:probe|discover|hardware))?|accounts(?:\/provider|\/logins(?:\/[a-f0-9-]+)?)?)$/.test(path)
+      && response.headers.get("content-type")?.split(";")[0].trim() === "application/json" && response.body) {
+      const reader = response.body.getReader();
+      const chunks = []; let bytes = 0;
+      try {
+        while (true) {
+          const next = await reader.read();
+          if (next.done) break;
+          bytes += next.value.byteLength;
+          if (bytes > 8192) break;
+          chunks.push(Buffer.from(next.value));
+        }
+        if (bytes <= 8192) {
+          const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 1
+            && typeof value.error === "string" && value.error.trim() && value.error.length <= 2048) {
+            detail = value.error.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+            for (const secret of [connection?.token, body?.apiKey]) if (typeof secret === "string" && secret) detail = detail.replaceAll(secret, "[redacted]");
+            detail = detail.replace(/\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization)\s*[:=]\s*[^\s,;]+/gi, "credential=[redacted]");
+          }
+        }
+      } catch { /* Malformed, oversized, or interrupted responses use the generic failure. */ }
+      finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    } else await response.body?.cancel();
+    throw new Error(detail || `rein serve returned HTTP ${response.status}. ${response.status === 401 ? "Check the bearer token." : response.status === 501 ? "This backend does not support that operation yet." : "The request was rejected."}`);
   }
   return response;
 }
@@ -88,11 +114,9 @@ async function stopOwnedServe() {
 }
 async function startLocal() {
   if (quitting) throw new Error("The app is quitting.");
-  // Installed packages cannot type-strip src/*.ts under node_modules.
-  const entry = existsSync(join(root, "dist/rein.js")) ? join(root, "dist/rein.js") : join(root, "bin/rein.js");
-  if (!existsSync(entry)) throw new Error("I couldn't find Rein. Run this app from the Rein checkout.");
+  const { entry, cwd, home } = prepareLocalRuntime({ packaged: app.isPackaged, appDirectory: directory, resourcesPath: process.resourcesPath, userHome: homedir(), reinHome: onboarding.home(), isolated: true });
   const child = spawn(process.execPath, [entry, "serve", "--port", "0"], {
-    cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, stdio: ["ignore", "pipe", "pipe"],
+    cwd, env: localRuntimeEnvironment({ packaged: app.isPackaged, environment: onboardingEnvironment(process.env), home, userHome: homedir() }), stdio: ["ignore", "pipe", "pipe"],
   });
   ownedServe = child;
   // Output is parsed privately. Neither stdout nor stderr is copied into app logs.
@@ -110,7 +134,6 @@ async function startLocal() {
     };
     child.stdout.on("data", data); child.once("error", fail); child.once("exit", exited);
   });
-  const home = resolve(process.env.REIN_HOME || join(homedir(), ".rein"));
   const file = join(home, "klaud", `serve-${new URL(url).port}.token`);
   for (const path of [home, dirname(file)]) if (!lstatSync(path).isDirectory() || lstatSync(path).isSymbolicLink()) throw new Error("Invalid Rein token directory.");
   const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -182,7 +205,7 @@ async function startRun(input) {
           if (event.name === "klaud.frontend_tool" && !frontendTools.some(tool => tool.name === value.toolName)) throw new Error("Unknown frontend tool.");
           run.pending.set(id, { ...value, kind: event.name, event });
         }
-        if (event.type === "TOOL_CALL_RESULT") run.pending.delete(event.toolCallId);
+        if (event.type === "TOOL_CALL_RESULT") run.pending.delete(event.providerToolCallId ?? event.toolCallId);
         if (["RUN_FINISHED", "RUN_ERROR"].includes(event.type)) run.terminal = true;
         if (!run.replayTruncated) {
           run.events.push(event); run.eventBytes += JSON.stringify(event).length;
@@ -228,7 +251,7 @@ async function confirmPending(id) {
     const action = pending.kind === "klaud.approval" ? pending.summary : pending.args?.action;
     if (typeof action !== "string" || action.length > 4000) throw new Error("Invalid confirmation text.");
     const { response } = await dialog.showMessageBox(window, {
-      type: "question", title: "rein-klaʊd", message: pending.kind === "klaud.approval" ? `Allow ${String(pending.tool).slice(0, 100)}?` : "Confirm this action?",
+      type: "question", title: "klaʊdbot", message: pending.kind === "klaud.approval" ? `Allow ${String(pending.tool).slice(0, 100)}?` : "Confirm this action?",
       detail: action, buttons: ["Deny", "Allow"], defaultId: 0, cancelId: 0, noLink: true,
     });
     if (activeRun !== run || !run.pending.has(id)) throw new Error("This action is no longer pending.");
@@ -261,12 +284,14 @@ else {
   });
   for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => app.quit());
   await app.whenReady();
+  const appIcon = nativeImage.createFromPath(appIconPath);
+  if (process.platform === "darwin" && !appIcon.isEmpty()) app.dock.setIcon(appIcon);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: "rein-klaʊd", submenu: [{ label: "Open rein-klaʊd", click: show }, { type: "separator" }, { role: "quit", label: "Quit rein-klaʊd" }] },
+    { label: "klaʊdbot", submenu: [{ label: "Open klaʊdbot", click: show }, { type: "separator" }, { role: "quit", label: "Quit klaʊdbot" }] },
     { role: "editMenu" }, { role: "windowMenu" },
   ]));
   window = new BrowserWindow({
-    width: 1100, height: 780, minWidth: 720, minHeight: 520, title: "rein-klaʊd", backgroundColor: "#151b22",
+    width: 1100, height: 780, minWidth: 720, minHeight: 520, title: "klaʊdbot", backgroundColor: "#151b22", icon: appIcon,
     webPreferences: { preload: join(directory, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, webviewTag: false },
   });
   window.on("close", event => { if (!quitting) { event.preventDefault(); window.hide(); } });
@@ -275,7 +300,30 @@ else {
   window.webContents.on("will-attach-webview", event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   window.webContents.session.setPermissionCheckHandler(() => false);
-  const initialConnection = environment ? connect(environment).catch(error => ({ error: safeError(error) })) : Promise.resolve();
+  const initialConnection = (async () => {
+    const setup = onboarding.inspect();
+    // Resume local onboarding against its owned home until the final step is saved.
+    if (setup.prepared) return connect(setup.completed && environment ? environment : { mode: "local" });
+  })().catch(error => ({ error: safeError(error) }));
+  handle("onboarding-inspect", () => onboarding.inspect());
+  handle("onboarding-prepare", async input => {
+    if (!input || Object.keys(input).length !== 1 || !["migrate", "fresh"].includes(input.choice)) throw new Error("Choose migration or a fresh setup.");
+    if (activeRun || onboardingPreparing || starting) throw new Error("Wait for the current operation before preparing setup.");
+    const setup = onboarding.inspect();
+    if (setup.completed) throw new Error("Initial setup is complete. Use Settings to change your bot.");
+    if (connection && (!ownedServe || !setup.prepared || setup.choice !== input.choice)) throw new Error("Disconnect before preparing a different home.");
+    onboardingPreparing = true;
+    try {
+      await onboarding.prepare(input.choice);
+      if (connection && ownedServe) return { connected: true, url: connection.url, state, run: null };
+      return await connect({ mode: "local" });
+    } finally { onboardingPreparing = false; }
+  });
+  handle("onboarding-complete", () => {
+    if (!connection || !ownedServe || !state?.bots.length || activeRun || onboardingPreparing || starting) throw new Error("Connect your local home and create or select a bot before finishing setup.");
+    return onboarding.complete();
+  });
+  handle("open-account-auth", async url => { await shell.openExternal(accountVerificationUrl(url)); return { opened: true }; });
   handle("status", async () => {
     const initial = await initialConnection;
     await activeRun?.ready;
@@ -297,6 +345,13 @@ else {
     try { if (run.id) await json("POST", `/runs/${run.id}/cancel`, {}); }
     finally { run.controller.abort(); }
     return { cancelled: true };
+  });
+  handle("pin-quote", async input => json("POST", "/journal/pin", { quote: input?.quote }));
+  handle("steer", async input => {
+    const run = activeRun;
+    if (!run?.id) throw new Error("The run has not started yet.");
+    if (typeof input?.message !== "string" || !input.message.trim()) throw new Error("Interrupt requires a message.");
+    return json("POST", `/runs/${run.id}/steer`, { message: input.message, quote: input.quote });
   });
   handle("tool-result", answerTool);
   handle("confirm", confirmPending);

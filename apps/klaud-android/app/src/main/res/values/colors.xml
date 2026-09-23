@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="klaud_bg">#151B22</color>
+    <color name="klaud_panel">#1B232C</color>
+    <color name="klaud_text">#EDF0F3</color>
+    <color name="klaud_muted">#9AA9B8</color>
+    <color name="klaud_line">#34414F</color>
+    <color name="klaud_accent">#7EB8DB</color>
+</resources>

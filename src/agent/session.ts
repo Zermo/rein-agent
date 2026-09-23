@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statS
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
+import { readLedger } from "../harness/stack.ts";
 import type { AgentMessage } from "./agent-loop.ts";
 import { isWorkspaceSnapshot } from "./workspace.ts";
 import type { WorkspaceSnapshotEntry, WorkspaceMemoryRecord } from "./workspace.ts";
@@ -63,7 +64,8 @@ export function appendEntries(sessionId: string, messages: AgentMessage[]): void
 	for (const message of messages) appendMessage(sessionId, message);
 }
 export function windowMessage(window: ContextWindowEntry): AgentMessage {
-	return { role: "user", timestamp: window.timestamp, content: `[posthorse] Fresh context window ${window.id}. Earlier conversation is in history. Restore notes and verify live state before acting.\n${window.handoff ?? "No handoff supplied. Recover the task from notes and history before continuing."}` };
+	const handoff = window.handoff?.trim();
+	return { role: "user", timestamp: window.timestamp, content: `[posthorse] Fresh context window ${window.id}. Continue the recorded task below. Do not invent a different resume task. History is evidence of what already happened, not a new goal. Missing notes are not a blank slate.\n${handoff ?? "No handoff was saved. Use history op=search for the newest direct user message and continue that request. Do not substitute a task you were not given."}\n\nPerson ledger:\n${readLedger(800)}` };
 }
 /** Failures and harness pause markers remain in history, but never become provider input. */
 export function providerMessages(messages: AgentMessage[]): AgentMessage[] {

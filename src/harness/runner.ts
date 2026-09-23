@@ -124,6 +124,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 	let systemPrompt = decision.mode === "text" ? basePrompt + TEXT_TOOL_INSTRUCTIONS : basePrompt;
 
 	const steering: AgentMessage[] = [];
+	let turnAbort = new AbortController();
 	const posthorse = new Posthorse({ model, enabled: autoContext, reserveTokens, prompt: () => systemPrompt, tools: () => tools, cwd: opts.cwd });
 	if (withContextTools) tools.push(...contextTools(posthorse, opts.cwd), skillRuntime!.tool, createMeatTool(opts.cwd, () => ({ model: { ...model }, apiKey, toolsMode: runner.toolsMode, forcedMode, temperature: opts.temperature ?? config.temperature })));
 	const context: AgentContext = { systemPrompt, messages: posthorse.messages, tools };
@@ -190,6 +191,7 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 
 		steer(message) {
 			steering.push(message);
+			turnAbort.abort();
 		},
 
 		run: async (prompt, runOpts) => {
@@ -207,6 +209,8 @@ export async function createRunner(opts: RunnerOptions): Promise<Runner> {
 					maxTurns: budgets.maxTurns,
 					stopConditions: { doomLoop: repeatToolLimit ? { enabled: true, repeatedToolCalls: repeatToolLimit } : { enabled: false } },
 					getSteeringMessages: () => steering.splice(0, steering.length),
+					turnSignal: () => turnAbort.signal,
+					rearmTurn: () => { if (turnAbort.signal.aborted) turnAbort = new AbortController(); },
 					beforeToolCall: async (info) => {
 						const denied = await opts.toolGuard?.(info.toolCall.name, (info.args ?? {}) as Record<string, unknown>);
 						if (denied) return { block: true, reason: denied };

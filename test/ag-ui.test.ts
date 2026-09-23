@@ -77,18 +77,16 @@ test("errors without an errorMessage use aborted", () => {
 	}
 });
 
-test("thinking events emit nothing and never expose thinking text", () => {
+test("thinking events stream onto a Think Path node", () => {
 	const partial = message([{ type: "thinking", thinking: privateThinking }]);
 	const events: AssistantMessageEvent[] = [
 		{ type: "thinking_start", contentIndex: 0, partial },
 		{ type: "thinking_delta", contentIndex: 0, delta: privateThinking, partial },
 		{ type: "thinking_end", contentIndex: 0, content: privateThinking, partial },
 	];
-	for (const event of events) {
-		const encoded = toAgUiEvents(event, ids);
-		assert.deepEqual(encoded, []);
-		assert.doesNotMatch(JSON.stringify(encoded), /PRIVATE_THINKING_SENTINEL/);
-	}
+	assert.deepEqual(toAgUiEvents(events[0], ids), [{ type: "THINKING_START", messageId: "r:0" }]);
+	assert.deepEqual(toAgUiEvents(events[1], ids), [{ type: "THINKING_CONTENT", messageId: "r:0", delta: privateThinking }]);
+	assert.deepEqual(toAgUiEvents(events[2], ids), [{ type: "THINKING_END", messageId: "r:0", content: privateThinking }]);
 });
 
 test("tool calls emit their real id and name, then final arguments exactly once", () => {
