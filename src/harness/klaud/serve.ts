@@ -1,5 +1,5 @@
 /** Loopback AG-UI transport. The runner owns execution and session persistence. */
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -22,6 +22,7 @@ import { flagDrift, operatorInterrupt } from "../interrupt.ts";
 import { pinJournal } from "../journal.ts";
 import { avatarFor, createBot, ensureOwnComputers, getBot, listBots, setBotAvatar } from "./bots.ts";
 import { inspectRoot, listInspectFiles, readInspectFile, resolveInspectFile } from "./inspect.ts";
+import { acceptCallback, listAuthLinks } from "../auth-link.ts";
 import type { KlaudBot } from "./bots.ts";
 
 export interface ServeOptions {
@@ -170,6 +171,17 @@ function body(req: IncomingMessage): Promise<Record<string, unknown>> {
 		const timer = setTimeout(() => fail(new HttpError(408, "Request body timed out.")), 10_000); timer.unref();
 		req.on("data", data); req.once("end", end); req.once("aborted", aborted); req.once("error", fail);
 	});
+}
+async function textBody(req: IncomingMessage): Promise<string> {
+	const chunks: Buffer[] = [];
+	let size = 0;
+	await new Promise<void>((resolve, reject) => {
+		const fail = (error: Error) => reject(error);
+		req.on("data", (chunk: Buffer) => { size += chunk.length; if (size > 8192) fail(new HttpError(413, "Callback body is too large.")); else chunks.push(chunk); });
+		req.once("end", () => resolve());
+		req.once("error", fail);
+	});
+	return Buffer.concat(chunks).toString("utf8");
 }
 function frontendDeclarations(value: unknown): Tool[] {
 	if (value === undefined) return [];
@@ -426,8 +438,24 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 			const expectedHost = new URL(url).host;
 			const allowedHosts = new Set([expectedHost, "reinklaud.zermo.org"]);
 			const allowedOrigins = new Set([url, "https://reinklaud.zermo.org", "http://10.0.0.56:4317", "http://127.0.0.1:4317"]);
-			if (!allowedHosts.has(requestHost) || (requestOrigin && !allowedOrigins.has(requestOrigin))) throw new HttpError(403, "Invalid Host or Origin.");
 			const path = (req.url ?? "/").split("?")[0];
+			const callback = (req.method === "GET" || req.method === "POST") && path === "/auth/callback";
+			if (!allowedHosts.has(requestHost) || (!callback && requestOrigin && !allowedOrigins.has(requestOrigin))) throw new HttpError(403, "Invalid Host or Origin.");
+			if (callback) {
+				const params = new URL(req.url ?? "/", "http://klaud.local").searchParams;
+				if (req.method === "POST") {
+					const raw = await textBody(req);
+					const form = raw.trim().startsWith("{") ? JSON.parse(raw) : Object.fromEntries(new URLSearchParams(raw));
+					if (form && typeof form === "object") for (const [key, value] of Object.entries(form)) if (typeof value === "string" && !params.has(key)) params.set(key, value);
+				}
+				try {
+					const page = acceptCallback(params.toString(), home);
+					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Referrer-Policy": "no-referrer" }).end(page);
+				} catch {
+					if (!res.headersSent) res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" }).end("<!doctype html><html><body><p>Unknown auth link.</p></body></html>");
+				}
+				return;
+			}
 			if (req.method === "GET" && path === "/health") { json(res, 200, { ok: true, name: "rein-klaud" }); return; }
 			if (req.method === "GET" && Object.hasOwn(PUBLIC_FILES, path)) {
 				const name = PUBLIC_FILES[path];
@@ -449,6 +477,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 				const provided = Buffer.from(req.headers.authorization ?? "");
 				if (provided.length !== authorization.length || !timingSafeEqual(provided, authorization)) throw new HttpError(401, "Bearer token required.");
 			}
+			if (req.method === "GET" && path === "/auth/links") { json(res, 200, { links: listAuthLinks(home) }); return; }
 			if (req.method === "GET" && req.url === "/state") { json(res, 200, snapshot()); return; }
 			if (req.method === "POST" && req.url === "/journal/pin") {
 				const input = await body(req);

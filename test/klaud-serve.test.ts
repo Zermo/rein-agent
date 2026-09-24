@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
+import { prepareAuthLink } from "../src/harness/auth-link.ts";
 import { startKlaudServe } from "../src/harness/klaud/serve.ts";
 import type { ServeOptions } from "../src/harness/klaud/serve.ts";
 import type { AgentTool } from "../src/agent/agent-loop.ts";
@@ -336,4 +337,16 @@ test("inspect serves cwd files and refuses traversal", async t => {
 	assert.match(ok.headers.get("content-type")!, /image\/png/);
 	assert.equal((await fetch(`${server.url}/bots/${bot.id}/inspect?path=${encodeURIComponent("../chart.png")}`, { headers: server.headers })).status, 400);
 	assert.equal((await fetch(`${server.url}/bots/${bot.id}/inspect?path=missing.png`, { headers: server.headers })).status, 404);
+});
+
+test("auth callback is public and does not echo the code", async t => {
+	const server = await fixture(t);
+	const missing = await fetch(`${server.url}/auth/callback?state=deadbeefdeadbeefdeadbeefdeadbeef`);
+	assert.equal(missing.status, 404);
+	const prepared = prepareAuthLink("manual", "Webhook", server.home);
+	const ok = await fetch(`${server.url}/auth/callback?state=${prepared.id}&code=secret-code`);
+	assert.equal(ok.status, 200);
+	const page = await ok.text();
+	assert.equal(page.includes("secret-code"), false);
+	assert.match(page, /Return to klaud/);
 });

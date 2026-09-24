@@ -1,6 +1,7 @@
 import type { AgentTool, AgentToolResult } from "../../agent/agent-loop.ts";
 import { toolsForCwd } from "../tools/index.ts";
 import { parseArcCuaPayload, runArcCuaHarness } from "./arc-cua.ts";
+import { prepareAuthLink, pushAuthLink, readReceipt } from "../auth-link.ts";
 import { applyKlaudPatch, KLAUD_SHELL_POINTERS, loadKlaudShell, saveKlaudShell } from "./shell.ts";
 import type { JsonPatchOp } from "./shell.ts";
 
@@ -78,6 +79,32 @@ export function createKlaudTools(home?: string, cwd = process.cwd()): AgentTool[
 			async execute(_id, args) {
 				try { return { content: JSON.stringify(await runArcCuaHarness(parseArcCuaPayload(args))) }; }
 				catch (error) { return toolError(error); }
+			},
+		},
+		{
+			name: "auth_link",
+			description: "Push an OAuth or manual auth link to the operator, and receive the callback. op=prepare returns the callback URL and state. Use that callback as redirect_uri or the webhook URL, then op=push the https link. op=receipt reads the callback once. Do not write the receipt into notes, journal, or accounts. Do not ask the operator to paste a token.",
+			parameters: {
+				type: "object",
+				properties: {
+					op: { type: "string", enum: ["prepare", "push", "receipt"] },
+					kind: { type: "string", enum: ["oauth", "manual"] },
+					label: { type: "string" },
+					id: { type: "string" },
+					url: { type: "string" },
+				},
+				required: ["op"],
+				additionalProperties: false,
+			},
+			executionMode: "sequential",
+			async execute(_id, args) {
+				try {
+					const op = String(args.op);
+					if (op === "prepare") return { content: JSON.stringify(prepareAuthLink(String(args.kind), String(args.label ?? ""), home ?? "")) };
+					if (op === "push") return { content: JSON.stringify(pushAuthLink(String(args.id), String(args.url), home ?? "")) };
+					if (op === "receipt") return { content: JSON.stringify(readReceipt(String(args.id), home ?? "")) };
+					throw new Error("op must be prepare, push, or receipt.");
+				} catch (error) { return toolError(error); }
 			},
 		},
 	];
