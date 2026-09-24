@@ -2,6 +2,8 @@
 import type { AgentTool } from "../../agent/agent-loop.ts";
 import { allowedHttpUrl } from "../net-guard.ts";
 import { rememberTool } from "../tool-memory.ts";
+import { pushBundledAuthLink, startBundledMcpAuth } from "./mcp-auth.ts";
+import { reinHome } from "../stack.ts";
 
 const PROTOCOL = "2025-03-26";
 const MAX_BODY = 64_000;
@@ -53,6 +55,7 @@ async function post(url: URL, body: unknown, session: string | undefined, signal
 	const response = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), redirect: "manual", signal });
 	if (response.status >= 300 && response.status < 400) fail("server redirected. Pass the final https URL.");
 	const text = await readBody(response);
+	if (response.status === 401) fail("HTTP 401. Call mcp op=auth to push the authorize link. Do not install a client.");
 	if (!response.ok) fail(`HTTP ${response.status}. ${clip(text.slice(0, 400))}`);
 	const next = response.headers.get("mcp-session-id") ?? session;
 	return { result: rpcResult(text, response.headers.get("content-type") ?? ""), session: next ?? undefined };
@@ -60,10 +63,12 @@ async function post(url: URL, body: unknown, session: string | undefined, signal
 
 const mcpTool: AgentTool = {
 	name: "mcp",
-	description: "Bundled Streamable HTTP MCP client for a digital account. op=list discovers tools; op=call runs one named tool. There is no @stdlib/mcp package and no @modelcontextprotocol/sdk in this process. Do not npm-install or node -e require a client. Account labels come from the accounts tool; do not store the token.",
+	description: "Bundled Streamable HTTP MCP client for a digital account. op=list discovers tools; op=call runs one named tool. Bundled with @modelcontextprotocol/sdk. op=list discovers tools; op=call runs one; op=auth pushes the OAuth or manual link and callback. Do not require() or npm-install another client. Do not store the token.",
 	parameters: { type: "object", properties: {
 		url: { type: "string", description: "MCP endpoint, https preferred. http only on loopback, LAN, or tailscale." },
-		op: { type: "string", enum: ["list", "call"] },
+		op: { type: "string", enum: ["list", "call", "auth"] },
+		label: { type: "string", description: "Operator-facing name for op=auth." },
+		authorize: { type: "string", description: "Optional https authorize link for op=auth. Otherwise the SDK discovers it." },
 		name: { type: "string", description: "Tool name for op=call." },
 		arguments: { type: "object", description: "Arguments for op=call. Default {}." },
 		token: { type: "string", description: "Optional bearer for this call only. Not stored." },
@@ -72,7 +77,15 @@ const mcpTool: AgentTool = {
 	async execute(_id, args, signal) {
 		try {
 			const url = allowedHttpUrl(args.url, "mcp url");
-			const op = args.op === "list" || args.op === "call" ? args.op : fail("op must be list or call.");
+			const op = args.op === "list" || args.op === "call" || args.op === "auth" ? args.op : fail("op must be list, call, or auth.");
+			if (op === "auth") {
+				const label = typeof args.label === "string" ? args.label : fail("op=auth requires label.");
+				const home = reinHome();
+				const card = typeof args.authorize === "string"
+					? pushBundledAuthLink(args.authorize, label, home)
+					: await startBundledMcpAuth(url.toString(), label, home);
+				return { content: JSON.stringify(card) };
+			}
 			if (op === "call" && (typeof args.name !== "string" || !args.name.trim())) fail("op=call requires name.");
 			if (args.arguments !== undefined && (typeof args.arguments !== "object" || args.arguments === null || Array.isArray(args.arguments))) fail("arguments must be an object.");
 			const token = args.token === undefined ? undefined : typeof args.token === "string" && args.token.length < 4000 ? args.token : fail("token must be a string for this call only.");
