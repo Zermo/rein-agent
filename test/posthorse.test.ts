@@ -187,3 +187,17 @@ test("interrupted tool batch is repaired only in provider replay", () => isolate
 	assert.match(JSON.stringify(active.at(-1)?.content), /Execution outcome is unknown/);
 	assert.equal(loadSession(id).messages.length, 3);
 }));
+
+test("resume keeps the last exchange through a one-message drift", () => isolated(() => {
+	const horse = controller({ cwd: process.env.REIN_HOME });
+	const id = createSession({});
+	horse.setSession(id);
+	horse.record(user("link the robinhood mcp"));
+	horse.record(assistant("What email address is on the account?"));
+	const resumed = controller({ cwd: process.env.REIN_HOME });
+	resumed.setSession(id);
+	const handoff = resumed.window?.handoff ?? "";
+	assert.match(handoff, /one message back/);
+	assert.match(handoff, /link the robinhood mcp/);
+	assert.match(handoff, /What email address/);
+}));

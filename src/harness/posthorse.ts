@@ -128,10 +128,12 @@ export class Posthorse {
 			// A budget pause is unfinished work. Carry its recorded request,
 			// checkpoint and pending results into the fresh workspace overlay,
 			// so a plain "continue" has an actual task to resume.
+			const exchange = this.lastExchange(this.messages.length);
 			const continuation = paused
 				? this.recovery(this.messages, this.messages.length, Math.min(6000, Math.floor(limit / 2)), true) : "";
-			const overlay = workspaceResumeOverlay(this.cwd, this.workspaceSnapshot, workspaceMemoryRecords(captureWorkspaceSnapshot(this.cwd).scope, this.sessionId), limit - continuation.length - (continuation ? 2 : 0));
-			const handoff = overlay.text + (continuation ? `\n\n${continuation}` : "");
+			const reserved = exchange.length + continuation.length + 4;
+			const overlay = workspaceResumeOverlay(this.cwd, this.workspaceSnapshot, workspaceMemoryRecords(captureWorkspaceSnapshot(this.cwd).scope, this.sessionId), Math.max(256, limit - reserved));
+			const handoff = [exchange, overlay.text, continuation].filter(Boolean).join("\n\n");
 			if (validWindowStart(this.messages, this.messages.length)) this.rollover(handoff, "resume", this.messages.length);
 			else {
 				// Preserve an interrupted tool batch exactly; providerMessages will
@@ -140,12 +142,35 @@ export class Posthorse {
 			}
 			if (!sameWorkspaceState(this.workspaceSnapshot, overlay.snapshot)) this.store(overlay.snapshot);
 			this.workspaceSnapshot = overlay.snapshot;
-		} catch { /* A non-Git/moved workspace still resumes with its own transcript. */ }
+		} catch {
+		const exchange = this.lastExchange(this.messages.length);
+		if (exchange && validWindowStart(this.messages, this.messages.length)) this.rollover(exchange, "resume", this.messages.length);
+	}
 	}
 	afterBatch(info: { message: AssistantMessage; toolResults: ToolResultMessage[]; newContext?: { handoff?: string } }): void {
 		if (info.newContext) this.rollover(info.newContext.handoff, "tool");
 	}
 	/** A bounded input record, never a generated summary or claim of completed work. */
+	private lastExchange(end: number): string {
+		let assistant = "";
+		let request = "";
+		for (let index = end - 1; index >= 0; index--) {
+			const message = this.messages[index];
+			if (!assistant && message?.role === "assistant") {
+				if (["error", "aborted"].includes(message.stopReason)) continue;
+				assistant = message.content.filter(part => part.type === "text").map(part => part.type === "text" ? part.text : "").join("\n").slice(0, 1200);
+				continue;
+			}
+			if (assistant && message?.role === "user") {
+				const body = messageText(message);
+				if (/^\s*\[(?:posthorse|rein persistent workspace overlay)/i.test(body)) continue;
+				request = body.slice(0, 800);
+				break;
+			}
+		}
+		if (!request && !assistant) return "";
+		return `Session context, one message back. The next message continues this exchange. Do not treat one new message as a new task.\nUser:\n${request || "(none)"}\nAssistant:\n${assistant || "(none)"}`;
+	}
 	private newestRequest(end: number): string {
 		for (let i = end - 1; i >= 0; i--) {
 			const message = this.messages[i];
