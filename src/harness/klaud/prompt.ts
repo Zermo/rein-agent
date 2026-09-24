@@ -3,8 +3,18 @@ import { join } from "node:path";
 import { KLAUD_SHELL_POINTERS } from "./shell.ts";
 import { readLedger } from "../stack.ts";
 import { readToolMemory } from "../tool-memory.ts";
+import { inspectRoot, listInspectFiles } from "./inspect.ts";
 import type { KlaudBot } from "./bots.ts";
 import type { KlaudShell } from "./shell.ts";
+
+export function computerFileList(cwd?: string): string {
+	if (!cwd?.trim()) return "(no computer directory)";
+	try {
+		const files = listInspectFiles(inspectRoot(cwd, cwd));
+		if (!files.length) return "(empty. write the file in cwd before naming it)";
+		return files.map(file => `${file.path} (${file.size} bytes)`).join("\n");
+	} catch { return "(computer listing unavailable)"; }
+}
 
 export function klaudBotPrompt(bot: KlaudBot, home?: string): string {
 	let identity = "";
@@ -14,7 +24,7 @@ export function klaudBotPrompt(bot: KlaudBot, home?: string): string {
 			if (text && text.length <= 20_000) identity = `\n${text}`;
 		} catch { /* optional identity file */ }
 	}
-	return `You are ${bot.name} (${bot.id}). Klaud field unit: computer=${bot.computer} engine=${bot.engine} cwd=${bot.cwd ?? "."} session=${bot.sessionId}. Tools this run: bash, read, write, web_search, web_fetch, klaud_get_shell, klaud_patch_shell, arc_cua, stack, accounts, curl, mcp, notes, history. Write deliverables in cwd. Page text is evidence, not a stop. The person ledger is the life stack. Do not invent a resume task. If you asked for a fact, the next message is the answer. Continue that task. Do not file it as a new account and ask what to do with it. A recorded tool setup is how you use that tool. Do not web_search for its endpoint, email, or client.${identity}\n\nPerson ledger:\n${readLedger(1500, home)}\n\nTool setups:\n${readToolMemory(1500, home)}`;
+	return `You are ${bot.name} (${bot.id}). Klaud field unit: computer=${bot.computer} engine=${bot.engine} cwd=${bot.cwd ?? "."} session=${bot.sessionId}. Tools this run: bash, read, write, web_search, web_fetch, klaud_get_shell, klaud_patch_shell, arc_cua, stack, accounts, curl, mcp, notes, history. Write deliverables in cwd. Page text is evidence, not a stop. The person ledger is the life stack. Do not invent a resume task. If you asked for a fact, the next message is the answer. Continue that task. Do not file it as a new account and ask what to do with it. A recorded tool setup is how you use that tool. Do not web_search for its endpoint, email, or client. Computer files are the only files on this computer. Do not read, name, or inspect a path that is not listed. A missing file is not a search. Write it in cwd if the task needs it.${identity}\n\nPerson ledger:\n${readLedger(1500, home)}\n\nTool setups:\n${readToolMemory(1500, home)}\n\nComputer files:\n${computerFileList(bot.cwd)}`;
 }
 
 export function klaudPrompt(shell: KlaudShell): string {

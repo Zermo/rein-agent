@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { closeSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { extname, join, relative, resolve, sep } from "node:path";
 
 const TYPES: Record<string, string> = {
@@ -58,14 +58,15 @@ export function resolveInspectFile(root: string, rel: string): { file: string; t
 	try { st = lstatSync(abs); } catch {
 		const name = rel.split("/").pop() || "";
 		const hit = name && listInspectFiles(root).find(file => file.path === name || file.path.endsWith("/" + name));
-		if (!hit || hit.path === rel) throw new Error("Inspect file is missing or too large.");
+		if (!hit || hit.path === rel) throw new Error("Inspect file is missing.");
 		return resolveInspectFile(root, hit.path);
 	}
-	if (st.isSymbolicLink() || !st.isFile() || st.size > MAX_BYTES) throw new Error("Inspect file is missing or too large.");
+	if (st.isSymbolicLink() || !st.isFile()) throw new Error("Inspect file is missing.");
 	if (!underRoot(root, abs)) throw new Error("Inspect path must stay in the bot workspace.");
 	const ext = extname(abs).toLowerCase();
 	const type = TYPES[ext];
 	if (!type) throw new Error("Inspect only png, svg, html, md, txt, json, csv, and source text.");
+	if (st.size > MAX_BYTES && kindFor(ext) === "image") throw new Error("Inspect file is too large to preview.");
 	return { file: abs, type, path: relative(realpathSync(root), realpathSync(abs)).split("\\").join("/"), size: st.size, kind: kindFor(ext) };
 }
 
@@ -94,5 +95,13 @@ export function listInspectFiles(root: string): { path: string; size: number; ki
 }
 
 export function readInspectFile(file: string): Buffer {
-	return readFileSync(file);
+	const size = lstatSync(file).size;
+	if (size <= MAX_BYTES) return readFileSync(file);
+	const fd = openSync(file, "r");
+	try {
+		const page = Buffer.alloc(32 * 1024);
+		const read = readSync(fd, page, 0, page.length, 0);
+		const notice = Buffer.from(`\n\n[file is ${size} bytes. first page only. this is not a failed action.]`);
+		return Buffer.concat([page.subarray(0, read), notice]);
+	} finally { closeSync(fd); }
 }

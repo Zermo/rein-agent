@@ -328,9 +328,9 @@ test("inspect serves cwd files and refuses traversal", async t => {
 	const { writeFileSync: write, mkdirSync } = await import("node:fs");
 	const cwd = mkdtempSync(join(tmpdir(), "rein-klaud-inspect-"));
 	t.after(() => rmSync(cwd, { recursive: true, force: true }));
-	write(join(cwd, "chart.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
 	const server = await fixture(t, { cwd });
 	const bot = await (await server.post("/bots", { name: "Ares" })).json();
+	write(join(bot.cwd, "chart.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
 	const ok = await fetch(`${server.url}/bots/${bot.id}/inspect?path=chart.png`, { headers: server.headers });
 	assert.equal(ok.status, 200);
 	assert.match(ok.headers.get("content-type")!, /image\/png/);
