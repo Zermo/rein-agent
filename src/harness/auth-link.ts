@@ -19,7 +19,8 @@ export type AuthCard = {
 	status: "waiting" | "arrived";
 	created: number;
 };
-type Stored = AuthCard & { receipt?: Record<string, string> };
+export type OauthSession = { serverUrl?: string; verifier?: string; client?: Record<string, unknown>; discovery?: Record<string, unknown> };
+type Stored = AuthCard & OauthSession & { receipt?: Record<string, string> };
 
 function dir(home: string): string {
 	const path = join(home, "stack", "auth");
@@ -78,6 +79,23 @@ export function listAuthLinks(home: string): AuthCard[] {
 	return out.sort((a, b) => b.created - a.created).slice(0, 8);
 }
 
+export function saveOauthSession(id: string, home: string, patch: OauthSession): void {
+	const row = load(home, id);
+	if (patch.serverUrl !== undefined) row.serverUrl = patch.serverUrl;
+	if (patch.verifier !== undefined) row.verifier = patch.verifier;
+	if (patch.client !== undefined) row.client = patch.client;
+	if (patch.discovery !== undefined) row.discovery = patch.discovery;
+	save(home, row);
+}
+export function readOauthSession(id: string, home: string): OauthSession {
+	const row = load(home, id);
+	return { serverUrl: row.serverUrl, verifier: row.verifier, client: row.client, discovery: row.discovery };
+}
+export function clearAuthCode(id: string, home: string): void {
+	const row = load(home, id);
+	if (row.receipt) delete row.receipt.code;
+	save(home, row);
+}
 export function acceptCallback(search: string, home: string): string {
 	const params = new URLSearchParams(search.replace(/^\?/, ""));
 	const row = load(home, params.get("state") ?? "");

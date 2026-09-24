@@ -22,7 +22,8 @@ import { flagDrift, operatorInterrupt } from "../interrupt.ts";
 import { pinJournal } from "../journal.ts";
 import { avatarFor, createBot, ensureOwnComputers, getBot, listBots, setBotAvatar } from "./bots.ts";
 import { inspectRoot, listInspectFiles, readInspectFile, resolveInspectFile } from "./inspect.ts";
-import { acceptCallback, listAuthLinks } from "../auth-link.ts";
+import { listAuthLinks } from "../auth-link.ts";
+import { completeBundledAuth } from "../tools/mcp-auth.ts";
 import type { KlaudBot } from "./bots.ts";
 
 export interface ServeOptions {
@@ -421,7 +422,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 			publishState();
 		}
 	}
-	const server = createServer((req, res) => {
+	const server = createServer(async (req, res) => {
 		res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Content-Type-Options", "nosniff"); res.setHeader("Referrer-Policy", "no-referrer"); res.setHeader("X-Frame-Options", "DENY");
 		void (async () => {
 			if (closing) throw new HttpError(503, "Server is closing.");
@@ -449,7 +450,7 @@ export async function startKlaudServe(opts: ServeOptions = {}): Promise<ServeHan
 					if (form && typeof form === "object") for (const [key, value] of Object.entries(form)) if (typeof value === "string" && !params.has(key)) params.set(key, value);
 				}
 				try {
-					const page = acceptCallback(params.toString(), home);
+					const page = await completeBundledAuth(params.toString(), home);
 					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Referrer-Policy": "no-referrer" }).end(page);
 				} catch {
 					if (!res.headersSent) res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" }).end("<!doctype html><html><body><p>Unknown auth link.</p></body></html>");

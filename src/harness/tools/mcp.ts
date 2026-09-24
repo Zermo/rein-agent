@@ -2,7 +2,7 @@
 import type { AgentTool } from "../../agent/agent-loop.ts";
 import { allowedHttpUrl } from "../net-guard.ts";
 import { rememberTool } from "../tool-memory.ts";
-import { pushBundledAuthLink, startBundledMcpAuth } from "./mcp-auth.ts";
+import { pushBundledAuthLink, savedAccessToken, startBundledMcpAuth } from "./mcp-auth.ts";
 import { reinHome } from "../stack.ts";
 
 const PROTOCOL = "2025-03-26";
@@ -88,7 +88,7 @@ const mcpTool: AgentTool = {
 			}
 			if (op === "call" && (typeof args.name !== "string" || !args.name.trim())) fail("op=call requires name.");
 			if (args.arguments !== undefined && (typeof args.arguments !== "object" || args.arguments === null || Array.isArray(args.arguments))) fail("arguments must be an object.");
-			const token = args.token === undefined ? undefined : typeof args.token === "string" && args.token.length < 4000 ? args.token : fail("token must be a string for this call only.");
+			const token = args.token === undefined ? savedAccessToken(url.toString()) : typeof args.token === "string" && args.token.length < 4000 ? args.token : fail("token must be a string for this call only.");
 			const timeout = AbortSignal.timeout(20_000);
 			const linked = signal ? AbortSignal.any([signal, timeout]) : timeout;
 			const init = await post(url, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: "rein", version: "0" } } }, undefined, linked, token);
